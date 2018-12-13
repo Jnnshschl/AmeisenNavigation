@@ -5,11 +5,11 @@ VisualStudioVersion = 15.0.28307.168
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "recastnavigation", "recastnavigation\recastnavigation.vcxproj", "{E1E5031F-CCFD-45B9-9DB1-57050AABCCFA}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Wrapper", "AmeisenBot.NavigationWrapper\AmeisenBot.NavigationWrapper.vcxproj", "{06650E79-3525-4BA5-8698-20E6023BA991}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Wrapper", "AmeisenNavigation.Wrapper\AmeisenNavigation.Wrapper.vcxproj", "{06650E79-3525-4BA5-8698-20E6023BA991}"
 EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation", "AmeisenBot.Navigation\AmeisenBot.NavigationServer.vcxproj", "{DBB5FF6E-3829-4045-875F-F35A7CBC9ECA}"
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation", "AmeisenNavigation\AmeisenNavigation.Server.vcxproj", "{DBB5FF6E-3829-4045-875F-F35A7CBC9ECA}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AmeisenNavigation.Server", "AmeisenNavigationServer\AmeisenNavigation.Server.csproj", "{661516D7-A36F-4955-A10C-A54D6125EA4A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AmeisenNavigation.Server", "AmeisenNavigation.Server\AmeisenNavigation.Server.csproj", "{661516D7-A36F-4955-A10C-A54D6125EA4A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

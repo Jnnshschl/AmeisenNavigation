@@ -11,8 +11,11 @@ std::string format_trailing_zeros(int number, int total_count) {
 	return ss.str();
 }
 
-void AmeisenNavigation::LoadMmapsForContinent(int map_id, std::string mmap_dir, dtNavMesh* mesh, dtNavMeshQuery* query)
+std::pair<dtNavMesh*, dtNavMeshQuery*> AmeisenNavigation::LoadMmapsForContinent(int map_id, std::string mmap_dir)
 {
+	dtNavMesh* mesh;
+	dtNavMeshQuery* query;
+
 	std::string mmap_filename = mmap_dir + format_trailing_zeros(map_id, 3) + ".mmap";
 
 	std::ifstream mmap_stream;
@@ -75,9 +78,11 @@ void AmeisenNavigation::LoadMmapsForContinent(int map_id, std::string mmap_dir, 
 	{
 		std::cout << "-> Failed to built NavMeshQuery " << "\n";
 		dtFreeNavMeshQuery(query);
+		return std::pair<dtNavMesh*, dtNavMeshQuery*>(nullptr, nullptr);
 	}
 	else
 	{
 		std::cout << "-> Sucessfully built NavMeshQuery " << "\n";
+		return std::pair<dtNavMesh*, dtNavMeshQuery*>(mesh, query);
 	}
 }

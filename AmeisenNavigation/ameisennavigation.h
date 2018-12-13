@@ -38,7 +38,7 @@ struct Path
 class AmeisenNavigation {
 public:
 	Path GetPath(int map_id, Vector3 start_pos, Vector3 end_pos);
-	void LoadMmapsForContinent(int map_id, std::string mmap_dir, dtNavMesh* mesh, dtNavMeshQuery* query);
+	std::pair<dtNavMesh*, dtNavMeshQuery*> LoadMmapsForContinent(int map_id, std::string mmap_dir);
 };
 
 #endif // !_H_AMEISENNAVIGATION
