@@ -62,7 +62,7 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	dtPolyRef path_poly[1024];
 	if (dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
 	{
-		std::cout << "-> Path found and contains " << path_size << " Nodes\n";
+		//std::cout << "-> Path found and contains " << path_size << " Nodes\n";
 
 		float path_a[1024 * 3];
 
@@ -75,11 +75,11 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 			float* closest_pos_wow = closest_pos;
 			RDToWoWCoords(closest_pos_wow);
 
-			std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
+			//std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
 
-			path_a[i] = closest_pos_wow[0];
-			path_a[i + 1] = closest_pos_wow[1];
-			path_a[i + 2] = closest_pos_wow[2];
+			path_a[i * 3] = closest_pos_wow[0];
+			path_a[i * 3 + 1] = closest_pos_wow[1];
+			path_a[i * 3 + 2] = closest_pos_wow[2];
 		}
 
 		(*path) = path_a;

@@ -30,7 +30,7 @@ namespace AmeisenNavigationWrapper {
 			ameisen_nav->GetPath(map_id, start, end, &path, path_size);
 			array<float>^ temp_path = gcnew array<float>(*path_size * 3);
 
-			for (int i = 0; i < *path_size; i+=3)
+			for (int i = 0; i < *path_size * 3; i+=3)
 			{
 				temp_path[i] = path[i];
 				temp_path[i+1] = path[i+1];

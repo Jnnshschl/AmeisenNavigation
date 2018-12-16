@@ -1,4 +1,5 @@
 ﻿using AmeisenNavigationWrapper;
+using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
 
@@ -22,6 +23,8 @@ namespace AmeisenBot.NavigationRESTApi
 
         private static void Main(string[] args)
         {
+            Console.Title = "AmeisenNavigation Server";
+
             float[] start = { -8826.562500f, -371.839752f, 71.638428f };
             float[] end = { -8847.150391f, -387.518677f, 72.575912f };
             float[] tileLoc = { -8918.406250f, -130.297256f, 80.906364f };
@@ -44,7 +47,10 @@ namespace AmeisenBot.NavigationRESTApi
                 Path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
             }
 
-            Console.WriteLine("Path contains " + Path.Count + " Nodes");
+            string json_path = JsonConvert.SerializeObject(Path);
+
+            Console.WriteLine($"Path contains {Path.Count} Nodes");
+            Console.WriteLine($"Path json {json_path}");
             Console.ReadKey();
         }
     }
