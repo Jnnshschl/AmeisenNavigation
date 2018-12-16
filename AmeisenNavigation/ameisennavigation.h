@@ -9,6 +9,7 @@
 #include <iomanip>
 #include <map>
 #include <vector>
+#include <chrono>
 
 #include <windows.h>
 
@@ -58,8 +59,14 @@ private:
 
 public:
 	AmeisenNavigation(std::string mmap_dir);
+
 	std::vector<Vector3> GetPath(int map_id, float* start, float* end);
+	dtPolyRef GetNearestPoly(int map_id, float* pos, float* closest_point);
+
 	bool LoadMmapsForContinent(int map_id);
+
+	void RDToWoWCoords(float pos[]);
+	void WoWToRDCoords(float pos[]);
 };
 
 #endif // !_H_AMEISENNAVIGATION

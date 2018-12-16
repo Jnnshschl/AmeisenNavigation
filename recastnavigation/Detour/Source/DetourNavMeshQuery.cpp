@@ -102,7 +102,6 @@ inline float dtQueryFilter::getCost(const float* pa, const float* pb,
 	
 static const float H_SCALE = 0.999f; // Search heuristic scale.
 
-
 dtNavMeshQuery* dtAllocNavMeshQuery()
 {
 	void* mem = dtAlloc(sizeof(dtNavMeshQuery), DT_ALLOC_PERM);
@@ -3623,7 +3622,7 @@ dtStatus dtNavMeshQuery::findDistanceToWall(dtPolyRef startRef, const float* cen
 	dtVsub(hitNormal, centerPos, hitPos);
 	dtVnormalize(hitNormal);
 	
-	*hitDist = dtMathSqrtf(radiusSqr);
+	*hitDist = sqrtf(radiusSqr);
 	
 	return status;
 }
