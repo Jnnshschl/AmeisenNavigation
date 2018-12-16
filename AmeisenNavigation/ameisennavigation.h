@@ -13,8 +13,8 @@
 
 #include <windows.h>
 
-#include "DetourNavMesh.h"
-#include "DetourNavMeshQuery.h"
+#include "../recastnavigation/Detour/Include/DetourNavMesh.h"
+#include "../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
 constexpr int MMAP_MAGIC = 0x4d4d4150;
 constexpr int MMAP_VERSION = 6;
@@ -41,13 +41,6 @@ struct MmapTileHeader {
 	char padding[3];
 };
 
-struct Vector3
-{
-	float x;
-	float y;
-	float z;
-};
-
 class AmeisenNavigation {
 private:
 	std::string _mmap_dir;
@@ -57,16 +50,15 @@ private:
 
 	std::string format_trailing_zeros(int number, int total_count);
 
+	void RDToWoWCoords(float pos[]);
+	void WoWToRDCoords(float pos[]);
+
 public:
 	AmeisenNavigation(std::string mmap_dir);
 
-	std::vector<Vector3> GetPath(int map_id, float* start, float* end);
+	void GetPath(int map_id, float* start, float* end, float** path, int* path_size);
 	dtPolyRef GetNearestPoly(int map_id, float* pos, float* closest_point);
 
 	bool LoadMmapsForContinent(int map_id);
-
-	void RDToWoWCoords(float pos[]);
-	void WoWToRDCoords(float pos[]);
 };
-
-#endif // !_H_AMEISENNAVIGATION
+#endif

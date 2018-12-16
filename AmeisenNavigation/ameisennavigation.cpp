@@ -1,5 +1,8 @@
 #include "ameisennavigation.h"
 
+AmeisenNavigation::AmeisenNavigation(std::string mmap_dir) {
+	_mmap_dir = mmap_dir;
+}
 
 std::string AmeisenNavigation::format_trailing_zeros(int number, int total_count) {
 	std::stringstream ss;
@@ -7,24 +10,34 @@ std::string AmeisenNavigation::format_trailing_zeros(int number, int total_count
 	return ss.str();
 }
 
-AmeisenNavigation::AmeisenNavigation(std::string mmap_dir)
+void AmeisenNavigation::RDToWoWCoords(float pos[])
 {
-	_mmap_dir = mmap_dir;
+	float orig_x = pos[0];
+	float orig_y = pos[1];
+	float orig_z = pos[2];
 
-	//_filter.setIncludeFlags(NAV_GROUND | NAV_WATER);
-	_filter.setIncludeFlags(0xffff);
-	_filter.setExcludeFlags(0);
+	pos[0] = orig_z;
+	pos[1] = orig_x;
+	pos[2] = orig_y;
 }
 
-std::vector<Vector3> AmeisenNavigation::GetPath(int map_id, float* start, float* end)
+void AmeisenNavigation::WoWToRDCoords(float pos[])
+{
+	float orig_x = pos[0];
+	float orig_y = pos[1];
+	float orig_z = pos[2];
+
+	pos[0] = orig_y;
+	pos[1] = orig_z;
+	pos[2] = orig_x;
+}
+
+void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** path, int* path_size)
 {
 	WoWToRDCoords(start);
 	WoWToRDCoords(end);
 
 	std::cout << "-> Generating Path (" << start[0] << "|" << start[1] << "|" << start[2] << ") -> (" << end[0] << "|" << end[1] << "|" << end[2] << ")\n";
-
-	std::vector<Vector3> path;
-
 
 	if (_meshmap[map_id] == nullptr
 		|| _querymap[map_id] == nullptr)
@@ -33,7 +46,7 @@ std::vector<Vector3> AmeisenNavigation::GetPath(int map_id, float* start, float*
 		if (!LoadMmapsForContinent(map_id))
 		{
 			std::cout << "-> Mesh or Query could not be loaded\n";
-			return path;
+			return;
 		}
 	}
 
@@ -46,13 +59,14 @@ std::vector<Vector3> AmeisenNavigation::GetPath(int map_id, float* start, float*
 	//std::cout << "-> Start Poly " << start_poly << " found " << closest_point_start[0] << " " << closest_point_start[1] << " " << closest_point_start[2] << "\n";
 	//std::cout << "-> End Poly " << end_poly << " found " << closest_point_end[0] << " " << closest_point_end[1] << " " << closest_point_end[2] << " \n";
 
-	int path_size = 0;
 	dtPolyRef path_poly[1024];
-	if (dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, &path_size, 1024)))
+	if (dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
 	{
 		std::cout << "-> Path found and contains " << path_size << " Nodes\n";
 
-		for (int i = 0; i < path_size; i++)
+		float path_a[1024 * 3];
+
+		for (int i = 0; i < (*path_size); i++)
 		{
 			float closest_pos[3];
 			bool pos_over_poly;
@@ -63,21 +77,17 @@ std::vector<Vector3> AmeisenNavigation::GetPath(int map_id, float* start, float*
 
 			std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
 
-			Vector3 vec;
-			vec.x = closest_pos_wow[0];
-			vec.y = closest_pos_wow[1];
-			vec.z = closest_pos_wow[2];
-
-			path.push_back(vec);
+			path_a[i] = closest_pos_wow[0];
+			path_a[i + 1] = closest_pos_wow[1];
+			path_a[i + 2] = closest_pos_wow[2];
 		}
+
+		(*path) = path_a;
 	}
 	else
 	{
 		std::cout << "-> Path not found\n";
 	}
-	std::cout << "\n";
-
-	return path;
 }
 
 dtPolyRef AmeisenNavigation::GetNearestPoly(int map_id, float* pos, float* closest_point)
@@ -160,26 +170,4 @@ bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 	{
 		return true;
 	}
-}
-
-void AmeisenNavigation::RDToWoWCoords(float pos[])
-{
-	float orig_x = pos[0];
-	float orig_y = pos[1];
-	float orig_z = pos[2];
-
-	pos[0] = orig_z;
-	pos[1] = orig_x;
-	pos[2] = orig_y;
-}
-
-void AmeisenNavigation::WoWToRDCoords(float pos[])
-{
-	float orig_x = pos[0];
-	float orig_y = pos[1];
-	float orig_z = pos[2];
-
-	pos[0] = orig_y;
-	pos[1] = orig_z;
-	pos[2] = orig_x;
 }
