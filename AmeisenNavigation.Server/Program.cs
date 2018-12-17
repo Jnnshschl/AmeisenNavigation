@@ -2,13 +2,14 @@
 using Newtonsoft.Json;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 
-namespace AmeisenBot.NavigationRESTApi
+namespace AmeisenNavigation.Server
 {
     internal class Program
     {
@@ -44,19 +45,49 @@ namespace AmeisenBot.NavigationRESTApi
         private static TcpListener TcpListener { get; set; }
         private static AmeisenNav AmeisenNav { get; set; }
 
-        private const int PORT = 47110;
+        private static readonly string errorPath = AppDomain.CurrentDomain.BaseDirectory + "errors.txt";
+        private static readonly string settingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
 
         private static void Main(string[] args)
         {
-            AmeisenNav = new AmeisenNav("H:\\mmaps\\");
             Console.Title = "AmeisenNavigation Server";
-            StopServer = false;
+            Console.WriteLine($"-> AmeisenNavigation Server");
+            Console.WriteLine($">> Loading config from: {settingsPath}");
 
-            TcpListener = new TcpListener(IPAddress.Any, PORT);
-            TcpListener.Start();
+            Settings settings = new Settings();
 
-            Console.WriteLine($"Starting server on 0.0.0.0:{PORT}");
-            EnterServerLoop();
+            if (File.Exists(settingsPath))
+            {
+                settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(settingsPath));
+            }
+            else
+            {
+                File.WriteAllText(settingsPath, JsonConvert.SerializeObject(settings));
+            }
+
+            if (!Directory.Exists(settings.mmapsFolder))
+            {
+                Console.ForegroundColor = ConsoleColor.Red;
+                Console.WriteLine(">> MMAP folder missing, edit folder in config.json");
+                Console.ResetColor();
+                Console.ReadKey();
+            }
+            else
+            {
+                Console.WriteLine($">> MMAPS located at: {settings.mmapsFolder}");
+                AmeisenNav = new AmeisenNav(settings.mmapsFolder);
+                StopServer = false;
+
+                TcpListener = new TcpListener(IPAddress.Parse(settings.ipAddress), settings.port);
+                TcpListener.Start();
+
+                Console.ForegroundColor = ConsoleColor.Green;
+                Console.WriteLine($">> Server running ({settings.ipAddress}:{settings.port}) press Ctrl + C to exit");
+                Console.ResetColor();
+                EnterServerLoop();
+
+                AmeisenNav.Dispose();
+            }
 
             // Debug stuff
             /*float[] start = { -8826.562500f, -371.839752f, 71.638428f };
@@ -71,17 +102,31 @@ namespace AmeisenBot.NavigationRESTApi
             Console.ReadKey();*/
         }
 
-        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int map_id)
+        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int map_id, TcpClient client)
         {
             int pathSize;
             float[] path_raw = new float[1024 * 3];
             List<Vector3> Path = new List<Vector3>();
 
+            Stopwatch sw = new Stopwatch();
+            sw.Start();
             unsafe
             {
                 path_raw = AmeisenNav.GetPath(map_id, start.X, start.Y, start.Z, end.X, end.Y, end.Z, &pathSize);
             }
+            sw.Stop();
 
+            Console.ForegroundColor = ConsoleColor.Cyan;
+            Console.Write($">> {client.Client.RemoteEndPoint}");
+
+            Console.ResetColor();
+            Console.Write(": Pathfinding took ");
+
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.Write($"{sw.ElapsedTicks} ");
+
+            Console.ResetColor();
+            Console.WriteLine("ticks");
 
             for (int i = 0; i < pathSize * 3; i += 3)
             {
@@ -104,7 +149,9 @@ namespace AmeisenBot.NavigationRESTApi
         public static void HandleClient(object obj)
         {
             TcpClient client = (TcpClient)obj;
-            Console.WriteLine($"New Client: {client.Client.RemoteEndPoint}");
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($">> New Client: {client.Client.RemoteEndPoint}");
+            Console.ResetColor();
 
             StreamWriter sWriter = new StreamWriter(client.GetStream(), Encoding.ASCII);
             StreamReader sReader = new StreamReader(client.GetStream(), Encoding.ASCII);
@@ -119,11 +166,11 @@ namespace AmeisenBot.NavigationRESTApi
                 try
                 {
                     rawData = sReader.ReadLine().Replace("&gt;", "");
-                    Console.WriteLine($"{client.Client.RemoteEndPoint} sent data: {rawData}");
+                    Console.WriteLine($">> {client.Client.RemoteEndPoint} sent data: {rawData}");
 
                     pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
-                    List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
+                    List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, client);
                     rawPath = JsonConvert.SerializeObject(path);
 
                     sWriter.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
@@ -131,7 +178,11 @@ namespace AmeisenBot.NavigationRESTApi
                 }
                 catch (Exception e)
                 {
-                    Console.WriteLine(e.ToString());
+                    Console.ForegroundColor = ConsoleColor.Red;
+                    Console.Write(">> Error at client: ");
+                    Console.ResetColor();
+                    Console.WriteLine($"{client.Client.RemoteEndPoint}");
+                    File.AppendAllText(errorPath, e.ToString() + "\n");
                     isClientConnected = false;
                 }
             }
