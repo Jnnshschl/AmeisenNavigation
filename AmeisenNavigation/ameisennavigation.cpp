@@ -71,38 +71,49 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	// check if we hit something
 	if (hit != FLT_MAX)
 	{
-		//std::cout << "-> Raycast hit something\n";
+		std::cout << "-> Raycast hit something\n";
 		if (!dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
 		{
 			std::cout << "-> Path not found\n";
 			return;
 		}
+		else 
+		{
+			// if the ray hits something our target is  not in a
+			// straight line so we need to build a path to it
+			std::cout << "-> Path found: " << (*path_size) << " Nodes\n";
+
+			float path_a[1024 * 3];
+
+			for (int i = 0; i < (*path_size); i++)
+			{
+				float closest_pos[3];
+				bool pos_over_poly;
+				_querymap[map_id]->closestPointOnPoly(path_poly[i], start, closest_pos, &pos_over_poly);
+
+				float* closest_pos_wow = closest_pos;
+				RDToWoWCoords(closest_pos_wow);
+
+				//std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
+
+				path_a[i * 3] = closest_pos_wow[0];
+				path_a[i * 3 + 1] = closest_pos_wow[1];
+				path_a[i * 3 + 2] = closest_pos_wow[2];
+			}
+
+			(*path) = path_a;
+		}
 	}
 	else
 	{
-		//std::cout << "-> Raycast hit nothing\n";
+		// if the ray hits nothing our target is in a
+		// straight line so only return the final pos
+		std::cout << "-> Raycast hit nothing\n";
+		RDToWoWCoords(end);
+		(*path_size) = 1;
+		(*path) = end;
 	}
 
-	//std::cout << "-> Path found\n";
-	float path_a[1024 * 3];
-
-	for (int i = 0; i < (*path_size); i++)
-	{
-		float closest_pos[3];
-		bool pos_over_poly;
-		_querymap[map_id]->closestPointOnPoly(path_poly[i], start, closest_pos, &pos_over_poly);
-
-		float* closest_pos_wow = closest_pos;
-		RDToWoWCoords(closest_pos_wow);
-
-		//std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
-
-		path_a[i * 3] = closest_pos_wow[0];
-		path_a[i * 3 + 1] = closest_pos_wow[1];
-		path_a[i * 3 + 2] = closest_pos_wow[2];
-	}
-
-	(*path) = path_a;
 }
 
 dtPolyRef AmeisenNavigation::GetNearestPoly(int map_id, float* pos, float* closest_point)

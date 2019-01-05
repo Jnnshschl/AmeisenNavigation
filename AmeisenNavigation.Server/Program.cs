@@ -133,10 +133,10 @@ namespace AmeisenNavigation.Server
             Console.Write(": Pathfinding took ");
 
             Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.Write($"{sw.ElapsedTicks} ");
+            Console.Write($"{sw.ElapsedMilliseconds} ");
 
             Console.ResetColor();
-            Console.WriteLine("ticks");
+            Console.WriteLine("ms");
 
             for (int i = 0; i < pathSize * 3; i += 3)
             {
@@ -176,7 +176,7 @@ namespace AmeisenNavigation.Server
                 try
                 {
                     rawData = sReader.ReadLine().Replace("&gt;", "");
-                    Console.WriteLine($">> {client.Client.RemoteEndPoint} sent data: {rawData}");
+                    //Console.WriteLine($">> {client.Client.RemoteEndPoint} sent data: {rawData}");
 
                     pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
