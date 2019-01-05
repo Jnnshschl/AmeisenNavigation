@@ -60,34 +60,49 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	//std::cout << "-> End Poly " << end_poly << " found " << closest_point_end[0] << " " << closest_point_end[1] << " " << closest_point_end[2] << " \n";
 
 	dtPolyRef path_poly[1024];
-	if (dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
+
+	float hit = 0;
+	float hit_normal[3];
+	memset(hit_normal, 0, sizeof(hit_normal));
+
+	_querymap[map_id]->raycast(start_poly, start, end, &_filter, &hit, hit_normal, path_poly, path_size, 1024);
+	//std::cout << "-> RaycastPath contains " << path_size << " Nodes\n";
+
+	// check if we hit something
+	if (hit != FLT_MAX)
 	{
-		//std::cout << "-> Path found and contains " << path_size << " Nodes\n";
-
-		float path_a[1024 * 3];
-
-		for (int i = 0; i < (*path_size); i++)
+		//std::cout << "-> Raycast hit something\n";
+		if (!dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
 		{
-			float closest_pos[3];
-			bool pos_over_poly;
-			_querymap[map_id]->closestPointOnPoly(path_poly[i], start, closest_pos, &pos_over_poly);
-
-			float* closest_pos_wow = closest_pos;
-			RDToWoWCoords(closest_pos_wow);
-
-			//std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
-
-			path_a[i * 3] = closest_pos_wow[0];
-			path_a[i * 3 + 1] = closest_pos_wow[1];
-			path_a[i * 3 + 2] = closest_pos_wow[2];
+			std::cout << "-> Path not found\n";
+			return;
 		}
-
-		(*path) = path_a;
 	}
 	else
 	{
-		std::cout << "-> Path not found\n";
+		//std::cout << "-> Raycast hit nothing\n";
 	}
+
+	//std::cout << "-> Path found\n";
+	float path_a[1024 * 3];
+
+	for (int i = 0; i < (*path_size); i++)
+	{
+		float closest_pos[3];
+		bool pos_over_poly;
+		_querymap[map_id]->closestPointOnPoly(path_poly[i], start, closest_pos, &pos_over_poly);
+
+		float* closest_pos_wow = closest_pos;
+		RDToWoWCoords(closest_pos_wow);
+
+		//std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
+
+		path_a[i * 3] = closest_pos_wow[0];
+		path_a[i * 3 + 1] = closest_pos_wow[1];
+		path_a[i * 3 + 2] = closest_pos_wow[2];
+	}
+
+	(*path) = path_a;
 }
 
 dtPolyRef AmeisenNavigation::GetNearestPoly(int map_id, float* pos, float* closest_point)
@@ -102,6 +117,11 @@ dtPolyRef AmeisenNavigation::GetNearestPoly(int map_id, float* pos, float* close
 
 bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 {
+	if (_loadingmap[map_id])
+		return false;
+
+	_loadingmap[map_id] = true;
+
 	std::string mmap_filename = _mmap_dir + format_trailing_zeros(map_id, 3) + ".mmap";
 	std::ifstream mmap_stream;
 	dtNavMeshParams params;

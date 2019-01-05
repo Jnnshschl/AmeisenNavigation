@@ -46,6 +46,7 @@ private:
 	std::string _mmap_dir;
 	std::map<int, dtNavMesh*> _meshmap;
 	std::map<int, dtNavMeshQuery*> _querymap;
+	std::map<int, bool> _loadingmap;
 	dtQueryFilter _filter;
 
 	std::string format_trailing_zeros(int number, int total_count);

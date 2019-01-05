@@ -5,12 +5,12 @@ using System.Runtime.InteropServices;
 // Allgemeine Informationen über eine Assembly werden über die folgenden
 // Attribute gesteuert. Ändern Sie diese Attributwerte, um die Informationen zu ändern,
 // die einer Assembly zugeordnet sind.
-[assembly: AssemblyTitle("AmeisenBot.NavigationRESTApi")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyTitle("AmeisenNavigation.Server")]
+[assembly: AssemblyDescription("AmeisenNavigation Server")]
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("")]
-[assembly: AssemblyProduct("AmeisenBot.NavigationRESTApi")]
-[assembly: AssemblyCopyright("Copyright ©  2018")]
+[assembly: AssemblyProduct("AmeisenNavigation.Server")]
+[assembly: AssemblyCopyright("Copyright © Jannis Höschele 2018")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

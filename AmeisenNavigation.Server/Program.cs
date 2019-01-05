@@ -78,6 +78,16 @@ namespace AmeisenNavigation.Server
                 AmeisenNav = new AmeisenNav(settings.mmapsFolder);
                 StopServer = false;
 
+                if (settings.preloadMaps.Length > 0)
+                {
+                    Console.WriteLine($">> Preloading Maps");
+                    foreach (int i in settings.preloadMaps)
+                    {
+                        AmeisenNav.LoadMap(i);
+                    }
+                    Console.WriteLine($">> Preloaded {settings.preloadMaps.Length} Maps");
+                }
+
                 TcpListener = new TcpListener(IPAddress.Parse(settings.ipAddress), settings.port);
                 TcpListener.Start();
 

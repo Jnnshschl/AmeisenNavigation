@@ -21,6 +21,11 @@ namespace AmeisenNavigationWrapper {
 		~AmeisenNav() { this->!AmeisenNav(); }
 		!AmeisenNav() { delete ameisen_nav; }
 
+		void LoadMap(int map_id) 
+		{
+			ameisen_nav->LoadMmapsForContinent(map_id);
+		}
+
 		array<float>^ GetPath(int map_id, float start_x, float start_y, float start_z, float end_x, float end_y, float end_z, int* path_size)
 		{
 			float start[] = { start_x, start_y, start_z };
