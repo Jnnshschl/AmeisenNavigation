@@ -192,7 +192,11 @@ namespace AmeisenNavigation.Server
                     Console.Write(">> Error at client: ");
                     Console.ResetColor();
                     Console.WriteLine($"{client.Client.RemoteEndPoint}");
-                    File.AppendAllText(errorPath, e.ToString() + "\n");
+                    try
+                    {
+                        File.AppendAllText(errorPath, e.ToString() + "\n");
+                    }
+                    catch { }
                     isClientConnected = false;
                 }
             }
