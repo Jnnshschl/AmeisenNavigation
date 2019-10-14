@@ -35,12 +35,12 @@ namespace AmeisenNavigation.Server
             {
                 Console.ReadKey();
             }
-            else if(!Directory.Exists(settings.MmapsFolder))
+            else if (!Directory.Exists(settings.MmapsFolder))
             {
                 ColoredPrint(">> MMAP folder missing, edit folder in config.json...", ConsoleColor.Red);
                 Console.ReadKey();
             }
-            else 
+            else
             {
                 AmeisenNav = new AmeisenNav(settings.MmapsFolder);
 
@@ -68,10 +68,10 @@ namespace AmeisenNavigation.Server
 
             unsafe
             {
-                fixed (float* pStart = start.ToArray())
-                fixed (float* pEnd = end.ToArray())
+                fixed (float* pointerStart = start.ToArray())
+                fixed (float* pointerEnd = end.ToArray())
                 {
-                    float* path_raw = AmeisenNav.GetPath(mapId, pStart, pEnd, &pathSize);
+                    float* path_raw = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
 
                     // postprocess the raw path to a list of Vector3
                     // the raw path looks like this:
@@ -100,45 +100,46 @@ namespace AmeisenNavigation.Server
         {
             ColoredPrint($">> New Client: {client.Client.RemoteEndPoint}", ConsoleColor.Green);
 
-            StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII);
-            StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII);
-
-            bool isClientConnected = true;
-            Interlocked.Increment(ref clientCount);
-            UpdateConnectedClientCount();
-
-            while (isClientConnected)
+            using (StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII))
+            using (StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII))
             {
-                try
+                bool isClientConnected = true;
+                Interlocked.Increment(ref clientCount);
+                UpdateConnectedClientCount();
+
+                while (isClientConnected)
                 {
-                    string rawData = reader.ReadLine().Replace("&gt;", string.Empty);
-                    PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
-
-                    List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
-
-                    writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
-                    writer.Flush();
-                }
-                catch (Exception e)
-                {
-                    string errorMsg = $"[{DateTime.Now.ToShortTimeString()}]>> {e.GetType()} occured at client ";
-                    ColoredPrint(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}");
-
                     try
                     {
-                        File.AppendAllText(ErrorPath, $"{errorMsg} \n{e}\n");
+                        string rawData = reader.ReadLine().Replace("&gt;", string.Empty);
+                        PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
+
+                        List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
+
+                        writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
+                        writer.Flush();
                     }
-                    catch
+                    catch (Exception e)
                     {
-                        // ignored, if we cant write to the log what should we do?
+                        string errorMsg = $"[{DateTime.Now.ToShortTimeString()}]>> {e.GetType()} occured at client ";
+                        ColoredPrint(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}");
+
+                        try
+                        {
+                            File.AppendAllText(ErrorPath, $"{errorMsg} \n{e}\n");
+                        }
+                        catch
+                        {
+                            // ignored, if we cant write to the log what should we do?
+                        }
+
+                        isClientConnected = false;
                     }
-
-                    isClientConnected = false;
                 }
-            }
 
-            Interlocked.Decrement(ref clientCount);
-            UpdateConnectedClientCount();
+                Interlocked.Decrement(ref clientCount);
+                UpdateConnectedClientCount();
+            }
         }
 
         public static void ColoredPrint(string s, ConsoleColor color, string uncoloredOutput = "")
