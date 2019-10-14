@@ -28,7 +28,7 @@ namespace AmeisenNavigation.Server
             UpdateConnectedClientCount();
             PrintHeader();
 
-            Console.WriteLine($"[{DateTime.Now.ToShortTimeString()}] >> Loading: {SettingsPath}...");
+            Console.WriteLine(BuildLog($"Loading: {SettingsPath}..."));
             Settings settings = LoadConfigFile();
 
             if (settings == null)
@@ -37,7 +37,7 @@ namespace AmeisenNavigation.Server
             }
             else if (!Directory.Exists(settings.MmapsFolder))
             {
-                ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> MMAP folder missing, edit folder in config.json...", ConsoleColor.Red);
+                ColoredPrint(BuildLog($"MMAP folder missing, edit folder in config.json..."), ConsoleColor.Red);
                 Console.ReadKey();
             }
             else
@@ -52,7 +52,7 @@ namespace AmeisenNavigation.Server
                 TcpListener = new TcpListener(IPAddress.Parse(settings.IpAddress), settings.Port);
                 TcpListener.Start();
 
-                ColoredPrint($"[{ DateTime.Now.ToShortTimeString()}] >> Server running on {settings.IpAddress}:{settings.Port} press Ctrl + C to exit...", ConsoleColor.Green);
+                ColoredPrint(BuildLog($"{settings.IpAddress}:{settings.Port} press Ctrl + C to exit..."), ConsoleColor.Green);
 
                 EnterServerLoop();
 
@@ -98,7 +98,7 @@ namespace AmeisenNavigation.Server
 
         public static void HandleClient(TcpClient client)
         {
-            ColoredPrint($"[{ DateTime.Now.ToShortTimeString()}] >> New Client: {client.Client.RemoteEndPoint}", ConsoleColor.Green);
+            ColoredPrint(BuildLog($"New Client: {client.Client.RemoteEndPoint}"), ConsoleColor.Green);
 
             using (StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII))
             using (StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII))
@@ -124,7 +124,7 @@ namespace AmeisenNavigation.Server
                     }
                     catch (Exception e)
                     {
-                        string errorMsg = $"[{DateTime.Now.ToShortTimeString()}] >> {e.GetType()} occured at client ";
+                        string errorMsg = BuildLog($"{e.GetType()} occured at client ");
                         ColoredPrint(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}");
 
                         try
@@ -153,6 +153,9 @@ namespace AmeisenNavigation.Server
             Console.WriteLine(uncoloredOutput);
         }
 
+        public static string BuildLog(string s)
+            => $"[{DateTime.Now.ToLongTimeString()}] >> {s}";
+
         private static void PrintHeader()
         {
             string version = System.Reflection.Assembly.GetEntryAssembly().GetName().Version.ToString();
@@ -168,13 +171,13 @@ namespace AmeisenNavigation.Server
 
         private static void PreloadMaps(Settings settings)
         {
-            Console.WriteLine($"[{DateTime.Now.ToShortTimeString()}] >> Preloading Maps...");
+            Console.WriteLine(BuildLog($"Preloading Maps..."));
             foreach (int i in settings.PreloadMaps)
             {
                 AmeisenNav.LoadMap(i);
             }
 
-            ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> Preloaded {settings.PreloadMaps.Length} Maps", ConsoleColor.Green);
+            ColoredPrint(BuildLog($"Preloaded {settings.PreloadMaps.Length} Maps"), ConsoleColor.Green);
         }
 
         private static Settings LoadConfigFile()
@@ -192,18 +195,18 @@ namespace AmeisenNavigation.Server
                         settings.MmapsFolder += "/";
                     }
 
-                    ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> Loaded config file", ConsoleColor.Green);
+                    ColoredPrint(BuildLog($"Loaded config file"), ConsoleColor.Green);
                 }
                 else
                 {
                     settings = new Settings();
                     File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
-                    Console.WriteLine($"[{DateTime.Now.ToShortTimeString()}] >> Created default config file");
+                    Console.WriteLine(BuildLog($"Created default config file"));
                 }
             }
             catch (Exception ex)
             {
-                ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString());
+                ColoredPrint(BuildLog($"Failed to parse config.json...\n"), ConsoleColor.Red, ex.ToString());
             }
 
             return settings;
