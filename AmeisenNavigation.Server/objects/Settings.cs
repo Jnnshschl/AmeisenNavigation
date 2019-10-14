@@ -1,10 +1,16 @@
+using Newtonsoft.Json;
+
 public class Settings
 {
-    public string MmapsFolder { get; } = "C:\\mmaps\\";
+    [JsonProperty("mmapsFolder")]
+    public string MmapsFolder { get; set; } = "C:\\mmaps\\";
 
-    public string IpAddress { get; } = "0.0.0.0";
+    [JsonProperty("ipAddress")]
+    public string IpAddress { get; set; } = "0.0.0.0";
 
-    public int Port { get; } = 47110;
+    [JsonProperty("port")]
+    public int Port { get; set; } = 47110;
 
-    public int[] PreloadMaps { get; } = { };
+    [JsonProperty("preloadMaps")]
+    public int[] PreloadMaps { get; set; } = { };
 }

@@ -1,0 +1,86 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1,
+						2
+					],
+					"projectIndex" : 0,
+					"source" : "."
+				},
+				{
+					"build" : "Detour",
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "Detour",
+					"targetIndexes" : 
+					[
+						0
+					]
+				},
+				{
+					"build" : "Recast",
+					"parentIndex" : 0,
+					"projectIndex" : 0,
+					"source" : "Recast",
+					"targetIndexes" : 
+					[
+						1
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"directoryIndexes" : 
+					[
+						0,
+						1,
+						2
+					],
+					"name" : "Project",
+					"targetIndexes" : 
+					[
+						0,
+						1
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 1,
+					"id" : "Detour::@af02d6d6a7de8e2ccf3d",
+					"jsonFile" : "target-Detour-Debug-5907fdc1bf059526e00f.json",
+					"name" : "Detour",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 2,
+					"id" : "Recast::@d233a775a36d06e0885c",
+					"jsonFile" : "target-Recast-Debug-1c5207c3cc4cce0a3230.json",
+					"name" : "Recast",
+					"projectIndex" : 0
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug",
+		"source" : "C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 0
+	}
+}
