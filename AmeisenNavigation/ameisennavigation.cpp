@@ -42,7 +42,7 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	if (_meshmap[map_id] == nullptr
 		|| _querymap[map_id] == nullptr)
 	{
-		std::cout << "-> Mesh for Continent " << map_id << " not loaded, loading it now\n\n";
+		/// std::cout << "-> Mesh for Continent " << map_id << " not loaded, loading it now\n\n";
 		if (!LoadMmapsForContinent(map_id))
 		{
 			std::cout << "-> Mesh or Query could not be loaded\n";
@@ -71,17 +71,17 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	// check if we hit something
 	if (hit != FLT_MAX)
 	{
-		std::cout << "-> Raycast hit something\n";
+		//// std::cout << "-> Raycast hit something\n";
 		if (!dtStatusSucceed(_querymap[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
 		{
-			std::cout << "-> Path not found\n";
+			//// std::cout << "-> Path not found\n";
 			return;
 		}
 		else 
 		{
 			// if the ray hits something our target is  not in a
 			// straight line so we need to build a path to it
-			std::cout << "-> Path found: " << (*path_size) << " Nodes\n";
+			//// std::cout << "-> Path found: " << (*path_size) << " Nodes\n";
 
 			float path_a[1024 * 3];
 
@@ -146,7 +146,7 @@ bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 	if (dtStatusFailed(_meshmap[map_id]->init(&params)))
 	{
 		dtFreeNavMesh(_meshmap[map_id]);
-		std::cout << "-> Error: could not read mmap file\n";
+		std::cout << "-> Error: could not read mmap file: " << mmap_filename << "\n";
 		return false;
 	}
 
@@ -168,7 +168,6 @@ bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 			}
 
 			//std::cout << "--> Reading Tile " << mmaptile_filename.c_str() << "\n";
-
 
 			std::ifstream mmaptile_stream;
 			mmaptile_stream.open(mmaptile_filename, std::ifstream::binary);

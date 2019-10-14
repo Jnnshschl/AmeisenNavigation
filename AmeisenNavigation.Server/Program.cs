@@ -28,7 +28,7 @@ namespace AmeisenNavigation.Server
             UpdateConnectedClientCount();
             PrintHeader();
 
-            Console.WriteLine($">> Loading: {SettingsPath}...");
+            Console.WriteLine($"[{DateTime.Now.ToShortTimeString()}] >> Loading: {SettingsPath}...");
             Settings settings = LoadConfigFile();
 
             if (settings == null)
@@ -37,7 +37,7 @@ namespace AmeisenNavigation.Server
             }
             else if (!Directory.Exists(settings.MmapsFolder))
             {
-                ColoredPrint(">> MMAP folder missing, edit folder in config.json...", ConsoleColor.Red);
+                ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> MMAP folder missing, edit folder in config.json...", ConsoleColor.Red);
                 Console.ReadKey();
             }
             else
@@ -52,7 +52,7 @@ namespace AmeisenNavigation.Server
                 TcpListener = new TcpListener(IPAddress.Parse(settings.IpAddress), settings.Port);
                 TcpListener.Start();
 
-                ColoredPrint($">> Server running on {settings.IpAddress}:{settings.Port} press Ctrl + C to exit...", ConsoleColor.Green);
+                ColoredPrint($"[{ DateTime.Now.ToShortTimeString()}] >> Server running on {settings.IpAddress}:{settings.Port} press Ctrl + C to exit...", ConsoleColor.Green);
 
                 EnterServerLoop();
 
@@ -98,7 +98,7 @@ namespace AmeisenNavigation.Server
 
         public static void HandleClient(TcpClient client)
         {
-            ColoredPrint($">> New Client: {client.Client.RemoteEndPoint}", ConsoleColor.Green);
+            ColoredPrint($"[{ DateTime.Now.ToShortTimeString()}] >> New Client: {client.Client.RemoteEndPoint}", ConsoleColor.Green);
 
             using (StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII))
             using (StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII))
@@ -111,17 +111,20 @@ namespace AmeisenNavigation.Server
                 {
                     try
                     {
-                        string rawData = reader.ReadLine().Replace("&gt;", string.Empty);
-                        PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
+                        string rawData = reader.ReadLine()?.Replace("&gt;", string.Empty);
+                        if (!string.IsNullOrEmpty(rawData))
+                        {
+                            PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
-                        List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
+                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
 
-                        writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
-                        writer.Flush();
+                            writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
+                            writer.Flush();
+                        }
                     }
                     catch (Exception e)
                     {
-                        string errorMsg = $"[{DateTime.Now.ToShortTimeString()}]>> {e.GetType()} occured at client ";
+                        string errorMsg = $"[{DateTime.Now.ToShortTimeString()}] >> {e.GetType()} occured at client ";
                         ColoredPrint(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}");
 
                         try
@@ -165,13 +168,13 @@ namespace AmeisenNavigation.Server
 
         private static void PreloadMaps(Settings settings)
         {
-            Console.WriteLine(">> Preloading Maps...");
+            Console.WriteLine($"[{DateTime.Now.ToShortTimeString()}] >> Preloading Maps...");
             foreach (int i in settings.PreloadMaps)
             {
                 AmeisenNav.LoadMap(i);
             }
 
-            ColoredPrint($">> Preloaded {settings.PreloadMaps.Length} Maps", ConsoleColor.Green);
+            ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> Preloaded {settings.PreloadMaps.Length} Maps", ConsoleColor.Green);
         }
 
         private static Settings LoadConfigFile()
@@ -183,18 +186,24 @@ namespace AmeisenNavigation.Server
                 if (File.Exists(SettingsPath))
                 {
                     settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(SettingsPath));
-                    ColoredPrint(">> Loaded config file", ConsoleColor.Green);
+
+                    if (!settings.MmapsFolder.EndsWith("/") && !settings.MmapsFolder.EndsWith("\\"))
+                    {
+                        settings.MmapsFolder += "/";
+                    }
+
+                    ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> Loaded config file", ConsoleColor.Green);
                 }
                 else
                 {
                     settings = new Settings();
                     File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
-                    Console.WriteLine(">> Created default config file");
+                    Console.WriteLine($"[{DateTime.Now.ToShortTimeString()}] >> Created default config file");
                 }
             }
             catch (Exception ex)
             {
-                ColoredPrint(">> Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString());
+                ColoredPrint($"[{DateTime.Now.ToShortTimeString()}] >> Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString());
             }
 
             return settings;
