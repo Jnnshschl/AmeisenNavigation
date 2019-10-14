@@ -37,7 +37,7 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	WoWToRDCoords(start);
 	WoWToRDCoords(end);
 
-	std::cout << "-> Generating Path (" << start[0] << "|" << start[1] << "|" << start[2] << ") -> (" << end[0] << "|" << end[1] << "|" << end[2] << ")\n";
+	//// std::cout << "-> Generating Path (" << start[0] << "|" << start[1] << "|" << start[2] << ") -> (" << end[0] << "|" << end[1] << "|" << end[2] << ")\n";
 
 	if (_meshmap[map_id] == nullptr
 		|| _querymap[map_id] == nullptr)
@@ -56,8 +56,8 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	dtPolyRef start_poly = GetNearestPoly(map_id, start, closest_point_start);
 	dtPolyRef end_poly = GetNearestPoly(map_id, end, closest_point_end);
 
-	//std::cout << "-> Start Poly " << start_poly << " found " << closest_point_start[0] << " " << closest_point_start[1] << " " << closest_point_start[2] << "\n";
-	//std::cout << "-> End Poly " << end_poly << " found " << closest_point_end[0] << " " << closest_point_end[1] << " " << closest_point_end[2] << " \n";
+	//// std::cout << "-> Start Poly " << start_poly << " found " << closest_point_start[0] << " " << closest_point_start[1] << " " << closest_point_start[2] << "\n";
+	//// std::cout << "-> End Poly " << end_poly << " found " << closest_point_end[0] << " " << closest_point_end[1] << " " << closest_point_end[2] << " \n";
 
 	dtPolyRef path_poly[1024];
 
@@ -66,7 +66,7 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	memset(hit_normal, 0, sizeof(hit_normal));
 
 	_querymap[map_id]->raycast(start_poly, start, end, &_filter, &hit, hit_normal, path_poly, path_size, 1024);
-	//std::cout << "-> RaycastPath contains " << path_size << " Nodes\n";
+	//// std::cout << "-> RaycastPath contains " << path_size << " Nodes\n";
 
 	// check if we hit something
 	if (hit != FLT_MAX)
@@ -94,7 +94,7 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 				float* closest_pos_wow = closest_pos;
 				RDToWoWCoords(closest_pos_wow);
 
-				//std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
+				//// std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
 
 				path_a[i * 3] = closest_pos_wow[0];
 				path_a[i * 3 + 1] = closest_pos_wow[1];
@@ -108,7 +108,7 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	{
 		// if the ray hits nothing our target is in a
 		// straight line so only return the final pos
-		std::cout << "-> Raycast hit nothing\n";
+		//// std::cout << "-> Raycast hit nothing\n";
 		RDToWoWCoords(end);
 		(*path_size) = 1;
 		(*path) = end;

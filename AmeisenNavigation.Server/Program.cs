@@ -1,149 +1,89 @@
-﻿using AmeisenNavigationWrapper;
-using Newtonsoft.Json;
-using System;
+﻿using System;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
+using AmeisenNavigation.Server.Objects;
+using AmeisenNavigationWrapper;
+using Newtonsoft.Json;
 
 namespace AmeisenNavigation.Server
 {
-    internal class Program
+    internal static class Program
     {
-        public struct PathRequest
-        {
-            public Vector3 A { get; set; }
-            public Vector3 B { get; set; }
-            public int MapId { get; set; }
+        private static readonly string ErrorPath = AppDomain.CurrentDomain.BaseDirectory + "errors.txt";
+        private static readonly string SettingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
+        private static int clientCount = 0;
 
-            public PathRequest(Vector3 a, Vector3 b, int mapId)
-            {
-                A = a;
-                B = b;
-                MapId = mapId;
-            }
-        }
+        private static bool StopServer { get; set; } = false;
 
-        public struct Vector3
-        {
-            public float X { get; set; }
-            public float Y { get; set; }
-            public float Z { get; set; }
-
-            public Vector3(float x, float y, float z)
-            {
-                X = x;
-                Y = y;
-                Z = z;
-            }
-        }
-
-        private static bool StopServer { get; set; }
         private static TcpListener TcpListener { get; set; }
+
         private static AmeisenNav AmeisenNav { get; set; }
 
-        private static readonly string errorPath = AppDomain.CurrentDomain.BaseDirectory + "errors.txt";
-        private static readonly string settingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
-
-        private static void Main(string[] args)
+        public static void Main()
         {
-            Console.Title = "AmeisenNavigation Server";
-            Console.WriteLine($"-> AmeisenNavigation Server");
-            Console.WriteLine($">> Loading config from: {settingsPath}");
+            UpdateConnectedClientCount();
+            PrintHeader();
 
-            Settings settings = new Settings();
+            Console.WriteLine($">> Loading: {SettingsPath}...");
+            Settings settings = LoadConfigFile();
 
-            if (File.Exists(settingsPath))
+            if (settings == null)
             {
-                settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(settingsPath));
-            }
-            else
-            {
-                File.WriteAllText(settingsPath, JsonConvert.SerializeObject(settings));
-            }
-
-            if (!Directory.Exists(settings.mmapsFolder))
-            {
-                Console.ForegroundColor = ConsoleColor.Red;
-                Console.WriteLine(">> MMAP folder missing, edit folder in config.json");
-                Console.ResetColor();
                 Console.ReadKey();
             }
-            else
+            else if(!Directory.Exists(settings.MmapsFolder))
             {
-                Console.WriteLine($">> MMAPS located at: {settings.mmapsFolder}");
-                AmeisenNav = new AmeisenNav(settings.mmapsFolder);
-                StopServer = false;
+                ColoredPrint(">> MMAP folder missing, edit folder in config.json...", ConsoleColor.Red);
+                Console.ReadKey();
+            }
+            else 
+            {
+                AmeisenNav = new AmeisenNav(settings.MmapsFolder);
 
-                if (settings.preloadMaps.Length > 0)
+                if (settings.PreloadMaps.Length > 0)
                 {
-                    Console.WriteLine($">> Preloading Maps");
-                    foreach (int i in settings.preloadMaps)
-                    {
-                        AmeisenNav.LoadMap(i);
-                    }
-                    Console.WriteLine($">> Preloaded {settings.preloadMaps.Length} Maps");
+                    PreloadMaps(settings);
                 }
 
-                TcpListener = new TcpListener(IPAddress.Parse(settings.ipAddress), settings.port);
+                TcpListener = new TcpListener(IPAddress.Parse(settings.IpAddress), settings.Port);
                 TcpListener.Start();
 
-                Console.ForegroundColor = ConsoleColor.Green;
-                Console.WriteLine($">> Server running ({settings.ipAddress}:{settings.port}) press Ctrl + C to exit");
-                Console.ResetColor();
+                ColoredPrint($">> Server running on {settings.IpAddress}:{settings.Port} press Ctrl + C to exit...", ConsoleColor.Green);
+
                 EnterServerLoop();
 
+                // cleanup after server stopped
                 AmeisenNav.Dispose();
             }
-
-            // Debug stuff
-            /*float[] start = { -8826.562500f, -371.839752f, 71.638428f };
-            float[] end = { -8847.150391f, -387.518677f, 72.575912f };
-            float[] tileLoc = { -8918.406250f, -130.297256f, 80.906364f };
-
-            List<Vector3> Path = GetPath(start, tileLoc);
-            string json_path = JsonConvert.SerializeObject(Path);
-
-            Console.WriteLine($"Path contains {Path.Count} Nodes");
-            Console.WriteLine($"Path json {json_path}");
-            Console.ReadKey();*/
         }
 
-        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int map_id, TcpClient client)
+        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId)
         {
             int pathSize;
-            float[] path_raw = new float[1024 * 3];
-            List<Vector3> Path = new List<Vector3>();
+            List<Vector3> path = new List<Vector3>();
 
-            Stopwatch sw = new Stopwatch();
-            sw.Start();
             unsafe
             {
-                path_raw = AmeisenNav.GetPath(map_id, start.X, start.Y, start.Z, end.X, end.Y, end.Z, &pathSize);
-            }
-            sw.Stop();
+                fixed (float* pStart = start.ToArray())
+                fixed (float* pEnd = end.ToArray())
+                {
+                    float* path_raw = AmeisenNav.GetPath(mapId, pStart, pEnd, &pathSize);
 
-            Console.ForegroundColor = ConsoleColor.Cyan;
-            Console.Write($">> {client.Client.RemoteEndPoint}");
-
-            Console.ResetColor();
-            Console.Write(": Pathfinding took ");
-
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.Write($"{sw.ElapsedMilliseconds} ");
-
-            Console.ResetColor();
-            Console.WriteLine("ms");
-
-            for (int i = 0; i < pathSize * 3; i += 3)
-            {
-                Path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
+                    // postprocess the raw path to a list of Vector3
+                    // the raw path looks like this:
+                    // [ x1, y1, z1, x2, y2, z2, ...]
+                    for (int i = 0; i < pathSize * 3; i += 3)
+                    {
+                        path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
+                    }
+                }
             }
 
-            return Path;
+            return path;
         }
 
         public static void EnterServerLoop()
@@ -156,50 +96,112 @@ namespace AmeisenNavigation.Server
             }
         }
 
-        public static void HandleClient(object obj)
+        public static void HandleClient(TcpClient client)
         {
-            TcpClient client = (TcpClient)obj;
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($">> New Client: {client.Client.RemoteEndPoint}");
-            Console.ResetColor();
+            ColoredPrint($">> New Client: {client.Client.RemoteEndPoint}", ConsoleColor.Green);
 
-            StreamWriter sWriter = new StreamWriter(client.GetStream(), Encoding.ASCII);
-            StreamReader sReader = new StreamReader(client.GetStream(), Encoding.ASCII);
+            StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII);
+            StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII);
 
             bool isClientConnected = true;
-            string rawData;
-            string rawPath;
-            PathRequest pathRequest;
+            Interlocked.Increment(ref clientCount);
+            UpdateConnectedClientCount();
 
             while (isClientConnected)
             {
                 try
                 {
-                    rawData = sReader.ReadLine().Replace("&gt;", "");
-                    //Console.WriteLine($">> {client.Client.RemoteEndPoint} sent data: {rawData}");
+                    string rawData = reader.ReadLine().Replace("&gt;", string.Empty);
+                    PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
-                    pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
+                    List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
 
-                    List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, client);
-                    rawPath = JsonConvert.SerializeObject(path);
-
-                    sWriter.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
-                    sWriter.Flush();
+                    writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
+                    writer.Flush();
                 }
                 catch (Exception e)
                 {
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.Write(">> Error at client: ");
-                    Console.ResetColor();
-                    Console.WriteLine($"{client.Client.RemoteEndPoint}");
+                    string errorMsg = $"[{DateTime.Now.ToShortTimeString()}]>> {e.GetType()} occured at client ";
+                    ColoredPrint(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}");
+
                     try
                     {
-                        File.AppendAllText(errorPath, e.ToString() + "\n");
+                        File.AppendAllText(ErrorPath, $"{errorMsg} \n{e}\n");
                     }
-                    catch { }
+                    catch
+                    {
+                        // ignored, if we cant write to the log what should we do?
+                    }
+
                     isClientConnected = false;
                 }
             }
+
+            Interlocked.Decrement(ref clientCount);
+            UpdateConnectedClientCount();
+        }
+
+        public static void ColoredPrint(string s, ConsoleColor color, string uncoloredOutput = "")
+        {
+            Console.ForegroundColor = color;
+            Console.Write(s);
+            Console.ResetColor();
+            Console.WriteLine(uncoloredOutput);
+        }
+
+        private static void PrintHeader()
+        {
+            string version = System.Reflection.Assembly.GetEntryAssembly().GetName().Version.ToString();
+            Console.WriteLine(@"    ___                   _                 _   __           ");
+            Console.WriteLine(@"   /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __");
+            Console.WriteLine(@"  / /| | / __ `__ \/ _ \/ / ___/ _ \/ __ \/  |/ / __ `/ | / /");
+            Console.WriteLine(@" / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / ");
+            Console.WriteLine(@"/_/  |_/_/ /_/ /_/\___/_/____/\___/_/ /_/_/ |_/\__,_/ |___/  ");
+            Console.Write($"                                        Server ");
+            ColoredPrint(version, ConsoleColor.Yellow);
+            Console.WriteLine();
+        }
+
+        private static void PreloadMaps(Settings settings)
+        {
+            Console.WriteLine(">> Preloading Maps...");
+            foreach (int i in settings.PreloadMaps)
+            {
+                AmeisenNav.LoadMap(i);
+            }
+
+            ColoredPrint($">> Preloaded {settings.PreloadMaps.Length} Maps", ConsoleColor.Green);
+        }
+
+        private static Settings LoadConfigFile()
+        {
+            Settings settings = null;
+
+            try
+            {
+                if (File.Exists(SettingsPath))
+                {
+                    settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(SettingsPath));
+                    ColoredPrint(">> Loaded config file", ConsoleColor.Green);
+                }
+                else
+                {
+                    settings = new Settings();
+                    File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
+                    Console.WriteLine(">> Created default config file");
+                }
+            }
+            catch (Exception ex)
+            {
+                ColoredPrint(">> Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString());
+            }
+
+            return settings;
+        }
+
+        private static void UpdateConnectedClientCount()
+        {
+            Console.Title = $"AmeisenNavigation Server - Connected Clients: [{clientCount}]";
         }
     }
 }
