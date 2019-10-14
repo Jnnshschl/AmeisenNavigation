@@ -17,18 +17,24 @@ namespace AmeisenNavigation.Server
         private static readonly string SettingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
         private static int clientCount = 0;
 
-        private static bool StopServer { get; set; } = false;
+        private static volatile bool stopServer = false;
 
         private static TcpListener TcpListener { get; set; }
 
         private static AmeisenNav AmeisenNav { get; set; }
 
+        private static Thread LoggingThread { get; set; }
+
+        private static Queue<LogEntry> LogQueue { get; set; }
+
         public static void Main()
         {
+            SetupLogging();
+
             UpdateConnectedClientCount();
             PrintHeader();
 
-            Console.WriteLine(BuildLog($"Loading: {SettingsPath}..."));
+            LogQueue.Enqueue(new LogEntry(BuildLog($"Loading: {SettingsPath}..."), ConsoleColor.White));
             Settings settings = LoadConfigFile();
 
             if (settings == null)
@@ -37,7 +43,7 @@ namespace AmeisenNavigation.Server
             }
             else if (!Directory.Exists(settings.MmapsFolder))
             {
-                ColoredPrint(BuildLog($"MMAP folder missing, edit folder in config.json..."), ConsoleColor.Red);
+                LogQueue.Enqueue(new LogEntry(BuildLog($"MMAP folder missing, edit folder in config.json..."), ConsoleColor.Red));
                 Console.ReadKey();
             }
             else
@@ -52,13 +58,21 @@ namespace AmeisenNavigation.Server
                 TcpListener = new TcpListener(IPAddress.Parse(settings.IpAddress), settings.Port);
                 TcpListener.Start();
 
-                ColoredPrint(BuildLog($"{settings.IpAddress}:{settings.Port} press Ctrl + C to exit..."), ConsoleColor.Green);
+                LogQueue.Enqueue(new LogEntry(BuildLog($"{settings.IpAddress}:{settings.Port} press Ctrl + C to exit..."), ConsoleColor.Green));
 
                 EnterServerLoop();
 
                 // cleanup after server stopped
                 AmeisenNav.Dispose();
             }
+        }
+
+        private static void SetupLogging()
+        {
+            LogQueue = new Queue<LogEntry>();
+            LoggingThread = new Thread(() => LoggingThreadRoutine());
+
+            LoggingThread.Start();
         }
 
         public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId)
@@ -88,7 +102,7 @@ namespace AmeisenNavigation.Server
 
         public static void EnterServerLoop()
         {
-            while (!StopServer)
+            while (!stopServer)
             {
                 TcpClient newClient = TcpListener.AcceptTcpClient();
                 Thread userThread = new Thread(new ThreadStart(() => HandleClient(newClient)));
@@ -98,7 +112,7 @@ namespace AmeisenNavigation.Server
 
         public static void HandleClient(TcpClient client)
         {
-            ColoredPrint(BuildLog($"New Client: {client.Client.RemoteEndPoint}"), ConsoleColor.Green);
+            LogQueue.Enqueue(new LogEntry(BuildLog($"New Client: {client.Client.RemoteEndPoint}"), ConsoleColor.Green));
 
             using (StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII))
             using (StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII))
@@ -125,7 +139,7 @@ namespace AmeisenNavigation.Server
                     catch (Exception e)
                     {
                         string errorMsg = BuildLog($"{e.GetType()} occured at client ");
-                        ColoredPrint(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}");
+                        LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}"));
 
                         try
                         {
@@ -156,8 +170,23 @@ namespace AmeisenNavigation.Server
         public static string BuildLog(string s)
             => $"[{DateTime.Now.ToLongTimeString()}] >> {s}";
 
+        public static void LoggingThreadRoutine()
+        {
+            while (!stopServer || LogQueue.Count > 0)
+            {
+                if (LogQueue.Count > 0)
+                {
+                    LogEntry logEntry = LogQueue.Dequeue();
+                    ColoredPrint(logEntry.ColoredPart, logEntry.Color, logEntry.UncoloredPart);
+                }
+
+                Thread.Sleep(1);
+            }
+        }
+
         private static void PrintHeader()
         {
+            Console.ForegroundColor = ConsoleColor.White;
             string version = System.Reflection.Assembly.GetEntryAssembly().GetName().Version.ToString();
             Console.WriteLine(@"    ___                   _                 _   __           ");
             Console.WriteLine(@"   /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __");
@@ -165,8 +194,10 @@ namespace AmeisenNavigation.Server
             Console.WriteLine(@" / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / ");
             Console.WriteLine(@"/_/  |_/_/ /_/ /_/\___/_/____/\___/_/ /_/_/ |_/\__,_/ |___/  ");
             Console.Write($"                                        Server ");
-            ColoredPrint(version, ConsoleColor.Yellow);
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine(version);
             Console.WriteLine();
+            Console.ResetColor();
         }
 
         private static void PreloadMaps(Settings settings)
@@ -177,7 +208,7 @@ namespace AmeisenNavigation.Server
                 AmeisenNav.LoadMap(i);
             }
 
-            ColoredPrint(BuildLog($"Preloaded {settings.PreloadMaps.Length} Maps"), ConsoleColor.Green);
+            LogQueue.Enqueue(new LogEntry(BuildLog($"Preloaded {settings.PreloadMaps.Length} Maps"), ConsoleColor.Green));
         }
 
         private static Settings LoadConfigFile()
@@ -195,18 +226,18 @@ namespace AmeisenNavigation.Server
                         settings.MmapsFolder += "/";
                     }
 
-                    ColoredPrint(BuildLog($"Loaded config file"), ConsoleColor.Green);
+                    LogQueue.Enqueue(new LogEntry(BuildLog($"Loaded config file"), ConsoleColor.Green));
                 }
                 else
                 {
                     settings = new Settings();
                     File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
-                    Console.WriteLine(BuildLog($"Created default config file"));
+                    LogQueue.Enqueue(new LogEntry(BuildLog($"Created default config file"), ConsoleColor.White));
                 }
             }
             catch (Exception ex)
             {
-                ColoredPrint(BuildLog($"Failed to parse config.json...\n"), ConsoleColor.Red, ex.ToString());
+                LogQueue.Enqueue(new LogEntry(BuildLog($"Failed to parse config.json...\n"), ConsoleColor.Red, ex.ToString()));
             }
 
             return settings;

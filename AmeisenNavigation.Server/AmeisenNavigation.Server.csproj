@@ -67,6 +67,7 @@
     <Reference Include="System.Xml" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="Objects\LogEntry.cs" />
     <Compile Include="Objects\PathRequest.cs" />
     <Compile Include="Objects\Settings.cs" />
     <Compile Include="Objects\Vector3.cs" />
