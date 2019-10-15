@@ -1,8 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 
 namespace AmeisenNavigation.Server.Objects
 {
@@ -14,11 +10,14 @@ namespace AmeisenNavigation.Server.Objects
 
         public ConsoleColor Color { get; set; }
 
-        public LogEntry(string coloredPart, ConsoleColor color, string uncoloredPart = "")
+        public LogLevel LogLevel { get; set; }
+
+        public LogEntry(string coloredPart, ConsoleColor color, string uncoloredPart = "", LogLevel logLevel = LogLevel.INFO)
         {
             ColoredPart = coloredPart;
             Color = color;
             UncoloredPart = uncoloredPart;
+            LogLevel = logLevel;
         }
     }
 }

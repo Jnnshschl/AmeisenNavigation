@@ -7,7 +7,7 @@
     <ProjectGuid>{94DD9098-C900-4E3B-8D06-01157198914E}</ProjectGuid>
     <OutputType>Exe</OutputType>
     <RootNamespace>AmeisenNavigation.Server</RootNamespace>
-    <AssemblyName>AmeisenNavigation.Server</AssemblyName>
+    <AssemblyName>AmeisenNavServer</AssemblyName>
     <TargetFrameworkVersion>v4.7.2</TargetFrameworkVersion>
     <FileAlignment>512</FileAlignment>
     <AutoGenerateBindingRedirects>true</AutoGenerateBindingRedirects>
@@ -68,6 +68,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Objects\LogEntry.cs" />
+    <Compile Include="Objects\LogLevel.cs" />
     <Compile Include="Objects\PathRequest.cs" />
     <Compile Include="Objects\Settings.cs" />
     <Compile Include="Objects\Vector3.cs" />

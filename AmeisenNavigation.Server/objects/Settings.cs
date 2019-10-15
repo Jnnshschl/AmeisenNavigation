@@ -1,3 +1,5 @@
+using System;
+using AmeisenNavigation.Server.Objects;
 using Newtonsoft.Json;
 
 public class Settings
@@ -13,4 +15,16 @@ public class Settings
 
     [JsonProperty("preloadMaps")]
     public int[] PreloadMaps { get; set; } = { };
+
+    [JsonProperty("logToFile")]
+    public bool LogToFile { get; set; } = false;
+
+    [JsonProperty("removeOldLog")]
+    public bool RemoveOldLog { get; set; } = true;
+
+    [JsonProperty("logFilePath")]
+    public string LogFilePath { get; set; } = AppDomain.CurrentDomain.BaseDirectory + "log.txt";
+
+    [JsonProperty("logLevel")]
+    public LogLevel LogLevel { get; set; } = LogLevel.DEBUG;
 }

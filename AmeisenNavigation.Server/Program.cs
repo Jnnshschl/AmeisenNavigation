@@ -1,13 +1,14 @@
-﻿using System;
+﻿using AmeisenNavigation.Server.Objects;
+using AmeisenNavigationWrapper;
+using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
-using AmeisenNavigation.Server.Objects;
-using AmeisenNavigationWrapper;
-using Newtonsoft.Json;
 
 namespace AmeisenNavigation.Server
 {
@@ -17,7 +18,7 @@ namespace AmeisenNavigation.Server
         private static readonly string SettingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
         private static int clientCount = 0;
 
-        private static volatile bool stopServer = false;
+        private static bool stopServer = false;
 
         private static TcpListener TcpListener { get; set; }
 
@@ -27,38 +28,44 @@ namespace AmeisenNavigation.Server
 
         private static Queue<LogEntry> LogQueue { get; set; }
 
+        private static Settings Settings { get; set; }
+
         public static void Main()
         {
+            // buggy need to find a beter way
+            //// Console.CancelKeyPress += Console_CancelKeyPress;
+
+            PrintHeader();
+
+            LogQueue = new Queue<LogEntry>();
+            Settings = LoadConfigFile();
+
             SetupLogging();
 
             UpdateConnectedClientCount();
-            PrintHeader();
 
-            LogQueue.Enqueue(new LogEntry(BuildLog($"Loading: {SettingsPath}..."), ConsoleColor.White));
-            Settings settings = LoadConfigFile();
-
-            if (settings == null)
+            if (Settings == null)
             {
                 Console.ReadKey();
             }
-            else if (!Directory.Exists(settings.MmapsFolder))
+            else if (!Directory.Exists(Settings.MmapsFolder))
             {
-                LogQueue.Enqueue(new LogEntry(BuildLog($"MMAP folder missing, edit folder in config.json..."), ConsoleColor.Red));
+                LogQueue.Enqueue(new LogEntry($"MMAP folder missing, edit folder in config.json...", ConsoleColor.Red, string.Empty, LogLevel.ERROR));
                 Console.ReadKey();
             }
             else
             {
-                AmeisenNav = new AmeisenNav(settings.MmapsFolder);
+                AmeisenNav = new AmeisenNav(Settings.MmapsFolder);
 
-                if (settings.PreloadMaps.Length > 0)
+                if (Settings.PreloadMaps.Length > 0)
                 {
-                    PreloadMaps(settings);
+                    PreloadMaps();
                 }
 
-                TcpListener = new TcpListener(IPAddress.Parse(settings.IpAddress), settings.Port);
+                TcpListener = new TcpListener(IPAddress.Parse(Settings.IpAddress), Settings.Port);
                 TcpListener.Start();
 
-                LogQueue.Enqueue(new LogEntry(BuildLog($"{settings.IpAddress}:{settings.Port} press Ctrl + C to exit..."), ConsoleColor.Green));
+                LogQueue.Enqueue(new LogEntry($"{Settings.IpAddress}:{Settings.Port} press Ctrl + C to exit...", ConsoleColor.Green, string.Empty, LogLevel.MASTER));
 
                 EnterServerLoop();
 
@@ -67,18 +74,27 @@ namespace AmeisenNavigation.Server
             }
         }
 
+        private static void Console_CancelKeyPress(object sender, ConsoleCancelEventArgs e)
+        {
+            LogQueue.Enqueue(new LogEntry($"Stopping server...", ConsoleColor.Red, string.Empty, LogLevel.MASTER));
+            stopServer = true;
+            TcpListener.Stop();
+            e.Cancel = true;
+        }
+
         private static void SetupLogging()
         {
-            LogQueue = new Queue<LogEntry>();
             LoggingThread = new Thread(() => LoggingThreadRoutine());
-
             LoggingThread.Start();
         }
 
-        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId)
+        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId, string clientIp)
         {
             int pathSize;
             List<Vector3> path = new List<Vector3>();
+
+            Stopwatch sw = new Stopwatch();
+            sw.Start();
 
             unsafe
             {
@@ -97,6 +113,9 @@ namespace AmeisenNavigation.Server
                 }
             }
 
+            sw.Stop();
+            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"Building Path with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms", LogLevel.INFO));
+
             return path;
         }
 
@@ -104,15 +123,26 @@ namespace AmeisenNavigation.Server
         {
             while (!stopServer)
             {
-                TcpClient newClient = TcpListener.AcceptTcpClient();
-                Thread userThread = new Thread(new ThreadStart(() => HandleClient(newClient)));
-                userThread.Start();
+                try
+                {
+                    TcpClient newClient = TcpListener.AcceptTcpClient();
+                    Thread userThread = new Thread(new ThreadStart(() => HandleClient(newClient)));
+                    userThread.Start();
+                }
+                catch (Exception e)
+                {
+                    if (!stopServer)
+                    {
+                        string errorMsg = $"{e.GetType()} occured while at the TcpListener\n";
+                        LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, e.ToString(), LogLevel.ERROR));
+                    }
+                }
             }
         }
 
         public static void HandleClient(TcpClient client)
         {
-            LogQueue.Enqueue(new LogEntry(BuildLog($"New Client: {client.Client.RemoteEndPoint}"), ConsoleColor.Green));
+            LogQueue.Enqueue(new LogEntry($"Client connected: {client.Client.RemoteEndPoint}", ConsoleColor.Cyan));
 
             using (StreamReader reader = new StreamReader(client.GetStream(), Encoding.ASCII))
             using (StreamWriter writer = new StreamWriter(client.GetStream(), Encoding.ASCII))
@@ -130,7 +160,7 @@ namespace AmeisenNavigation.Server
                         {
                             PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
-                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId);
+                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, client.Client.RemoteEndPoint.ToString());
 
                             writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
                             writer.Flush();
@@ -138,17 +168,8 @@ namespace AmeisenNavigation.Server
                     }
                     catch (Exception e)
                     {
-                        string errorMsg = BuildLog($"{e.GetType()} occured at client ");
-                        LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}"));
-
-                        try
-                        {
-                            File.AppendAllText(ErrorPath, $"{errorMsg} \n{e}\n");
-                        }
-                        catch
-                        {
-                            // ignored, if we cant write to the log what should we do?
-                        }
+                        string errorMsg = $"{e.GetType()} occured at client ";
+                        LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
 
                         isClientConnected = false;
                     }
@@ -156,19 +177,24 @@ namespace AmeisenNavigation.Server
 
                 Interlocked.Decrement(ref clientCount);
                 UpdateConnectedClientCount();
+                LogQueue.Enqueue(new LogEntry($"Client disconnected: ", ConsoleColor.Cyan, client.Client.RemoteEndPoint.ToString()));
             }
         }
 
-        public static void ColoredPrint(string s, ConsoleColor color, string uncoloredOutput = "")
+        public static string ColoredPrint(string s, ConsoleColor color, string uncoloredOutput = "", LogLevel logLevel = LogLevel.INFO)
         {
+            string logString = BuildLog(s, logLevel);
+
             Console.ForegroundColor = color;
-            Console.Write(s);
+            Console.Write(logString);
             Console.ResetColor();
             Console.WriteLine(uncoloredOutput);
+
+            return $"{logString}{uncoloredOutput}";
         }
 
-        public static string BuildLog(string s)
-            => $"[{DateTime.Now.ToLongTimeString()}] >> {s}";
+        public static string BuildLog(string s, LogLevel logLevel)
+            => $"[{DateTime.Now.ToLongTimeString()}] {$"[{logLevel.ToString()}]".PadRight(9)} >> {s}";
 
         public static void LoggingThreadRoutine()
         {
@@ -177,7 +203,21 @@ namespace AmeisenNavigation.Server
                 if (LogQueue.Count > 0)
                 {
                     LogEntry logEntry = LogQueue.Dequeue();
-                    ColoredPrint(logEntry.ColoredPart, logEntry.Color, logEntry.UncoloredPart);
+                    if (logEntry.LogLevel >= Settings.LogLevel)
+                    {
+                        string logString = ColoredPrint(logEntry.ColoredPart, logEntry.Color, logEntry.UncoloredPart, logEntry.LogLevel);
+                        if (Settings.LogToFile)
+                        {
+                            try
+                            {
+                                File.AppendAllText(Settings.LogFilePath, logString);
+                            }
+                            catch
+                            {
+                                // ignored, if we cant write to file we cant log it lmao
+                            }
+                        }
+                    }
                 }
 
                 Thread.Sleep(1);
@@ -200,15 +240,16 @@ namespace AmeisenNavigation.Server
             Console.ResetColor();
         }
 
-        private static void PreloadMaps(Settings settings)
+        private static void PreloadMaps()
         {
-            Console.WriteLine(BuildLog($"Preloading Maps..."));
-            foreach (int i in settings.PreloadMaps)
+            LogQueue.Enqueue(new LogEntry($"Preloading Maps: ", ConsoleColor.Green, JsonConvert.SerializeObject(Settings.PreloadMaps), LogLevel.DEBUG));
+            foreach (int i in Settings.PreloadMaps)
             {
                 AmeisenNav.LoadMap(i);
+                LogQueue.Enqueue(new LogEntry($"Preloaded Map: ", ConsoleColor.Green, i.ToString(), LogLevel.DEBUG));
             }
 
-            LogQueue.Enqueue(new LogEntry(BuildLog($"Preloaded {settings.PreloadMaps.Length} Maps"), ConsoleColor.Green));
+            LogQueue.Enqueue(new LogEntry($"Preloaded {Settings.PreloadMaps.Length} Maps", ConsoleColor.Green, string.Empty, LogLevel.DEBUG));
         }
 
         private static Settings LoadConfigFile()
@@ -226,21 +267,49 @@ namespace AmeisenNavigation.Server
                         settings.MmapsFolder += "/";
                     }
 
-                    LogQueue.Enqueue(new LogEntry(BuildLog($"Loaded config file"), ConsoleColor.Green));
+                    if (settings.LogToFile)
+                    {
+                        CheckForLogFileExistence();
+                    }
+
+                    LogQueue.Enqueue(new LogEntry($"Loaded config file", ConsoleColor.Green));
                 }
                 else
                 {
                     settings = new Settings();
                     File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
-                    LogQueue.Enqueue(new LogEntry(BuildLog($"Created default config file"), ConsoleColor.White));
+                    LogQueue.Enqueue(new LogEntry($"Created default config file", ConsoleColor.White));
                 }
             }
             catch (Exception ex)
             {
-                LogQueue.Enqueue(new LogEntry(BuildLog($"Failed to parse config.json...\n"), ConsoleColor.Red, ex.ToString()));
+                LogQueue.Enqueue(new LogEntry($"Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString(), LogLevel.ERROR));
             }
 
             return settings;
+        }
+
+        private static void CheckForLogFileExistence()
+        {
+            // create the directory if needed
+            if (!Directory.Exists(Settings.LogFilePath))
+            {
+                Directory.CreateDirectory(Settings.LogFilePath);
+
+                // create the file if needed
+                if (!File.Exists(Settings.LogFilePath))
+                {
+                    File.Create(Settings.LogFilePath);
+                }
+                else
+                {
+                    // remove old logs if configured
+                    if (Settings.RemoveOldLog)
+                    {
+                        File.Delete(Settings.LogFilePath);
+                    }
+                }
+            }
         }
 
         private static void UpdateConnectedClientCount()

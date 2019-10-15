@@ -1,8 +1,0 @@
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/CMakeFiles/edit_cache.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/CMakeFiles/rebuild_cache.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/Detour/CMakeFiles/Detour.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/Detour/CMakeFiles/edit_cache.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/Detour/CMakeFiles/rebuild_cache.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/Recast/CMakeFiles/Recast.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/Recast/CMakeFiles/edit_cache.dir
-C:/Users/Jannis/source/repos/AmeisenNavigation/recastnavigation/out/build/x64-Debug/Recast/CMakeFiles/rebuild_cache.dir
