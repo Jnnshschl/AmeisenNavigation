@@ -1,40 +1,29 @@
-# Copyright (C) 2008-2018 TrinityCore <https://www.trinitycore.org/>
-#
-# This file is free software; as a special exception the author gives
-# unlimited permission to copy and/or distribute it, with or without
-# modifications, as long as this notice is preserved.
-#
-# This program is distributed in the hope that it will be useful, but
-# WITHOUT ANY WARRANTY, to the extent permitted by law; without even the
-# implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+file(GLOB SOURCES Source/*.cpp)
 
-set(Recast_STAT_SRCS
-    Source/Recast.cpp 
-    Source/RecastAlloc.cpp 
-	Source/RecastAssert.cpp 
-    Source/RecastArea.cpp 
-    Source/RecastContour.cpp 
-    Source/RecastFilter.cpp 
-    Source/RecastLayers.cpp
-    Source/RecastMesh.cpp 
-    Source/RecastMeshDetail.cpp 
-    Source/RecastRasterization.cpp 
-    Source/RecastRegion.cpp 
+if (RECASTNAVIGATION_STATIC)
+    add_library(Recast STATIC ${SOURCES})
+else ()
+    add_library(Recast SHARED ${SOURCES})
+endif ()
+
+add_library(RecastNavigation::Recast ALIAS Recast)
+
+set(Recast_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Include")
+
+target_include_directories(Recast PUBLIC
+    "$<BUILD_INTERFACE:${Recast_INCLUDE_DIR}>"
 )
 
-add_library(Recast STATIC ${Recast_STAT_SRCS})
+set_target_properties(Recast PROPERTIES
+        SOVERSION ${SOVERSION}
+        VERSION ${VERSION}
+        )
 
-target_include_directories(Recast
-  PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/Include)
+install(TARGETS Recast
+        ARCHIVE DESTINATION lib
+        LIBRARY DESTINATION lib
+        COMPONENT library
+        )
 
-target_link_libraries(Recast
-  PRIVATE
-    trinity-dependency-interface
-  PUBLIC
-    zlib)
-
-set_target_properties(Recast
-    PROPERTIES
-      FOLDER
-        "dep")
+file(GLOB INCLUDES Include/*.h)
+install(FILES ${INCLUDES} DESTINATION include)

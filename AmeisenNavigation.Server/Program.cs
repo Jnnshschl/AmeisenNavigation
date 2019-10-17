@@ -1,4 +1,5 @@
 ﻿using AmeisenNavigation.Server.Objects;
+using AmeisenNavigation.Server.Transformations;
 using AmeisenNavigationWrapper;
 using Newtonsoft.Json;
 using System;
@@ -88,7 +89,7 @@ namespace AmeisenNavigation.Server
             LoggingThread.Start();
         }
 
-        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId, string clientIp)
+        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId, PathRequestFlags flags, string clientIp)
         {
             int pathSize;
             List<Vector3> path = new List<Vector3>();
@@ -111,6 +112,11 @@ namespace AmeisenNavigation.Server
                         path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
                     }
                 }
+            }
+
+            if (flags.HasFlag(PathRequestFlags.ChaikinCurve))
+            {
+                path = ChaikinCurve.Perform(path);
             }
 
             sw.Stop();
@@ -160,7 +166,7 @@ namespace AmeisenNavigation.Server
                         {
                             PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
-                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, client.Client.RemoteEndPoint.ToString());
+                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, pathRequest.Flags, client.Client.RemoteEndPoint.ToString());
 
                             writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
                             writer.Flush();
