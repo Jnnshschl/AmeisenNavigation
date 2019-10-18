@@ -119,6 +119,8 @@ public:
 
 };
 
+
+
 /// Provides information about raycast hit
 /// filled by dtNavMeshQuery::raycast
 /// @ingroup detour
