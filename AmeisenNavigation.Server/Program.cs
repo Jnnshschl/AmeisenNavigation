@@ -15,9 +15,9 @@ namespace AmeisenNavigation.Server
 {
     internal static class Program
     {
-        private static readonly string ErrorPath = AppDomain.CurrentDomain.BaseDirectory + "errors.txt";
         private static readonly string SettingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
         private static int clientCount = 0;
+        private static readonly object maplock = new object();
 
         private static bool stopServer = false;
 
@@ -56,7 +56,7 @@ namespace AmeisenNavigation.Server
             }
             else
             {
-                AmeisenNav = new AmeisenNav(Settings.MmapsFolder);
+                AmeisenNav = new AmeisenNav(Settings.MmapsFolder.Replace('/', '\\'));
 
                 if (Settings.PreloadMaps.Length > 0)
                 {
@@ -96,6 +96,14 @@ namespace AmeisenNavigation.Server
 
             Stopwatch sw = new Stopwatch();
             sw.Start();
+
+            lock (maplock)
+            {
+                if (!AmeisenNav.IsMapLoaded(mapId))
+                {
+                    AmeisenNav.LoadMap(mapId);
+                }
+            }
 
             unsafe
             {
@@ -161,7 +169,7 @@ namespace AmeisenNavigation.Server
                 {
                     try
                     {
-                        string rawData = reader.ReadLine()?.Replace("&gt;", string.Empty);
+                        string rawData = reader.ReadLine().Replace("&gt;", string.Empty);
                         if (!string.IsNullOrEmpty(rawData))
                         {
                             PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);

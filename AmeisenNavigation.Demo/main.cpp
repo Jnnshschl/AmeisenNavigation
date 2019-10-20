@@ -3,7 +3,7 @@
 
 int main()
 {
-	std::string mmap_dir = "C:\\mmaps\\";
+	std::string mmap_dir = "H:\\WoW Stuff\\3.3.5a mmaps\\";
 	int map_id = 0;
 
 	AmeisenNavigation* ameisen_nav = new AmeisenNavigation(mmap_dir);

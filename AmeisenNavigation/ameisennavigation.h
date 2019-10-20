@@ -44,9 +44,10 @@ struct MmapTileHeader {
 class AmeisenNavigation {
 private:
 	std::string _mmap_dir;
-	std::map<int, dtNavMesh*> _meshmap;
-	std::map<int, dtNavMeshQuery*> _querymap;
-	std::map<int, bool> _loadingmap;
+	std::map<int, dtNavMesh*> _mesh_map;
+	std::map<int, dtNavMeshQuery*> _query_map;
+	std::map<int, bool> _loading_map;
+
 	dtQueryFilter _filter;
 
 	std::string format_trailing_zeros(int number, int total_count);
@@ -61,5 +62,8 @@ public:
 	dtPolyRef GetNearestPoly(int map_id, float* pos, float* closest_point);
 
 	bool LoadMmapsForContinent(int map_id);
+	bool IsMapLoaded(int map_id);
+	bool IsMapLoadingInProgress(int map_id);
 };
+
 #endif

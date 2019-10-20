@@ -46,6 +46,11 @@ namespace AmeisenNavigationWrapper
 			ameisen_nav->LoadMmapsForContinent(map_id);
 		}
 
+		bool IsMapLoaded(int map_id)
+		{
+			return !ameisen_nav->IsMapLoaded(map_id);
+		}
+
 		/// <summary>
 		/// Use this method if you dont want to mess around 
 		/// with an unsafe pointer in your code, the path
