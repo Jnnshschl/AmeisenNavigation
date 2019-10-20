@@ -103,21 +103,21 @@ namespace AmeisenNavigation.Server
                 {
                     AmeisenNav.LoadMap(mapId);
                 }
-            }
 
-            unsafe
-            {
-                fixed (float* pointerStart = start.ToArray())
-                fixed (float* pointerEnd = end.ToArray())
+                unsafe
                 {
-                    float* path_raw = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
-
-                    // postprocess the raw path to a list of Vector3
-                    // the raw path looks like this:
-                    // [ x1, y1, z1, x2, y2, z2, ...]
-                    for (int i = 0; i < pathSize * 3; i += 3)
+                    fixed (float* pointerStart = start.ToArray())
+                    fixed (float* pointerEnd = end.ToArray())
                     {
-                        path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
+                        float* path_raw = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
+
+                        // postprocess the raw path to a list of Vector3
+                        // the raw path looks like this:
+                        // [ x1, y1, z1, x2, y2, z2, ...]
+                        for (int i = 0; i < pathSize * 3; i += 3)
+                        {
+                            path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
+                        }
                     }
                 }
             }
@@ -313,7 +313,7 @@ namespace AmeisenNavigation.Server
                 // create the file if needed
                 if (!File.Exists(Settings.LogFilePath))
                 {
-                    File.Create(Settings.LogFilePath);
+                    File.Create(Settings.LogFilePath).Close();
                 }
                 else
                 {
