@@ -1,4 +1,6 @@
-﻿namespace AmeisenNavigation.Server.Objects
+﻿using System;
+
+namespace AmeisenNavigation.Server.Objects
 {
     public struct Vector3
     {
@@ -8,6 +10,8 @@
             Y = y;
             Z = z;
         }
+
+        public static Vector3 Zero = new Vector3(0, 0, 0);
 
         public float X { get; set; }
 
@@ -19,6 +23,12 @@
         {
             return left.Equals(right);
         }
+
+        public static Vector3 operator +(Vector3 a, Vector3 b)
+            => new Vector3(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
+
+        public static Vector3 operator -(Vector3 a, Vector3 b)
+            => new Vector3(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
 
         public static bool operator !=(Vector3 left, Vector3 right)
         {
@@ -54,5 +64,13 @@
                 return (int)(17 + (X * 23) + (Y * 23) + (Z * 23));
             }
         }
+
+        public double GetDistance(Vector3 b)
+            => Math.Sqrt(((X - b.X) * (X - b.X))
+                       + ((Y - b.Y) * (Y - b.Y))
+                       + ((Z - b.Z) * (Z - b.Z)));
+
+        public double GetDistance2D(Vector3 b)
+            => Math.Sqrt(Math.Pow(X - b.X, 2) + Math.Pow(Y - b.Y, 2));
     }
 }

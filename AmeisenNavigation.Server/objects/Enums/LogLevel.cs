@@ -1,4 +1,4 @@
-﻿namespace AmeisenNavigation.Server.Objects
+﻿namespace AmeisenNavigation.Server.Objects.Enums
 {
     public enum LogLevel
     {

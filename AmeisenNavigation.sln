@@ -6,6 +6,9 @@ MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "recastnavigation", "recastnavigation\recastnavigation.vcxproj", "{E1E5031F-CCFD-45B9-9DB1-57050AABCCFA}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation", "AmeisenNavigation\AmeisenNavigation.Server.vcxproj", "{DBB5FF6E-3829-4045-875F-F35A7CBC9ECA}"
+	ProjectSection(ProjectDependencies) = postProject
+		{E1E5031F-CCFD-45B9-9DB1-57050AABCCFA} = {E1E5031F-CCFD-45B9-9DB1-57050AABCCFA}
+	EndProjectSection
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AmeisenNavigation.Server", "AmeisenNavigation.Server\AmeisenNavigation.Server.csproj", "{94DD9098-C900-4E3B-8D06-01157198914E}"
 EndProject

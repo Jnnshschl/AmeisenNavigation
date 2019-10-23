@@ -1,5 +1,5 @@
 using System;
-using AmeisenNavigation.Server.Objects;
+using AmeisenNavigation.Server.Objects.Enums;
 using Newtonsoft.Json;
 
 public class Settings

@@ -1,4 +1,5 @@
 ﻿using System;
+using AmeisenNavigation.Server.Objects.Enums;
 
 namespace AmeisenNavigation.Server.Objects
 {

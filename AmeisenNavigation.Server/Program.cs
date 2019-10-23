@@ -1,4 +1,5 @@
 ﻿using AmeisenNavigation.Server.Objects;
+using AmeisenNavigation.Server.Objects.Enums;
 using AmeisenNavigation.Server.Transformations;
 using AmeisenNavigationWrapper;
 using Newtonsoft.Json;
@@ -120,6 +121,11 @@ namespace AmeisenNavigation.Server
                         }
                     }
                 }
+            }
+
+            if (flags.HasFlag(PathRequestFlags.NaturalSteeringBehavior))
+            {
+                path = NaturalSteeringBehavior.Perform(path);
             }
 
             if (flags.HasFlag(PathRequestFlags.ChaikinCurve))
