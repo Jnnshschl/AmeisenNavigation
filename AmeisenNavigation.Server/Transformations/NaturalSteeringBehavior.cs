@@ -7,7 +7,7 @@ namespace AmeisenNavigation.Server.Transformations
 {
     public class NaturalSteeringBehavior
     {
-        public static List<Vector3> Perform(List<Vector3> path, bool avoidObstacles = true, double distanceThreshold = 12.0, float maxVelocity = 1f)
+        public static List<Vector3> Perform(List<Vector3> path, bool avoidObstacles = true, double distanceThreshold = 12.0, float maxVelocity = 2f)
         {
             Random rnd = new Random();
             double rndDistanceDivider = (rnd.NextDouble() + 1) * 2.0;
@@ -58,7 +58,7 @@ namespace AmeisenNavigation.Server.Transformations
             return newPath;
         }
 
-        private static List<Obstacle> FindPossibleObstacles(List<Vector3> path, double maxAngle = Math.PI / 2.0)
+        private static List<Obstacle> FindPossibleObstacles(List<Vector3> path, double maxAngle = Math.PI / 4.0)
         {
             List<Obstacle> obstacles = new List<Obstacle>();
 

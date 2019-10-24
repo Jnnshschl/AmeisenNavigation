@@ -133,8 +133,10 @@ namespace AmeisenNavigation.Server
                 path = ChaikinCurve.Perform(path);
             }
 
+            path = NodeReduction.Perform(path);
+
             sw.Stop();
-            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"Building Path with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms", LogLevel.INFO));
+            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"Building Path with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
 
             return path;
         }
