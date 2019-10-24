@@ -10,6 +10,11 @@ namespace AmeisenNavigation.Server.Transformations
         {
             List<Vector3> newPath = new List<Vector3>();
 
+            if (path.Count < 3)
+            {
+                return newPath;
+            }
+            
             double lastAngleA = 0.0;
             double lastAngleB = 0.0;
 
