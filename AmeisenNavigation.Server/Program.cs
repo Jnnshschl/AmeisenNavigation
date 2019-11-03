@@ -4,6 +4,7 @@ using AmeisenNavigation.Server.Transformations;
 using AmeisenNavigationWrapper;
 using Newtonsoft.Json;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -28,7 +29,7 @@ namespace AmeisenNavigation.Server
 
         private static Thread LoggingThread { get; set; }
 
-        private static Queue<LogEntry> LogQueue { get; set; }
+        private static ConcurrentQueue<LogEntry> LogQueue { get; set; }
 
         private static Settings Settings { get; set; }
 
@@ -39,7 +40,7 @@ namespace AmeisenNavigation.Server
 
             PrintHeader();
 
-            LogQueue = new Queue<LogEntry>();
+            LogQueue = new ConcurrentQueue<LogEntry>();
             Settings = LoadConfigFile();
 
             SetupLogging();
@@ -133,7 +134,7 @@ namespace AmeisenNavigation.Server
                 path = ChaikinCurve.Perform(path);
             }
 
-            //path = NodeReduction.Perform(path);
+            //// bugged atm path = NodeReduction.Perform(path);
 
             sw.Stop();
             LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"Building Path with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
@@ -222,9 +223,8 @@ namespace AmeisenNavigation.Server
         {
             while (!stopServer || LogQueue.Count > 0)
             {
-                if (LogQueue.Count > 0)
+                if (LogQueue.TryDequeue(out LogEntry logEntry))
                 {
-                    LogEntry logEntry = LogQueue.Dequeue();
                     if (logEntry.LogLevel >= Settings.LogLevel)
                     {
                         string logString = ColoredPrint(logEntry.ColoredPart, logEntry.Color, logEntry.UncoloredPart, logEntry.LogLevel);
