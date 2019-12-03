@@ -19,17 +19,15 @@
 constexpr int MMAP_MAGIC = 0x4d4d4150;
 constexpr int MMAP_VERSION = 6;
 
+// #define DEBUG
+
 enum NavTerrain
 {
 	NAV_EMPTY = 0x00,
 	NAV_GROUND = 0x01,
 	NAV_MAGMA = 0x02,
 	NAV_SLIME = 0x04,
-	NAV_WATER = 0x08,
-	NAV_UNUSED1 = 0x10,
-	NAV_UNUSED2 = 0x20,
-	NAV_UNUSED3 = 0x40,
-	NAV_UNUSED4 = 0x80
+	NAV_WATER = 0x08
 };
 
 struct MmapTileHeader {
@@ -46,7 +44,6 @@ private:
 	std::string _mmap_dir;
 	std::map<int, dtNavMesh*> _mesh_map;
 	std::map<int, dtNavMeshQuery*> _query_map;
-	std::map<int, bool> _loading_map;
 
 	dtQueryFilter _filter;
 
@@ -63,7 +60,6 @@ public:
 
 	bool LoadMmapsForContinent(int map_id);
 	bool IsMapLoaded(int map_id);
-	bool IsMapLoadingInProgress(int map_id);
 };
 
 #endif
