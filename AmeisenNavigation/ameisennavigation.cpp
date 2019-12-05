@@ -1,11 +1,11 @@
 #include "ameisennavigation.h"
 
-AmeisenNavigation::AmeisenNavigation(std::string mmap_dir) 
+AmeisenNavigation::AmeisenNavigation(std::string mmap_dir)
 {
 	_mmap_dir = mmap_dir;
 }
 
-std::string AmeisenNavigation::format_trailing_zeros(int number, int total_count) 
+std::string AmeisenNavigation::format_trailing_zeros(int number, int total_count)
 {
 	std::stringstream ss;
 	ss << std::setw(total_count) << std::setfill('0') << number;
@@ -40,6 +40,11 @@ bool AmeisenNavigation::IsMapLoaded(int map_id)
 		&& _query_map[map_id] != nullptr;
 }
 
+float random_float()
+{
+	return static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+}
+
 void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** path, int* path_size)
 {
 	WoWToRDCoords(start);
@@ -51,11 +56,11 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 
 	if (!IsMapLoaded(map_id))
 	{
-		
+
 #ifdef DEBUG
 		std::cout << "-> Mesh for Continent " << map_id << " not loaded, loading it now\n\n";
 #endif		
-		
+
 		if (!LoadMmapsForContinent(map_id))
 		{
 			std::cout << "-> Mesh or Query could not be loaded\n";
@@ -74,8 +79,6 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	std::cout << "-> End Poly " << end_poly << " found " << closest_point_end[0] << " " << closest_point_end[1] << " " << closest_point_end[2] << " \n";
 #endif
 
-	dtPolyRef path_poly[1024];
-
 	// Raycast stuff, currently disabled. 
 	// Need to find a sweetspot to trust the raycast
 	// because if we use it across  ahole it may give
@@ -85,8 +88,9 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	//// float hit_normal[3];
 	//// memset(hit_normal, 0, sizeof(hit_normal));
 	//// _query_map[map_id]->raycast(start_poly, start, end, &_filter, &hit, hit_normal, path_poly, path_size, 1024);
-	
-	if (!dtStatusSucceed(_query_map[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, 1024)))
+
+	dtPolyRef path_poly[1024];
+	if (!dtStatusSucceed(_query_map[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, MAX_PATH_LENGHT)))
 	{
 #ifdef DEBUG
 		std::cout << "-> Path not found\n";
@@ -98,20 +102,26 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 #ifdef DEBUG
 		std::cout << "-> Path found: " << (*path_size) << " Nodes\n";
 #endif
-		float path_a[1024 * 3];
+
+		float path_a[MAX_PATH_LENGHT * 3];
+
+		dtPolyRef visited_polys[MAX_PATH_LENGHT];
+		float result_pos[3];
+
+		result_pos[0] = end[0];
+		result_pos[1] = end[1];
+		result_pos[2] = end[2];
+
 		for (int i = 0; i < (*path_size); ++i)
 		{
-			float closest_pos[3];
-			_query_map[map_id]->closestPointOnPoly(path_poly[i], start, closest_pos);
-			RDToWoWCoords(closest_pos);
+			float start_poly_pos[3];
+			_query_map[map_id]->closestPointOnPolyBoundary(path_poly[i], result_pos, result_pos);
 
-#ifdef DEBUG
-			std::cout << "-> Node " << i << " X: " << closest_pos_wow[0] << " Y: " << closest_pos_wow[1] << " Z: " << closest_pos_wow[2] << "\n";
-#endif
+			RDToWoWCoords(result_pos);
 
-			path_a[i * 3] = closest_pos[0];
-			path_a[i * 3 + 1] = closest_pos[1];
-			path_a[i * 3 + 2] = closest_pos[2];
+			path_a[i * 3] = result_pos[0];
+			path_a[i * 3 + 1] = result_pos[1];
+			path_a[i * 3 + 2] = result_pos[2];
 		}
 
 		(*path) = path_a;
@@ -165,7 +175,7 @@ bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 			}
 
 #ifdef DEBUG
-			std::cout << "--> Reading Tile " << mmaptile_filename.c_str() << "\n";
+			std::cout << "-> Reading Tile " << mmaptile_filename.c_str() << "\n";
 #endif
 
 			std::ifstream mmaptile_stream;
@@ -189,7 +199,7 @@ bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 	}
 
 	_query_map[map_id] = dtAllocNavMeshQuery();
-	if (dtStatusFailed(_query_map[map_id]->init(_mesh_map[map_id], 2048)))
+	if (dtStatusFailed(_query_map[map_id]->init(_mesh_map[map_id], MAX_PATH_LENGHT)))
 	{
 		std::cout << "-> Failed to built NavMeshQuery " << "\n";
 		dtFreeNavMeshQuery(_query_map[map_id]);

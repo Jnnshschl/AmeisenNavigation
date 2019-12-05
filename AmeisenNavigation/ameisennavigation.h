@@ -19,6 +19,8 @@
 constexpr int MMAP_MAGIC = 0x4d4d4150;
 constexpr int MMAP_VERSION = 6;
 
+constexpr int MAX_PATH_LENGHT = 1024;
+
 // #define DEBUG
 
 enum NavTerrain

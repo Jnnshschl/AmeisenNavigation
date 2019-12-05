@@ -48,7 +48,7 @@ namespace AmeisenNavigationWrapper
 
 		bool IsMapLoaded(int map_id)
 		{
-			return !ameisen_nav->IsMapLoaded(map_id);
+			return ameisen_nav->IsMapLoaded(map_id);
 		}
 
 		/// <summary>
