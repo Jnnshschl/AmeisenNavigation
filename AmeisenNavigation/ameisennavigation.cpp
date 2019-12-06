@@ -68,6 +68,8 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 	{
 		// same poly, we don't need pathfinding here
 		D(std::cout << ">> Start and End positions are on the same poly, returning end position\n";)
+		RDToWowCoords(end);
+
 		(*path_size) = 1;
 		(*path) = end;
 		return;
