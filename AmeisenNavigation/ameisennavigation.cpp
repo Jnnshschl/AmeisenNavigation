@@ -12,7 +12,7 @@ std::string AmeisenNavigation::format_trailing_zeros(int number, int total_count
 	return ss.str();
 }
 
-void AmeisenNavigation::RDToWoWCoords(float pos[])
+void AmeisenNavigation::RDToWowCoords(float pos[])
 {
 	float orig_x = pos[0];
 	float orig_y = pos[1];
@@ -23,7 +23,7 @@ void AmeisenNavigation::RDToWoWCoords(float pos[])
 	pos[2] = orig_y;
 }
 
-void AmeisenNavigation::WoWToRDCoords(float pos[])
+void AmeisenNavigation::WowToRDCoords(float pos[])
 {
 	float orig_x = pos[0];
 	float orig_y = pos[1];
@@ -40,92 +40,67 @@ bool AmeisenNavigation::IsMapLoaded(int map_id)
 		&& _query_map[map_id] != nullptr;
 }
 
-float random_float()
-{
-	return static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
-}
-
 void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** path, int* path_size)
 {
-	WoWToRDCoords(start);
-	WoWToRDCoords(end);
+	WowToRDCoords(start);
+	WowToRDCoords(end);
 
-#ifdef DEBUG
-	std::cout << "-> Generating Path (" << start[0] << "|" << start[1] << "|" << start[2] << ") -> (" << end[0] << "|" << end[1] << "|" << end[2] << ")\n";
-#endif
+	D(std::cout << ">> Generating Path (" << start[0] << "|" << start[1] << "|" << start[2] << ") >> (" << end[0] << "|" << end[1] << "|" << end[2] << ")\n";)
 
 	if (!IsMapLoaded(map_id))
 	{
-
-#ifdef DEBUG
-		std::cout << "-> Mesh for Continent " << map_id << " not loaded, loading it now\n\n";
-#endif		
+		D(std::cout << ">> Mesh for Continent " << map_id << " not loaded, loading it now\n\n";)
 
 		if (!LoadMmapsForContinent(map_id))
 		{
-			std::cout << "-> Mesh or Query could not be loaded\n";
+			D(std::cerr << ">> Mesh or Query could not be loaded\n";)
 			return;
 		}
 	}
 
 	float closest_point_start[3];
-	float closest_point_end[3];
-
 	dtPolyRef start_poly = GetNearestPoly(map_id, start, closest_point_start);
+
+	float closest_point_end[3];
 	dtPolyRef end_poly = GetNearestPoly(map_id, end, closest_point_end);
 
-#ifdef DEBUG
-	std::cout << "-> Start Poly " << start_poly << " found " << closest_point_start[0] << " " << closest_point_start[1] << " " << closest_point_start[2] << "\n";
-	std::cout << "-> End Poly " << end_poly << " found " << closest_point_end[0] << " " << closest_point_end[1] << " " << closest_point_end[2] << " \n";
-#endif
-
-	// Raycast stuff, currently disabled. 
-	// Need to find a sweetspot to trust the raycast
-	// because if we use it across  ahole it may give
-	// wrong results.
-
-	//// float hit = 0;
-	//// float hit_normal[3];
-	//// memset(hit_normal, 0, sizeof(hit_normal));
-	//// _query_map[map_id]->raycast(start_poly, start, end, &_filter, &hit, hit_normal, path_poly, path_size, 1024);
-
-	dtPolyRef path_poly[1024];
-	if (!dtStatusSucceed(_query_map[map_id]->findPath(start_poly, end_poly, start, end, &_filter, path_poly, path_size, MAX_PATH_LENGHT)))
+	if (start_poly == end_poly) 
 	{
-#ifdef DEBUG
-		std::cout << "-> Path not found\n";
-#endif
+		// same poly, we don't need pathfinding here
+		D(std::cout << ">> Start and End positions are on the same poly, returning end position\n";)
+		(*path_size) = 1;
+		(*path) = end;
 		return;
 	}
-	else
+
+	dtPolyRef polypath[MAX_PATH_LENGHT];
+	int polypath_size = 0;
+	if(dtStatusFailed(_query_map[map_id]->findPath(start_poly, end_poly, closest_point_start, closest_point_end, &_filter, polypath, &polypath_size, MAX_PATH_LENGHT)))
 	{
-#ifdef DEBUG
-		std::cout << "-> Path found: " << (*path_size) << " Nodes\n";
-#endif
-
-		float path_a[MAX_PATH_LENGHT * 3];
-
-		dtPolyRef visited_polys[MAX_PATH_LENGHT];
-		float result_pos[3];
-
-		result_pos[0] = end[0];
-		result_pos[1] = end[1];
-		result_pos[2] = end[2];
-
-		for (int i = 0; i < (*path_size); ++i)
-		{
-			float start_poly_pos[3];
-			_query_map[map_id]->closestPointOnPolyBoundary(path_poly[i], result_pos, result_pos);
-
-			RDToWoWCoords(result_pos);
-
-			path_a[i * 3] = result_pos[0];
-			path_a[i * 3 + 1] = result_pos[1];
-			path_a[i * 3 + 2] = result_pos[2];
-		}
-
-		(*path) = path_a;
+		// pathfinding failed
+		D(std::cerr << ">> No PolyPath found...\n";)
+		(*path_size) = 0;
+		return;
 	}
+
+	float pointpath[MAX_PATH_LENGHT * 3];
+	int pointpath_size = 0;
+	if (dtStatusFailed(_query_map[map_id]->findStraightPath(closest_point_start, closest_point_end, polypath, polypath_size, pointpath, nullptr, nullptr, &pointpath_size, MAX_PATH_LENGHT)))
+	{
+		// pathfinding failed
+		D(std::cerr << ">> Failed to calculate PointPath...\n";)
+		(*path_size) = 0;
+		return;
+	}
+
+	// convert to Recast and Detour coordinates to Wow coordinates
+	for (int i = 0; i < pointpath_size; i += 3)
+	{
+		RDToWowCoords(&pointpath[i]);
+	}
+
+	(*path_size) = pointpath_size;
+	(*path) = pointpath;
 }
 
 dtPolyRef AmeisenNavigation::GetNearestPoly(int map_id, float* pos, float* closest_point)
@@ -140,23 +115,27 @@ dtPolyRef AmeisenNavigation::GetNearestPoly(int map_id, float* pos, float* close
 
 bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 {
+	// build the *.mmap filename (example: 001.mmap or 587.mmap)
 	std::string mmap_filename = _mmap_dir + format_trailing_zeros(map_id, 3) + ".mmap";
-	std::ifstream mmap_stream;
+
 	dtNavMeshParams params;
 
-	_mesh_map[map_id] = dtAllocNavMesh();
-
-	mmap_stream.open(mmap_filename);
+	// read the dtNavMeshParams
+	std::ifstream mmap_stream;
+	mmap_stream.open(mmap_filename, std::ifstream::binary);
 	mmap_stream.read((char*)&params, sizeof(params));
 	mmap_stream.close();
 
+	// allocate and init the NavMesh
+	_mesh_map[map_id] = dtAllocNavMesh();
 	if (dtStatusFailed(_mesh_map[map_id]->init(&params)))
 	{
 		dtFreeNavMesh(_mesh_map[map_id]);
-		std::cout << "-> Error: could not init map navmesh, file: " << mmap_filename << "\n";
+		D(std::cerr << ">> Could not init map navmesh file: " << mmap_filename << "\n";)
 		return false;
 	}
 
+	// load every NavMesh Tile from 1, 1 to 64, 64
 	for (int x = 1; x <= 64; ++x)
 	{
 		for (int y = 1; y <= 64; ++y)
@@ -168,40 +147,43 @@ bool AmeisenNavigation::LoadMmapsForContinent(int map_id)
 				+ format_trailing_zeros(y, 2)
 				+ ".mmtile";
 
+			// we can't load non existent files
 			GetFileAttributes(mmaptile_filename.c_str());
-			if (INVALID_FILE_ATTRIBUTES == GetFileAttributes(mmaptile_filename.c_str()) && GetLastError() == ERROR_FILE_NOT_FOUND)
+			if (INVALID_FILE_ATTRIBUTES == GetFileAttributes(mmaptile_filename.c_str()) 
+				&& GetLastError() == ERROR_FILE_NOT_FOUND)
 			{
 				continue;
 			}
 
-#ifdef DEBUG
-			std::cout << "-> Reading Tile " << mmaptile_filename.c_str() << "\n";
-#endif
+			D(std::cout << ">> Reading Tile " << mmaptile_filename.c_str() << "\n";)
 
 			std::ifstream mmaptile_stream;
 			mmaptile_stream.open(mmaptile_filename, std::ifstream::binary);
 
+			// read the mmap header
 			MmapTileHeader fileHeader;
 			mmaptile_stream.read((char*)&fileHeader, sizeof(fileHeader));
 
+			// read the NavMesh Tile data
 			unsigned char* data = (unsigned char*)dtAlloc(fileHeader.size, DT_ALLOC_PERM);
 			mmaptile_stream.read((char*)data, fileHeader.size);
 
-			dtTileRef tileRef = 0;
-
+			// add the Tile to our NavMesh
+			dtTileRef tileRef;
 			if (!dtStatusSucceed(_mesh_map[map_id]->addTile(data, fileHeader.size, DT_TILE_FREE_DATA, 0, &tileRef)))
 			{
-				std::cout << "-> Error at adding tile " << x << " " << y << " to navmesh\n";
+				D(std::cerr << ">> Failed adding tile " << x << " " << y << " to navmesh\n";)
 			}
 
 			mmaptile_stream.close();
 		}
 	}
 
+	// init the NavMeshQuery
 	_query_map[map_id] = dtAllocNavMeshQuery();
 	if (dtStatusFailed(_query_map[map_id]->init(_mesh_map[map_id], MAX_PATH_LENGHT)))
 	{
-		std::cout << "-> Failed to built NavMeshQuery " << "\n";
+		D(std::cerr << ">> Failed to init NavMeshQuery " << "\n";)
 		dtFreeNavMeshQuery(_query_map[map_id]);
 		return false;
 	}

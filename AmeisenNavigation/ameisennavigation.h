@@ -21,7 +21,11 @@ constexpr int MMAP_VERSION = 6;
 
 constexpr int MAX_PATH_LENGHT = 1024;
 
-// #define DEBUG
+#ifdef DEBUG 
+#define D(x) x
+#else 
+#define D(x)
+#endif
 
 enum NavTerrain
 {
@@ -51,8 +55,8 @@ private:
 
 	std::string format_trailing_zeros(int number, int total_count);
 
-	void RDToWoWCoords(float pos[]);
-	void WoWToRDCoords(float pos[]);
+	void RDToWowCoords(float pos[]);
+	void WowToRDCoords(float pos[]);
 
 public:
 	AmeisenNavigation(std::string mmap_dir);

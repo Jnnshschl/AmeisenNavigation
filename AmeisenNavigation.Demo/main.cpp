@@ -10,7 +10,6 @@ int main()
 
 	std::cout << "-> Preloading Eastern Kingdoms & Kalimdor...\n";
 	ameisen_nav->LoadMmapsForContinent(0); // Eastern Kingdoms
-	ameisen_nav->LoadMmapsForContinent(1); // Kalimdor
 
 	float start[3] = { -8826.562500f, -371.839752f, 71.638428f };
 	float end[3] = { -8918.406250f, -130.297256f, 80.906364f };

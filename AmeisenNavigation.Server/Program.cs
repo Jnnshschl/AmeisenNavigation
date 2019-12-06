@@ -124,17 +124,10 @@ namespace AmeisenNavigation.Server
                 }
             }
 
-            if (flags.HasFlag(PathRequestFlags.NaturalSteeringBehavior))
-            {
-                path = NaturalSteeringBehavior.Perform(path);
-            }
-
             if (flags.HasFlag(PathRequestFlags.ChaikinCurve))
             {
                 path = ChaikinCurve.Perform(path);
             }
-
-            //// bugged atm path = NodeReduction.Perform(path);
 
             sw.Stop();
             LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"Building Path with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
