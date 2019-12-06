@@ -83,9 +83,11 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 		return;
 	}
 
+	D(std::cerr << ">> PolyPath size: " << polypath_size << "\n";)
+
 	float pointpath[MAX_PATH_LENGHT * 3];
 	int pointpath_size = 0;
-	if (dtStatusFailed(_query_map[map_id]->findStraightPath(closest_point_start, closest_point_end, polypath, polypath_size, pointpath, nullptr, nullptr, &pointpath_size, MAX_PATH_LENGHT)))
+	if (dtStatusFailed(_query_map[map_id]->findStraightPath(start, end, polypath, polypath_size, pointpath, nullptr, nullptr, &pointpath_size, MAX_PATH_LENGHT)))
 	{
 		// pathfinding failed
 		D(std::cerr << ">> Failed to calculate PointPath...\n";)
@@ -93,8 +95,10 @@ void AmeisenNavigation::GetPath(int map_id, float* start, float* end, float** pa
 		return;
 	}
 
+	D(std::cerr << ">> PointPath size: " << pointpath_size << "\n";)
+
 	// convert to Recast and Detour coordinates to Wow coordinates
-	for (int i = 0; i < pointpath_size; i += 3)
+	for (int i = 0; i < pointpath_size * 3; i += 3)
 	{
 		RDToWowCoords(&pointpath[i]);
 	}
