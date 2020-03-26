@@ -1,31 +1,28 @@
-#pragma once
-
 #ifndef _H_AMEISENNAVIGATION
 #define _H_AMEISENNAVIGATION
 
-#include <iostream>
-#include <fstream>
-#include <sstream>
-#include <iomanip>
 #include <map>
 #include <vector>
-#include <chrono>
 
-#include <windows.h>
+#include <chrono>
+#include <sstream>
+
+#include <fstream>
+#include <iostream>
+#include <filesystem>
 
 #include "../recastnavigation/Detour/Include/DetourNavMesh.h"
 #include "../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
-constexpr int MMAP_MAGIC = 0x4d4d4150;
-constexpr int MMAP_VERSION = 6;
-
-constexpr int MAX_PATH_LENGHT = 1024;
-
-#ifdef DEBUG 
+#ifdef DEBUG
 #define D(x) x
-#else 
+#else
 #define D(x)
 #endif
+
+constexpr int MMAP_MAGIC = 0x4d4d4150;
+constexpr int MMAP_VERSION = 6;
+constexpr int MAX_PATH_LENGHT = 1024;
 
 enum NavTerrain
 {
@@ -36,7 +33,8 @@ enum NavTerrain
 	NAV_WATER = 0x08
 };
 
-struct MmapTileHeader {
+struct MmapTileHeader
+{
 	unsigned int mmapMagic;
 	unsigned int dtVersion;
 	unsigned int mmapVersion;
@@ -45,27 +43,27 @@ struct MmapTileHeader {
 	char padding[3];
 };
 
-class AmeisenNavigation {
+class AmeisenNavigation
+{
 private:
-	std::string _mmap_dir;
-	std::map<int, dtNavMesh*> _mesh_map;
-	std::map<int, dtNavMeshQuery*> _query_map;
+	std::string m_MmapFolder;
+	dtQueryFilter m_QueryFilter;
+	std::map<int, dtNavMesh*> m_NavMeshMap;
+	std::map<int, dtNavMeshQuery*> m_NavMeshQueryMap;
 
-	dtQueryFilter _filter;
-
-	std::string format_trailing_zeros(int number, int total_count);
-
-	void RDToWowCoords(float pos[]);
-	void WowToRDCoords(float pos[]);
+	void RDToWowCoords(float* pos);
+	void WowToRDCoords(float* pos);
+	std::string FormatTrailingZeros(int number, int zeroCount);
 
 public:
-	AmeisenNavigation(std::string mmap_dir);
+	AmeisenNavigation(std::string mmapFolder);
 
-	void GetPath(int map_id, float* start, float* end, float** path, int* path_size);
-	dtPolyRef GetNearestPoly(int map_id, float* pos, float* closest_point);
+	bool LoadMmapsForContinent(int mapId);
+	bool IsMmapLoaded(int mapId);
 
-	bool LoadMmapsForContinent(int map_id);
-	bool IsMapLoaded(int map_id);
+	dtPolyRef GetNearestPoly(int mapId, float* position, float* closestPointOnPoly);
+	bool GetPath(int mapId, float* startPosition, float* endPosition, float* path, int* pathSize);
+	bool CastMovementRay(int mapId, float* startPosition, float* endPosition);
 };
 
 #endif

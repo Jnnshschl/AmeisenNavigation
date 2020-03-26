@@ -1,18 +1,10 @@
-﻿using System;
-using AmeisenNavigation.Server.Objects.Enums;
+﻿using AmeisenNavigation.Server.Objects.Enums;
+using System;
 
 namespace AmeisenNavigation.Server.Objects
 {
     public class LogEntry
     {
-        public string ColoredPart { get; set; }
-
-        public string UncoloredPart { get; set; }
-
-        public ConsoleColor Color { get; set; }
-
-        public LogLevel LogLevel { get; set; }
-
         public LogEntry(string coloredPart, ConsoleColor color, string uncoloredPart = "", LogLevel logLevel = LogLevel.INFO)
         {
             ColoredPart = coloredPart;
@@ -20,5 +12,13 @@ namespace AmeisenNavigation.Server.Objects
             UncoloredPart = uncoloredPart;
             LogLevel = logLevel;
         }
+
+        public ConsoleColor Color { get; set; }
+
+        public string ColoredPart { get; set; }
+
+        public LogLevel LogLevel { get; set; }
+
+        public string UncoloredPart { get; set; }
     }
 }

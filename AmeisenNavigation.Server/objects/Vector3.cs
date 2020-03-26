@@ -4,6 +4,8 @@ namespace AmeisenNavigation.Server.Objects
 {
     public struct Vector3
     {
+        public static Vector3 Zero = new Vector3(0, 0, 0);
+
         public Vector3(float x, float y, float z)
         {
             X = x;
@@ -11,29 +13,11 @@ namespace AmeisenNavigation.Server.Objects
             Z = z;
         }
 
-        public static Vector3 Zero = new Vector3(0, 0, 0);
-
         public float X { get; set; }
 
         public float Y { get; set; }
 
         public float Z { get; set; }
-
-        public static bool operator ==(Vector3 left, Vector3 right)
-        {
-            return left.Equals(right);
-        }
-
-        public static Vector3 operator +(Vector3 a, Vector3 b)
-            => new Vector3(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
-
-        public static Vector3 operator -(Vector3 a, Vector3 b)
-            => new Vector3(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
-
-        public static bool operator !=(Vector3 left, Vector3 right)
-        {
-            return !(left == right);
-        }
 
         public static Vector3 FromArray(float[] array)
             => new Vector3()
@@ -43,19 +27,35 @@ namespace AmeisenNavigation.Server.Objects
                 Z = array[2]
             };
 
-        public float[] ToArray()
-            => new float[3]
-            {
-                X,
-                Y,
-                Z
-            };
+        public static Vector3 operator -(Vector3 a, Vector3 b)
+            => new Vector3(a.X - b.X, a.Y - b.Y, a.Z - b.Z);
+
+        public static bool operator !=(Vector3 left, Vector3 right)
+        {
+            return !(left == right);
+        }
+
+        public static Vector3 operator +(Vector3 a, Vector3 b)
+            => new Vector3(a.X + b.X, a.Y + b.Y, a.Z + b.Z);
+
+        public static bool operator ==(Vector3 left, Vector3 right)
+        {
+            return left.Equals(right);
+        }
 
         public override bool Equals(object obj)
             => obj.GetType() == typeof(Vector3)
             && ((Vector3)obj).X == X
             && ((Vector3)obj).Y == Y
             && ((Vector3)obj).Z == Z;
+
+        public double GetDistance(Vector3 b)
+            => Math.Sqrt(((X - b.X) * (X - b.X))
+                       + ((Y - b.Y) * (Y - b.Y))
+                       + ((Z - b.Z) * (Z - b.Z)));
+
+        public double GetDistance2D(Vector3 b)
+            => Math.Sqrt(Math.Pow(X - b.X, 2) + Math.Pow(Y - b.Y, 2));
 
         public override int GetHashCode()
         {
@@ -65,12 +65,12 @@ namespace AmeisenNavigation.Server.Objects
             }
         }
 
-        public double GetDistance(Vector3 b)
-            => Math.Sqrt(((X - b.X) * (X - b.X))
-                       + ((Y - b.Y) * (Y - b.Y))
-                       + ((Z - b.Z) * (Z - b.Z)));
-
-        public double GetDistance2D(Vector3 b)
-            => Math.Sqrt(Math.Pow(X - b.X, 2) + Math.Pow(Y - b.Y, 2));
+        public float[] ToArray()
+                                            => new float[3]
+            {
+                X,
+                Y,
+                Z
+            };
     }
 }

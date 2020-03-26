@@ -7,6 +7,9 @@ public class Settings
     [JsonProperty("mmapsFolder")]
     public string MmapsFolder { get; set; } = "C:\\mmaps\\";
 
+    [JsonProperty("vmapsFolder")]
+    public string VmapsFolder { get; set; } = "C:\\vmaps\\";
+
     [JsonProperty("ipAddress")]
     public string IpAddress { get; set; } = "0.0.0.0";
 

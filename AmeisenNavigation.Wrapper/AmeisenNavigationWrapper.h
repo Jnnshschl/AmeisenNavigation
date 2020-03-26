@@ -27,12 +27,12 @@ namespace AmeisenNavigationWrapper
 			ameisen_nav = new AmeisenNavigation(msclr::interop::marshal_as<std::string>(mmap_dir));
 		}
 
-		~AmeisenNav() 
+		~AmeisenNav()
 		{
 			this->!AmeisenNav();
 		}
 
-		!AmeisenNav() 
+		!AmeisenNav()
 		{
 			delete ameisen_nav;
 		}
@@ -48,11 +48,16 @@ namespace AmeisenNavigationWrapper
 
 		bool IsMapLoaded(int map_id)
 		{
-			return ameisen_nav->IsMapLoaded(map_id);
+			return ameisen_nav->IsMmapLoaded(map_id);
+		}
+
+		bool CastMovementRay(int map_id, float start[], float end[])
+		{
+			return ameisen_nav->CastMovementRay(map_id, start, end);
 		}
 
 		/// <summary>
-		/// Use this method if you dont want to mess around 
+		/// Use this method if you dont want to mess around
 		/// with an unsafe pointer in your code, the path
 		/// will be retuned as an 1D array formatted like:
 		/// [ x1, y1, z1, x2, y2, z2, ...]
@@ -64,14 +69,13 @@ namespace AmeisenNavigationWrapper
 		/// <returns>Pointer to the array of waypoints</returns>
 		float* GetPath(int map_id, float start[], float end[], int* path_size)
 		{
-			float* path;
-			ameisen_nav->GetPath(map_id, start, end, &path, path_size);
-
+			float* path = new float[MAX_PATH_LENGHT * 3];
+			ameisen_nav->GetPath(map_id, start, end, path, path_size);
 			return path;
 		}
 
 		/// <summary>
-		/// Use this method if you dont want to mess around 
+		/// Use this method if you dont want to mess around
 		/// with an unsafe pointer in your code, the path
 		/// will be retuned as an 1D array formatted like:
 		/// [ x1, y1, z1, x2, y2, z2, ...]
