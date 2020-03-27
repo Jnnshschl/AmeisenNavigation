@@ -2,7 +2,8 @@
 {
     public enum MovementType
     {
-        MOVE_TO_POSITION,
-        CAST_MOVEMENT_RAY
+        MoveToPosition,
+        CastMovementRay,
+        MoveAlongSurface
     }
 }

@@ -4,9 +4,7 @@
 #include <map>
 #include <vector>
 
-#include <chrono>
 #include <sstream>
-
 #include <fstream>
 #include <iostream>
 #include <filesystem>
@@ -20,7 +18,7 @@
 #define D(x)
 #endif
 
-constexpr int MMAP_MAGIC = 0x4d4d4150;
+constexpr int MMAP_MAGIC = 0x4D4D4150;
 constexpr int MMAP_VERSION = 6;
 constexpr int MAX_PATH_LENGHT = 1024;
 
@@ -53,6 +51,7 @@ private:
 
 	void RDToWowCoords(float* pos);
 	void WowToRDCoords(float* pos);
+	bool PreparePathfinding(int mapId, int* pathSize);
 	std::string FormatTrailingZeros(int number, int zeroCount);
 
 public:
@@ -63,6 +62,7 @@ public:
 
 	dtPolyRef GetNearestPoly(int mapId, float* position, float* closestPointOnPoly);
 	bool GetPath(int mapId, float* startPosition, float* endPosition, float* path, int* pathSize);
+	bool MoveAlongSurface(int mapId, float* startPosition, float* endPosition, float* positionToGoTo);
 	bool CastMovementRay(int mapId, float* startPosition, float* endPosition);
 };
 

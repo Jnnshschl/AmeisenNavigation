@@ -42,22 +42,14 @@ bool AmeisenNavigation::IsMmapLoaded(int map_id)
 
 bool AmeisenNavigation::GetPath(int mapId, float* startPosition, float* endPosition, float* path, int* pathSize)
 {
-	D(std::cout << ">> Generating Path (" << startPosition[0] << ", " << startPosition[1] << ", " << startPosition[2] << ") -> (" << endPosition[0] << ", " << endPosition[1] << ", " << endPosition[2] << ")" << std::endl);
+	D(std::cout << ">> GetPath (" << mapId << ") (" << startPosition[0] << ", " << startPosition[1] << ", " << startPosition[2] << ") -> (" << endPosition[0] << ", " << endPosition[1] << ", " << endPosition[2] << ")" << std::endl);
 
 	WowToRDCoords(startPosition);
 	WowToRDCoords(endPosition);
 
-	if (!IsMmapLoaded(mapId))
+	if (!PreparePathfinding(mapId, pathSize))
 	{
-		D(std::cout << ">> Mesh for Continent " << mapId << " not loaded, loading it now" << std::endl);
-
-		if (!LoadMmapsForContinent(mapId))
-		{
-			std::cerr << ">> Unable to load MMAPS for continent " << mapId << std::endl;
-
-			*pathSize = 0;
-			return false;
-		}
+		return false;
 	}
 
 	float* closestPointStart = new float[3];
@@ -119,7 +111,7 @@ bool AmeisenNavigation::GetPath(int mapId, float* startPosition, float* endPosit
 	}
 }
 
-bool AmeisenNavigation::CastMovementRay(int mapId, float* startPosition, float* endPosition)
+bool AmeisenNavigation::PreparePathfinding(int mapId, int* pathSize)
 {
 	if (!IsMmapLoaded(mapId))
 	{
@@ -128,8 +120,57 @@ bool AmeisenNavigation::CastMovementRay(int mapId, float* startPosition, float* 
 		if (!LoadMmapsForContinent(mapId))
 		{
 			std::cerr << ">> Unable to load MMAPS for continent " << mapId << std::endl;
+
+			if (pathSize)
+			{
+				*pathSize = 0;
+			}
+
 			return false;
 		}
+	}
+
+	return true;
+}
+
+bool AmeisenNavigation::MoveAlongSurface(int mapId, float* startPosition, float* endPosition, float* positionToGoTo)
+{
+	D(std::cout << ">> MoveAlongSurface (" << mapId << ") (" << startPosition[0] << ", " << startPosition[1] << ", " << startPosition[2] << ") -> (" << endPosition[0] << ", " << endPosition[1] << ", " << endPosition[2] << ")" << std::endl);
+
+	WowToRDCoords(startPosition);
+	WowToRDCoords(endPosition);
+
+	if (!PreparePathfinding(mapId, nullptr))
+	{
+		return false;
+	}
+
+	int visitedCount;
+	dtPolyRef* visited = new dtPolyRef[64];
+	dtPolyRef startPoly = GetNearestPoly(mapId, startPosition, nullptr);
+	if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->moveAlongSurface(startPoly, startPosition, endPosition, &m_QueryFilter, positionToGoTo, visited, &visitedCount, 64)))
+	{
+		RDToWowCoords(positionToGoTo);
+		D(std::cout << ">> Found position to go to (" << positionToGoTo[0] << ", " << positionToGoTo[1] << ", " << positionToGoTo[2] << ")" << std::endl);
+
+		delete[] visited;
+		return true;
+	}
+
+	delete[] visited;
+	return false;
+}
+
+bool AmeisenNavigation::CastMovementRay(int mapId, float* startPosition, float* endPosition)
+{
+	D(std::cout << ">> CastMovementRay (" << mapId << ") (" << startPosition[0] << ", " << startPosition[1] << ", " << startPosition[2] << ") -> (" << endPosition[0] << ", " << endPosition[1] << ", " << endPosition[2] << ")" << std::endl);
+
+	WowToRDCoords(startPosition);
+	WowToRDCoords(endPosition);
+
+	if (!PreparePathfinding(mapId, nullptr))
+	{
+		return false;
 	}
 
 	dtPolyRef startPoly = GetNearestPoly(mapId, startPosition, nullptr);

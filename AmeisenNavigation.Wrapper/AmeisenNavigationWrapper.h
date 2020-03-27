@@ -56,6 +56,13 @@ namespace AmeisenNavigationWrapper
 			return ameisen_nav->CastMovementRay(map_id, start, end);
 		}
 
+		float* MoveAlongSurface(int map_id, float start[], float end[])
+		{
+			float* positionToGoTo = new float[3];
+			ameisen_nav->MoveAlongSurface(map_id, start, end, positionToGoTo);
+			return positionToGoTo;
+		}
+
 		/// <summary>
 		/// Use this method if you dont want to mess around
 		/// with an unsafe pointer in your code, the path

@@ -90,24 +90,28 @@ namespace AmeisenNavigation.Server
                     {
                         switch (movementType)
                         {
-                            case MovementType.MOVE_TO_POSITION:
-                                float* path_raw = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
+                            case MovementType.MoveToPosition:
+                                float* movePath = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
 
-                                // postprocess the raw path to a list of Vector3
-                                // the raw path looks like this:
-                                // [ x1, y1, z1, x2, y2, z2, ...]
                                 for (int i = 0; i < pathSize * 3; i += 3)
                                 {
-                                    path.Add(new Vector3(path_raw[i], path_raw[i + 1], path_raw[i + 2]));
+                                    path.Add(new Vector3(movePath[i], movePath[i + 1], movePath[i + 2]));
                                 }
 
                                 if (flags.HasFlag(PathRequestFlags.ChaikinCurve))
                                 {
                                     path = ChaikinCurve.Perform(path);
                                 }
+
                                 break;
 
-                            case MovementType.CAST_MOVEMENT_RAY:
+                            case MovementType.MoveAlongSurface:
+                                float* surfacePath = AmeisenNav.MoveAlongSurface(mapId, pointerStart, pointerEnd);
+                                path.Add(new Vector3(surfacePath[0], surfacePath[1], surfacePath[2]));
+
+                                break;
+
+                            case MovementType.CastMovementRay:
                                 if (AmeisenNav.CastMovementRay(mapId, pointerStart, pointerEnd))
                                 {
                                     // return end if target is in line of sight
@@ -118,6 +122,7 @@ namespace AmeisenNavigation.Server
                                     // return none if target is not in line of sight
                                     path.Clear();
                                 }
+
                                 break;
                         }
                     }
