@@ -1,8 +1,8 @@
 #include "ameisennavigation.h"
 
 AmeisenNavigation::AmeisenNavigation(std::string mmapFolder)
+	: m_MmapFolder(mmapFolder)
 {
-	m_MmapFolder = mmapFolder;
 }
 
 std::string AmeisenNavigation::FormatTrailingZeros(int number, int zeroCount)
@@ -52,8 +52,8 @@ bool AmeisenNavigation::GetPath(int mapId, float* startPosition, float* endPosit
 		return false;
 	}
 
-	float* closestPointStart = new float[3];
-	float* closestPointEnd = new float[3];
+	float closestPointStart[3];
+	float closestPointEnd[3];
 
 	dtPolyRef startPoly = GetNearestPoly(mapId, startPosition, closestPointStart);
 	dtPolyRef endPoly = GetNearestPoly(mapId, endPosition, closestPointEnd);
@@ -72,7 +72,7 @@ bool AmeisenNavigation::GetPath(int mapId, float* startPosition, float* endPosit
 	}
 	else
 	{
-		dtPolyRef* polypath = new dtPolyRef[MAX_PATH_LENGHT];
+		dtPolyRef polypath[MAX_PATH_LENGHT];
 		int polypathSize = 0;
 
 		if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->findPath(startPoly, endPoly, closestPointStart, closestPointEnd, &m_QueryFilter, polypath, &polypathSize, MAX_PATH_LENGHT)))
@@ -103,10 +103,6 @@ bool AmeisenNavigation::GetPath(int mapId, float* startPosition, float* endPosit
 
 		*pathSize = 0;
 		path = nullptr;
-
-		delete[] closestPointStart;
-		delete[] closestPointEnd;
-		delete[] polypath;
 		return false;
 	}
 }
@@ -146,18 +142,16 @@ bool AmeisenNavigation::MoveAlongSurface(int mapId, float* startPosition, float*
 	}
 
 	int visitedCount;
-	dtPolyRef* visited = new dtPolyRef[64];
+	dtPolyRef visited[64];
 	dtPolyRef startPoly = GetNearestPoly(mapId, startPosition, nullptr);
 	if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->moveAlongSurface(startPoly, startPosition, endPosition, &m_QueryFilter, positionToGoTo, visited, &visitedCount, 64)))
 	{
 		RDToWowCoords(positionToGoTo);
 		D(std::cout << ">> Found position to go to (" << positionToGoTo[0] << ", " << positionToGoTo[1] << ", " << positionToGoTo[2] << ")" << std::endl);
 
-		delete[] visited;
 		return true;
 	}
 
-	delete[] visited;
 	return false;
 }
 
