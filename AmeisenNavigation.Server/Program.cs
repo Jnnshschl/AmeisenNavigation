@@ -130,8 +130,7 @@ namespace AmeisenNavigation.Server
             }
 
             sw.Stop();
-            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"Building Path with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
-
+            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"{movementType} with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
             return path;
         }
 

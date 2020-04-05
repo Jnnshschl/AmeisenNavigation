@@ -7,9 +7,9 @@
 
 #include "../AmeisenNavigation/ameisennavigation.h"
 
-void TestLoadMmaps(int mapId, AmeisenNavigation& ameisenNavigation);
-void TestGetPath(int mapId, AmeisenNavigation& ameisenNavigation, float* startPosition, float* endPosition);
-void TestCastMovementRay(int mapId, AmeisenNavigation& ameisenNavigation, float* startPosition, float* endPosition);
-void TestMoveAlongSurface(int mapId, AmeisenNavigation& ameisenNavigation, float* startPosition, float* endPosition);
+void TestLoadMmaps(const int mapId, AmeisenNavigation& ameisenNavigation);
+void TestGetPath(const int mapId, AmeisenNavigation& ameisenNavigation, const Vector3& startPosition, const Vector3& endPosition);
+void TestCastMovementRay(const int mapId, AmeisenNavigation& ameisenNavigation, const Vector3& startPosition, const Vector3& endPosition);
+void TestMoveAlongSurface(const int mapId, AmeisenNavigation& ameisenNavigation, const Vector3& startPosition, const Vector3& endPosition);
 
 #endif // !_H_MAIN

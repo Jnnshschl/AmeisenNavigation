@@ -59,7 +59,7 @@ namespace AmeisenNavigationWrapper
 		float* MoveAlongSurface(int map_id, float start[], float end[])
 		{
 			float* positionToGoTo = new float[3];
-			ameisen_nav->MoveAlongSurface(map_id, start, end, positionToGoTo);
+			ameisen_nav->MoveAlongSurface(map_id, start, end, reinterpret_cast<Vector3*>(positionToGoTo));
 			return positionToGoTo;
 		}
 
@@ -77,7 +77,7 @@ namespace AmeisenNavigationWrapper
 		float* GetPath(int map_id, float start[], float end[], int* path_size)
 		{
 			float* path = new float[MAX_PATH_LENGHT * 3];
-			ameisen_nav->GetPath(map_id, start, end, path, path_size);
+			ameisen_nav->GetPath(map_id, start, end, reinterpret_cast<Vector3*>(path), path_size);
 			return path;
 		}
 
