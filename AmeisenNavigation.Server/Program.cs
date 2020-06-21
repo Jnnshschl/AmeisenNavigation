@@ -156,7 +156,7 @@ namespace AmeisenNavigation.Server
 
                             List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, pathRequest.MovementType, pathRequest.Flags, client.Client.RemoteEndPoint.ToString());
 
-                            writer.WriteLine(JsonConvert.SerializeObject(path) + " &gt;");
+                            writer.WriteLine($"{JsonConvert.SerializeObject(path)}&gt;");
                             writer.Flush();
                         }
                     }

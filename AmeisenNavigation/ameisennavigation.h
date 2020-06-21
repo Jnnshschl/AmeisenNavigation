@@ -21,16 +21,15 @@
 #endif
 
 constexpr int MMAP_MAGIC = 0x4D4D4150;
-constexpr int MMAP_VERSION = 6;
+constexpr int MMAP_VERSION = 10;
 constexpr int MAX_PATH_LENGHT = 1024;
 
 enum NavTerrain
 {
-	NAV_EMPTY = 0x00,
-	NAV_GROUND = 0x01,
-	NAV_MAGMA = 0x02,
-	NAV_SLIME = 0x04,
-	NAV_WATER = 0x08
+	NAV_EMPTY = 0,
+	NAV_MAGMA_SLIME = 61,
+	NAV_WATER = 62,
+	NAV_GROUND = 63
 };
 
 struct MmapTileHeader
