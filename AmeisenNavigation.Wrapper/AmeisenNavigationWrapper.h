@@ -13,6 +13,8 @@ namespace AmeisenNavigationWrapper
 	{
 	private:
 		AmeisenNavigation* ameisen_nav;
+		int maxPolyPath;
+		int maxPointPath;
 
 	public:
 		/// <summary>
@@ -22,9 +24,11 @@ namespace AmeisenNavigationWrapper
 		/// one position to another.
 		/// </summary>
 		/// <param name="mmap_dir">The folder containing the extracted mmaps</param>
-		AmeisenNav(String^ mmap_dir)
+		AmeisenNav(String^ mmap_dir, int maxPolyPathLenght, int maxPointPathLenght)
+			: ameisen_nav(new AmeisenNavigation(msclr::interop::marshal_as<std::string>(mmap_dir), maxPolyPathLenght, maxPointPathLenght)),
+			maxPolyPath(maxPolyPathLenght),
+			maxPointPath(maxPointPathLenght)
 		{
-			ameisen_nav = new AmeisenNavigation(msclr::interop::marshal_as<std::string>(mmap_dir));
 		}
 
 		~AmeisenNav()
@@ -63,6 +67,20 @@ namespace AmeisenNavigationWrapper
 			return positionToGoTo;
 		}
 
+		float* GetRandomPoint(int map_id)
+		{
+			float* positionToGoTo = new float[3];
+			ameisen_nav->GetRandomPoint(map_id, reinterpret_cast<Vector3*>(positionToGoTo));
+			return positionToGoTo;
+		}
+
+		float* GetRandomPointAround(int map_id, float start[], float maxRadius)
+		{
+			float* positionToGoTo = new float[3];
+			ameisen_nav->GetRandomPointAround(map_id, start, maxRadius, reinterpret_cast<Vector3*>(positionToGoTo));
+			return positionToGoTo;
+		}
+
 		/// <summary>
 		/// Use this method if you dont want to mess around
 		/// with an unsafe pointer in your code, the path
@@ -76,7 +94,7 @@ namespace AmeisenNavigationWrapper
 		/// <returns>Pointer to the array of waypoints</returns>
 		float* GetPath(int map_id, float start[], float end[], int* path_size)
 		{
-			float* path = new float[MAX_PATH_LENGHT * 3];
+			float* path = new float[maxPointPath * 3];
 			ameisen_nav->GetPath(map_id, start, end, reinterpret_cast<Vector3*>(path), path_size);
 			return path;
 		}

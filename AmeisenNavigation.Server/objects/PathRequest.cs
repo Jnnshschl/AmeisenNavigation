@@ -4,10 +4,11 @@ namespace AmeisenNavigation.Server.Objects
 {
     public struct PathRequest
     {
-        public PathRequest(Vector3 a, Vector3 b, int mapId, PathRequestFlags flags = PathRequestFlags.None, MovementType movementType = MovementType.MoveToPosition)
+        public PathRequest(Vector3 a, Vector3 b, float maxRadius, int mapId, PathRequestFlags flags = PathRequestFlags.None, MovementType movementType = MovementType.MoveToPosition)
         {
             A = a;
             B = b;
+            MaxRadius = maxRadius;
             MapId = mapId;
             Flags = flags;
             MovementType = movementType;
@@ -20,6 +21,8 @@ namespace AmeisenNavigation.Server.Objects
         public PathRequestFlags Flags { get; set; }
 
         public int MapId { get; set; }
+
+        public float MaxRadius { get; set; }
 
         public MovementType MovementType { get; set; }
 
@@ -45,7 +48,7 @@ namespace AmeisenNavigation.Server.Objects
         {
             unchecked
             {
-                return (int)(17 + (A.GetHashCode() * 23) + (B.GetHashCode() * 23) + (MapId * 23) + ((int)Flags * 23) + ((int)MovementType * 23));
+                return (int)(17 + (A.GetHashCode() * 23) + (B.GetHashCode() * 23) + (MaxRadius * 23) + (MapId * 23) + ((int)Flags * 23) + ((int)MovementType * 23));
             }
         }
     }

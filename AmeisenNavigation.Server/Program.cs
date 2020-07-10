@@ -68,7 +68,7 @@ namespace AmeisenNavigation.Server
             }
         }
 
-        public static List<Vector3> GetPath(Vector3 start, Vector3 end, int mapId, MovementType movementType, PathRequestFlags flags, string clientIp)
+        public static List<Vector3> GetPath(Vector3 start, Vector3 end, float maxRadius, int mapId, MovementType movementType, PathRequestFlags flags, string clientIp)
         {
             int pathSize;
             List<Vector3> path = new List<Vector3>();
@@ -102,13 +102,11 @@ namespace AmeisenNavigation.Server
                                 {
                                     path = ChaikinCurve.Perform(path);
                                 }
-
                                 break;
 
                             case MovementType.MoveAlongSurface:
                                 float* surfacePath = AmeisenNav.MoveAlongSurface(mapId, pointerStart, pointerEnd);
                                 path.Add(new Vector3(surfacePath[0], surfacePath[1], surfacePath[2]));
-
                                 break;
 
                             case MovementType.CastMovementRay:
@@ -122,7 +120,16 @@ namespace AmeisenNavigation.Server
                                     // return none if target is not in line of sight
                                     path.Clear();
                                 }
+                                break;
 
+                            case MovementType.GetRandomPoint:
+                                float* randomPoint = AmeisenNav.GetRandomPoint(mapId);
+                                path.Add(new Vector3(randomPoint[0], randomPoint[1], randomPoint[2]));
+                                break;
+
+                            case MovementType.GetRandomPointAround:
+                                float* randomPointAround = AmeisenNav.GetRandomPointAround(mapId, pointerStart, maxRadius);
+                                path.Add(new Vector3(randomPointAround[0], randomPointAround[1], randomPointAround[2]));
                                 break;
                         }
                     }
@@ -130,7 +137,7 @@ namespace AmeisenNavigation.Server
             }
 
             sw.Stop();
-            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"{movementType} with {path.Count} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
+            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"{movementType} with {path.Count}/{Settings.MaxPointPathCount} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
             return path;
         }
 
@@ -154,7 +161,7 @@ namespace AmeisenNavigation.Server
                         {
                             PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
 
-                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MapId, pathRequest.MovementType, pathRequest.Flags, client.Client.RemoteEndPoint.ToString());
+                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MaxRadius, pathRequest.MapId, pathRequest.MovementType, pathRequest.Flags, client.Client.RemoteEndPoint.ToString());
 
                             writer.WriteLine($"{JsonConvert.SerializeObject(path)}&gt;");
                             writer.Flush();
@@ -179,26 +186,27 @@ namespace AmeisenNavigation.Server
         {
             while (!stopServer || LogQueue.Count > 0)
             {
-                if (LogQueue.TryDequeue(out LogEntry logEntry))
+                StringBuilder sb = new StringBuilder();
+
+                while (LogQueue.TryDequeue(out LogEntry logEntry))
                 {
                     if (logEntry.LogLevel >= Settings.LogLevel)
                     {
                         string logString = ColoredPrint(logEntry.ColoredPart, logEntry.Color, logEntry.UncoloredPart, logEntry.LogLevel);
                         if (Settings.LogToFile)
                         {
-                            try
-                            {
-                                File.AppendAllText(Settings.LogFilePath, logString);
-                            }
-                            catch
-                            {
-                                // ignored, if we cant write to file we cant log it lmao
-                            }
+                            sb.AppendLine(logString);
                         }
                     }
                 }
 
-                Thread.Sleep(1);
+                try
+                {
+                    File.WriteAllText(Settings.LogFilePath, sb.ToString());
+                }
+                catch { }
+
+                Thread.Sleep(500);
             }
         }
 
@@ -227,7 +235,8 @@ namespace AmeisenNavigation.Server
             }
             else
             {
-                AmeisenNav = new AmeisenNav(Settings.MmapsFolder.Replace('/', '\\'));
+                Settings.MmapsFolder = Settings.MmapsFolder.Replace('/', '\\');
+                AmeisenNav = new AmeisenNav(Settings.MmapsFolder, Settings.MaxPolyPathCount, Settings.MaxPointPathCount);
 
                 if (Settings.PreloadMaps.Length > 0)
                 {
@@ -237,7 +246,7 @@ namespace AmeisenNavigation.Server
                 TcpListener = new TcpListener(IPAddress.Parse(Settings.IpAddress), Settings.Port);
                 TcpListener.Start();
 
-                LogQueue.Enqueue(new LogEntry($"{Settings.IpAddress}:{Settings.Port} press Ctrl + C to exit...", ConsoleColor.Green, string.Empty, LogLevel.MASTER));
+                LogQueue.Enqueue(new LogEntry($"Listening on {Settings.IpAddress}:{Settings.Port} press Ctrl + C to exit...", ConsoleColor.Green, string.Empty, LogLevel.MASTER));
 
                 EnterServerLoop();
 
@@ -297,7 +306,9 @@ namespace AmeisenNavigation.Server
                         CheckForLogFileExistence();
                     }
 
-                    LogQueue.Enqueue(new LogEntry($"Loaded config file", ConsoleColor.Green));
+                    LogQueue.Enqueue(new LogEntry($"MaxPolyPathCount = {settings.MaxPolyPathCount}", ConsoleColor.White));
+                    LogQueue.Enqueue(new LogEntry($"MaxPointPathCount = {settings.MaxPointPathCount}", ConsoleColor.White));
+                    LogQueue.Enqueue(new LogEntry("Loaded config file", ConsoleColor.Green));
                 }
                 else
                 {

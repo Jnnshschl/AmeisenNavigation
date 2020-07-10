@@ -16,6 +16,12 @@ public class Settings
     [JsonProperty("logToFile")]
     public bool LogToFile { get; set; } = false;
 
+    [JsonProperty("maxPointPathCount")]
+    public int MaxPointPathCount { get; set; } = 256;
+
+    [JsonProperty("maxPolyPathCount")]
+    public int MaxPolyPathCount { get; set; } = 512;
+
     [JsonProperty("mmapsFolder")]
     public string MmapsFolder { get; set; } = "C:\\mmaps\\";
 
@@ -27,7 +33,4 @@ public class Settings
 
     [JsonProperty("removeOldLog")]
     public bool RemoveOldLog { get; set; } = true;
-
-    [JsonProperty("vmapsFolder")]
-    public string VmapsFolder { get; set; } = "C:\\vmaps\\";
 }
