@@ -9,7 +9,7 @@ using namespace System::Runtime::InteropServices;
 
 namespace AmeisenNavigationWrapper
 {
-	public ref class AmeisenNav
+	public ref class AmeisenNav : IDisposable
 	{
 	private:
 		AmeisenNavigation* ameisen_nav;
@@ -60,25 +60,43 @@ namespace AmeisenNavigationWrapper
 			return ameisen_nav->CastMovementRay(map_id, start, end);
 		}
 
-		float* MoveAlongSurface(int map_id, float start[], float end[])
+		array<float>^ MoveAlongSurface(int map_id, float start[], float end[])
 		{
-			float* positionToGoTo = new float[3];
+			float positionToGoTo[3];
 			ameisen_nav->MoveAlongSurface(map_id, start, end, reinterpret_cast<Vector3*>(positionToGoTo));
-			return positionToGoTo;
+
+			array<float>^ position = gcnew array<float>(3);
+			position[0] = positionToGoTo[0];
+			position[1] = positionToGoTo[1];
+			position[2] = positionToGoTo[2];
+
+			return position;
 		}
 
-		float* GetRandomPoint(int map_id)
+		array<float>^ GetRandomPoint(int map_id)
 		{
-			float* positionToGoTo = new float[3];
+			float positionToGoTo[3];
 			ameisen_nav->GetRandomPoint(map_id, reinterpret_cast<Vector3*>(positionToGoTo));
-			return positionToGoTo;
+
+			array<float>^ position = gcnew array<float>(3);
+			position[0] = positionToGoTo[0];
+			position[1] = positionToGoTo[1];
+			position[2] = positionToGoTo[2];
+
+			return position;
 		}
 
-		float* GetRandomPointAround(int map_id, float start[], float maxRadius)
+		array<float>^ GetRandomPointAround(int map_id, float start[], float maxRadius)
 		{
-			float* positionToGoTo = new float[3];
+			float positionToGoTo[3];
 			ameisen_nav->GetRandomPointAround(map_id, start, maxRadius, reinterpret_cast<Vector3*>(positionToGoTo));
-			return positionToGoTo;
+
+			array<float>^ position = gcnew array<float>(3);
+			position[0] = positionToGoTo[0];
+			position[1] = positionToGoTo[1];
+			position[2] = positionToGoTo[2];
+
+			return position;
 		}
 
 		/// <summary>
@@ -92,27 +110,10 @@ namespace AmeisenNavigationWrapper
 		/// <param name="end">The position to go to</param>
 		/// <param name="path_size">Count of waypoints inside the list, remember each waypoint has 3 floats</param>
 		/// <returns>Pointer to the array of waypoints</returns>
-		float* GetPath(int map_id, float start[], float end[], int* path_size)
+		array<float>^ GetPath(int map_id, float start[], float end[], int* path_size)
 		{
 			float* path = new float[maxPointPath * 3];
 			ameisen_nav->GetPath(map_id, start, end, reinterpret_cast<Vector3*>(path), path_size);
-			return path;
-		}
-
-		/// <summary>
-		/// Use this method if you dont want to mess around
-		/// with an unsafe pointer in your code, the path
-		/// will be retuned as an 1D array formatted like:
-		/// [ x1, y1, z1, x2, y2, z2, ...]
-		/// </summary>
-		/// <param name="map_id">The MapId as an integer 0 => Eastern Kingdoms...</param>
-		/// <param name="start">The position to start at</param>
-		/// <param name="end">The position to go to</param>
-		/// <param name="path_size">Count of waypoints inside the list, remember each waypoint has 3 floats</param>
-		/// <returns>Array of waypoints (x, y, z)</returns>
-		array<float>^ GetPathAsArray(int map_id, float start[], float end[], int* path_size)
-		{
-			float* path = GetPath(map_id, start, end, path_size);
 
 			array<float>^ temp_path = gcnew array<float>(*path_size * 3);
 			for (int i = 0; i < *path_size * 3; i += 3)
@@ -122,6 +123,7 @@ namespace AmeisenNavigationWrapper
 				temp_path[i + 2] = path[i + 2];
 			}
 
+			delete[] path;
 			return temp_path;
 		}
 	};

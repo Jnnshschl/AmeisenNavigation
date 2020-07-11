@@ -4,9 +4,7 @@ AmeisenNavigation::AmeisenNavigation(const std::string& mmapFolder, int maxPolyP
 	: m_MmapFolder(mmapFolder),
 	maxPolyPath(maxPolyPathLenght),
 	maxPointPath(maxPointPathLenght),
-	m_QueryFilter(dtQueryFilter()),
-	m_NavMeshMap(std::unordered_map<int, dtNavMesh*>()),
-	m_NavMeshQueryMap(std::unordered_map<int, dtNavMeshQuery*>())
+	m_QueryFilter(dtQueryFilter())
 {
 	m_QueryFilter.setIncludeFlags(NAV_GROUND | NAV_WATER);
 	m_QueryFilter.setExcludeFlags(NAV_EMPTY | NAV_GROUND_STEEP | NAV_MAGMA_SLIME);
@@ -72,14 +70,14 @@ bool AmeisenNavigation::GetPath(const int mapId, const Vector3& startPosition, c
 	}
 	else
 	{
-		dtPolyRef* polypath = new dtPolyRef[maxPolyPath];
+		const std::unique_ptr<dtPolyRef> polypath(new dtPolyRef[maxPolyPath]);
 		int polypathSize = 0;
 
-		if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->findPath(startPoly, endPoly, reinterpret_cast<const float*>(&closestPointStart), reinterpret_cast<const float*>(&closestPointEnd), &m_QueryFilter, polypath, &polypathSize, maxPolyPath)))
+		if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->findPath(startPoly, endPoly, reinterpret_cast<const float*>(&closestPointStart), reinterpret_cast<const float*>(&closestPointEnd), &m_QueryFilter, polypath.get(), &polypathSize, maxPolyPath)))
 		{
 			D(std::cout << ">> PolyPath size: " << polypathSize << "/" << maxPolyPath << std::endl);
 
-			if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->findStraightPath(reinterpret_cast<const float*>(&closestPointStart), reinterpret_cast<const float*>(&closestPointEnd), polypath, polypathSize, reinterpret_cast<float*>(path), nullptr, nullptr, pathSize, maxPointPath)))
+			if (dtStatusSucceed(m_NavMeshQueryMap[mapId]->findStraightPath(reinterpret_cast<const float*>(&closestPointStart), reinterpret_cast<const float*>(&closestPointEnd), polypath.get(), polypathSize, reinterpret_cast<float*>(path), nullptr, nullptr, pathSize, maxPointPath)))
 			{
 				D(std::cout << ">> PointPath size: " << (*pathSize) << "/" << maxPointPath << std::endl);
 
@@ -89,7 +87,6 @@ bool AmeisenNavigation::GetPath(const int mapId, const Vector3& startPosition, c
 					path[i] = RDToWowCoords(path[i]);
 				}
 
-				delete[] polypath;
 				return true;
 			}
 			else
@@ -104,7 +101,6 @@ bool AmeisenNavigation::GetPath(const int mapId, const Vector3& startPosition, c
 
 		*pathSize = 0;
 		path = nullptr;
-		delete[] polypath;
 		return false;
 	}
 }

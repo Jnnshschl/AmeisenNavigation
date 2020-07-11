@@ -91,7 +91,7 @@ namespace AmeisenNavigation.Server
                         switch (movementType)
                         {
                             case MovementType.MoveToPosition:
-                                float* movePath = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
+                                float[] movePath = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
 
                                 for (int i = 0; i < pathSize * 3; i += 3)
                                 {
@@ -105,7 +105,7 @@ namespace AmeisenNavigation.Server
                                 break;
 
                             case MovementType.MoveAlongSurface:
-                                float* surfacePath = AmeisenNav.MoveAlongSurface(mapId, pointerStart, pointerEnd);
+                                float[] surfacePath = AmeisenNav.MoveAlongSurface(mapId, pointerStart, pointerEnd);
                                 path.Add(new Vector3(surfacePath[0], surfacePath[1], surfacePath[2]));
                                 break;
 
@@ -123,12 +123,12 @@ namespace AmeisenNavigation.Server
                                 break;
 
                             case MovementType.GetRandomPoint:
-                                float* randomPoint = AmeisenNav.GetRandomPoint(mapId);
+                                float[] randomPoint = AmeisenNav.GetRandomPoint(mapId);
                                 path.Add(new Vector3(randomPoint[0], randomPoint[1], randomPoint[2]));
                                 break;
 
                             case MovementType.GetRandomPointAround:
-                                float* randomPointAround = AmeisenNav.GetRandomPointAround(mapId, pointerStart, maxRadius);
+                                float[] randomPointAround = AmeisenNav.GetRandomPointAround(mapId, pointerStart, maxRadius);
                                 path.Add(new Vector3(randomPointAround[0], randomPointAround[1], randomPointAround[2]));
                                 break;
                         }
