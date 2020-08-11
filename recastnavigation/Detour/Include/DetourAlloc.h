@@ -44,7 +44,7 @@ typedef void (dtFreeFunc)(void* ptr);
 /// Sets the base custom allocation functions to be used by Detour.
 ///  @param[in]		allocFunc	The memory allocation function to be used by #dtAlloc
 ///  @param[in]		freeFunc	The memory de-allocation function to be used by #dtFree
-void dtAllocSetCustom(dtAllocFunc *allocFunc, dtFreeFunc *freeFunc);
+void dtAllocSetCustom(dtAllocFunc* allocFunc, dtFreeFunc* freeFunc);
 
 /// Allocates a memory block.
 ///  @param[in]		size	The size, in bytes of memory, to allocate.

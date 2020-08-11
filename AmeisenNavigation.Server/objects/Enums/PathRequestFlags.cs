@@ -6,6 +6,7 @@ namespace AmeisenNavigation.Server.Objects.Enums
     public enum PathRequestFlags
     {
         None = 0,
-        ChaikinCurve = 1 << 0,
+        ChaikinCurve = 1,
+        CatmullRomSpline = 2,
     }
 }

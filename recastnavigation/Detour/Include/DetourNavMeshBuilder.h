@@ -25,12 +25,10 @@
 /// @ingroup detour
 struct dtNavMeshCreateParams
 {
-
 	/// @name Polygon Mesh Attributes
 	/// Used to create the base navigation graph.
 	/// See #rcPolyMesh for details related to these attributes.
 	/// @{
-
 	const unsigned short* verts;			///< The polygon mesh vertices. [(x, y, z) * #vertCount] [Unit: vx]
 	int vertCount;							///< The number vertices in the polygon mesh. [Limit: >= 3]
 	const unsigned short* polys;			///< The polygon data. [Size: #polyCount * 2 * #nvp]
@@ -43,7 +41,6 @@ struct dtNavMeshCreateParams
 	/// @name Height Detail Attributes (Optional)
 	/// See #rcPolyMeshDetail for details related to these attributes.
 	/// @{
-
 	const unsigned int* detailMeshes;		///< The height detail sub-mesh data. [Size: 4 * #polyCount]
 	const float* detailVerts;				///< The detail mesh vertices. [Size: 3 * #detailVertsCount] [Unit: wu]
 	int detailVertsCount;					///< The number of vertices in the detail mesh.
@@ -52,11 +49,10 @@ struct dtNavMeshCreateParams
 
 	/// @}
 	/// @name Off-Mesh Connections Attributes (Optional)
-	/// Used to define a custom point-to-point edge within the navigation graph, an 
-	/// off-mesh connection is a user defined traversable connection made up to two vertices, 
+	/// Used to define a custom point-to-point edge within the navigation graph, an
+	/// off-mesh connection is a user defined traversable connection made up to two vertices,
 	/// at least one of which resides within a navigation mesh polygon.
 	/// @{
-
 	/// Off-mesh connection vertices. [(ax, ay, az, bx, by, bz) * #offMeshConCount] [Unit: wu]
 	const float* offMeshConVerts;
 	/// Off-mesh connection radii. [Size: #offMeshConCount] [Unit: wu]
@@ -69,7 +65,7 @@ struct dtNavMeshCreateParams
 	///
 	/// 0 = Travel only from endpoint A to endpoint B.<br/>
 	/// #DT_OFFMESH_CON_BIDIR = Bidirectional travel.
-	const unsigned char* offMeshConDir;	
+	const unsigned char* offMeshConDir;
 	/// The user defined ids of the off-mesh connection. [Size: #offMeshConCount]
 	const unsigned int* offMeshConUserID;
 	/// The number of off-mesh connections. [Limit: >= 0]
@@ -79,7 +75,6 @@ struct dtNavMeshCreateParams
 	/// @name Tile Attributes
 	/// @note The tile grid/layer data can be left at zero if the destination is a single tile mesh.
 	/// @{
-
 	unsigned int userId;	///< The user defined id of the tile.
 	int tileX;				///< The tile's x-grid location within the multi-tile destination mesh. (Along the x-axis.)
 	int tileY;				///< The tile's y-grid location within the multi-tile desitation mesh. (Along the z-axis.)
@@ -90,7 +85,6 @@ struct dtNavMeshCreateParams
 	/// @}
 	/// @name General Configuration Attributes
 	/// @{
-
 	float walkableHeight;	///< The agent height. [Unit: wu]
 	float walkableRadius;	///< The agent radius. [Unit: wu]
 	float walkableClimb;	///< The agent maximum traversable ledge. (Up/Down) [Unit: wu]
@@ -136,14 +130,13 @@ This structure is used to marshal data between the Recast mesh generation pipeli
 
 See the rcPolyMesh and rcPolyMeshDetail documentation for detailed information related to mesh structure.
 
-Units are usually in voxels (vx) or world units (wu). The units for voxels, grid size, and cell size 
+Units are usually in voxels (vx) or world units (wu). The units for voxels, grid size, and cell size
 are all based on the values of #cs and #ch.
 
-The standard navigation mesh build process is to create tile data using dtCreateNavMeshData, then add the tile 
+The standard navigation mesh build process is to create tile data using dtCreateNavMeshData, then add the tile
 to a navigation mesh using either the dtNavMesh single tile <tt>init()</tt> function or the dtNavMesh::addTile()
 function.
 
 @see dtCreateNavMeshData
 
 */
-

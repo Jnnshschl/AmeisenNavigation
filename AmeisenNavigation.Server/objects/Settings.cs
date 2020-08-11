@@ -4,6 +4,12 @@ using System;
 
 public class Settings
 {
+    [JsonProperty("catmullRomSplinePoints")]
+    public int CatmullRomSplinePoints { get; set; } = 4;
+
+    [JsonProperty("chaikinIterations")]
+    public int ChaikinIterations { get; set; } = 1;
+
     [JsonProperty("ipAddress")]
     public string IpAddress { get; set; } = "0.0.0.0";
 

@@ -68,79 +68,6 @@ namespace AmeisenNavigation.Server
             }
         }
 
-        public static List<Vector3> GetPath(Vector3 start, Vector3 end, float maxRadius, int mapId, MovementType movementType, PathRequestFlags flags, string clientIp)
-        {
-            int pathSize;
-            List<Vector3> path = new List<Vector3>();
-
-            Stopwatch sw = new Stopwatch();
-            sw.Start();
-
-            lock (querylock)
-            {
-                if (!AmeisenNav.IsMapLoaded(mapId))
-                {
-                    AmeisenNav.LoadMap(mapId);
-                }
-
-                unsafe
-                {
-                    fixed (float* pointerStart = start.ToArray())
-                    fixed (float* pointerEnd = end.ToArray())
-                    {
-                        switch (movementType)
-                        {
-                            case MovementType.MoveToPosition:
-                                float[] movePath = AmeisenNav.GetPath(mapId, pointerStart, pointerEnd, &pathSize);
-
-                                for (int i = 0; i < pathSize * 3; i += 3)
-                                {
-                                    path.Add(new Vector3(movePath[i], movePath[i + 1], movePath[i + 2]));
-                                }
-
-                                if (flags.HasFlag(PathRequestFlags.ChaikinCurve))
-                                {
-                                    path = ChaikinCurve.Perform(path);
-                                }
-                                break;
-
-                            case MovementType.MoveAlongSurface:
-                                float[] surfacePath = AmeisenNav.MoveAlongSurface(mapId, pointerStart, pointerEnd);
-                                path.Add(new Vector3(surfacePath[0], surfacePath[1], surfacePath[2]));
-                                break;
-
-                            case MovementType.CastMovementRay:
-                                if (AmeisenNav.CastMovementRay(mapId, pointerStart, pointerEnd))
-                                {
-                                    // return end if target is in line of sight
-                                    path.Add(end);
-                                }
-                                else
-                                {
-                                    // return none if target is not in line of sight
-                                    path.Clear();
-                                }
-                                break;
-
-                            case MovementType.GetRandomPoint:
-                                float[] randomPoint = AmeisenNav.GetRandomPoint(mapId);
-                                path.Add(new Vector3(randomPoint[0], randomPoint[1], randomPoint[2]));
-                                break;
-
-                            case MovementType.GetRandomPointAround:
-                                float[] randomPointAround = AmeisenNav.GetRandomPointAround(mapId, pointerStart, maxRadius);
-                                path.Add(new Vector3(randomPointAround[0], randomPointAround[1], randomPointAround[2]));
-                                break;
-                        }
-                    }
-                }
-            }
-
-            sw.Stop();
-            LogQueue.Enqueue(new LogEntry($"[{clientIp}] ", ConsoleColor.Green, $"{movementType} with {path.Count}/{Settings.MaxPointPathCount} Nodes took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
-            return path;
-        }
-
         public static void HandleClient(TcpClient client)
         {
             LogQueue.Enqueue(new LogEntry($"Client connected: {client.Client.RemoteEndPoint}", ConsoleColor.Cyan));
@@ -156,16 +83,39 @@ namespace AmeisenNavigation.Server
                 {
                     try
                     {
-                        string rawData = reader.ReadLine().Replace("&gt;", string.Empty);
-                        if (!string.IsNullOrEmpty(rawData))
+                        string rawData = reader.ReadLine();
+
+                        if (!string.IsNullOrWhiteSpace(rawData)
+                            && Enum.TryParse(rawData[0].ToString(), out MsgType msgType))
                         {
-                            PathRequest pathRequest = JsonConvert.DeserializeObject<PathRequest>(rawData);
+                            rawData = rawData.Substring(1);
 
-                            List<Vector3> path = GetPath(pathRequest.A, pathRequest.B, pathRequest.MaxRadius, pathRequest.MapId, pathRequest.MovementType, pathRequest.Flags, client.Client.RemoteEndPoint.ToString());
+                            switch (msgType)
+                            {
+                                case MsgType.KeepAlive:
+                                    HandleKeepAlive(writer);
+                                    break;
 
-                            writer.WriteLine($"{JsonConvert.SerializeObject(path)}&gt;");
-                            writer.Flush();
+                                case MsgType.Path:
+                                    HandlePathRequest(writer, rawData);
+                                    break;
+
+                                case MsgType.RandomPoint:
+                                    Stopwatch swRandomPoint = new Stopwatch();
+                                    swRandomPoint.Start();
+
+                                    HandleRandomPointRequest(writer, rawData);
+
+                                    swRandomPoint.Stop();
+                                    LogQueue.Enqueue(new LogEntry($"[GETRANDOMPOINT] ", ConsoleColor.Green, $"FindRandomPoint took {swRandomPoint.ElapsedMilliseconds}ms ({swRandomPoint.ElapsedTicks} ticks)", LogLevel.INFO));
+                                    break;
+                            }
                         }
+                    }
+                    catch (IOException)
+                    {
+                        // occurs when client disconnects
+                        isClientConnected = false;
                     }
                     catch (Exception e)
                     {
@@ -214,7 +164,7 @@ namespace AmeisenNavigation.Server
         {
             // buggy need to find a beter way
             //// Console.CancelKeyPress += Console_CancelKeyPress;
-
+            ///
             PrintHeader();
 
             LogQueue = new ConcurrentQueue<LogEntry>();
@@ -284,6 +234,136 @@ namespace AmeisenNavigation.Server
             stopServer = true;
             TcpListener.Stop();
             e.Cancel = true;
+        }
+
+        private static void HandleKeepAlive(StreamWriter writer)
+        {
+            writer.WriteLine($"1");
+            writer.Flush();
+        }
+
+        private static void HandlePathRequest(StreamWriter writer, string rawData)
+        {
+            PathRequest request = JsonConvert.DeserializeObject<PathRequest>(rawData);
+
+            lock (querylock)
+            {
+                if (!AmeisenNav.IsMapLoaded(request.MapId))
+                {
+                    LogQueue.Enqueue(new LogEntry($"[MMAPS] ", ConsoleColor.Green, $"Loading Map: {request.MapId}", LogLevel.INFO));
+                    AmeisenNav.LoadMap(request.MapId);
+                }
+            }
+
+            unsafe
+            {
+                fixed (float* pointerStart = request.A.ToArray())
+                fixed (float* pointerEnd = request.B.ToArray())
+                {
+                    switch (request.MovementType)
+                    {
+                        case MovementType.FindPath:
+                            int pathSize = 0;
+                            float[] movePath;
+
+                            Stopwatch swPath = Stopwatch.StartNew();
+
+                            lock (querylock) { movePath = AmeisenNav.GetPath(request.MapId, pointerStart, pointerEnd, &pathSize); }
+
+                            List<Vector3> path = new List<Vector3>();
+                            for (int i = 0; i < pathSize * 3; i += 3)
+                            {
+                                path.Add(new Vector3(movePath[i], movePath[i + 1], movePath[i + 2]));
+                            }
+
+                            if (request.Flags.HasFlag(PathRequestFlags.ChaikinCurve))
+                            {
+                                if (path.Count > 1)
+                                {
+                                    path = ChaikinCurve.Perform(path, Settings.ChaikinIterations);
+                                }
+                                else
+                                {
+                                    request.Flags &= ~PathRequestFlags.ChaikinCurve;
+                                }
+                            }
+
+                            if (request.Flags.HasFlag(PathRequestFlags.CatmullRomSpline))
+                            {
+                                if (path.Count >= 4)
+                                {
+                                    path = CatmullRomSpline.Perform(path, Settings.CatmullRomSplinePoints);
+                                }
+                                else
+                                {
+                                    request.Flags &= ~PathRequestFlags.CatmullRomSpline;
+                                }
+                            }
+
+                            swPath.Stop();
+                            LogQueue.Enqueue(new LogEntry($"[FINDPATH] ", ConsoleColor.Green, $"Generating path with {pathSize}/{Settings.MaxPointPathCount} nodes took {swPath.ElapsedMilliseconds}ms ({swPath.ElapsedTicks} ticks) (Flags: {request.Flags})", LogLevel.INFO));
+
+                            writer.WriteLine($"{JsonConvert.SerializeObject(path)}");
+                            break;
+
+                        case MovementType.MoveAlongSurface:
+                            Stopwatch swMoveAlongSurface = Stopwatch.StartNew();
+
+                            float[] surfacePath;
+                            lock (querylock) { surfacePath = AmeisenNav.MoveAlongSurface(request.MapId, pointerStart, pointerEnd); }
+
+                            swMoveAlongSurface.Stop();
+                            LogQueue.Enqueue(new LogEntry($"[MOVEALONGSURFACE] ", ConsoleColor.Green, $"MoveAlongSurface took {swMoveAlongSurface.ElapsedMilliseconds}ms ({swMoveAlongSurface.ElapsedTicks} ticks)", LogLevel.INFO));
+
+                            writer.WriteLine($"{JsonConvert.SerializeObject(Vector3.FromArray(surfacePath))}");
+                            break;
+
+                        case MovementType.CastMovementRay:
+                            Stopwatch swCastMovementRay = Stopwatch.StartNew();
+
+                            string result;
+                            lock (querylock) { result = AmeisenNav.CastMovementRay(request.MapId, pointerStart, pointerEnd) ? JsonConvert.SerializeObject(request.B) : string.Empty; }
+
+                            swCastMovementRay.Stop();
+                            LogQueue.Enqueue(new LogEntry($"[CASTMOVEMENTRAY] ", ConsoleColor.Green, $"CastMovementRay took {swCastMovementRay.ElapsedMilliseconds}ms ({swCastMovementRay.ElapsedTicks} ticks)", LogLevel.INFO));
+
+                            writer.WriteLine($"{result}");
+                            break;
+                    }
+
+                    writer.Flush();
+                }
+            }
+        }
+
+        private static void HandleRandomPointRequest(StreamWriter writer, string rawData)
+        {
+            RandomPointRequest request = JsonConvert.DeserializeObject<RandomPointRequest>(rawData);
+
+            lock (querylock)
+            {
+                if (!AmeisenNav.IsMapLoaded(request.MapId))
+                {
+                    LogQueue.Enqueue(new LogEntry($"[MMAPS] ", ConsoleColor.Green, $"Loading Map: {request.MapId}", LogLevel.INFO));
+                    AmeisenNav.LoadMap(request.MapId);
+                }
+            }
+
+            unsafe
+            {
+                fixed (float* pointerStart = request.A.ToArray())
+                {
+                    float[] randomPoint;
+                    lock (querylock)
+                    {
+                        randomPoint = request.MaxRadius > 0f ? AmeisenNav.GetRandomPointAround(request.MapId, pointerStart, request.MaxRadius)
+                                                             : AmeisenNav.GetRandomPoint(request.MapId);
+                    }
+
+                    writer.WriteLine($"{JsonConvert.SerializeObject(Vector3.FromArray(randomPoint))}");
+                    writer.Flush();
+                }
+            }
         }
 
         private static Settings LoadConfigFile()
