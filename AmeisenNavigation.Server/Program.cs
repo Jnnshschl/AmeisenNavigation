@@ -74,6 +74,10 @@ namespace AmeisenNavigation.Server
             LogQueue.Enqueue(new LogEntry($"Client connected: {client.Client.RemoteEndPoint}", ConsoleColor.Cyan));
 
             using Stream stream = client.GetStream();
+
+            // stream.ReadTimeout = 500;
+            // stream.WriteTimeout = 500;
+
             using BinaryReader binaryReader = new BinaryReader(stream);
             using BinaryWriter binaryWriter = new BinaryWriter(stream);
 
@@ -85,53 +89,58 @@ namespace AmeisenNavigation.Server
             {
                 try
                 {
-                    int dataSize = BitConverter.ToInt32(binaryReader.ReadBytes(4), 0);
+                    byte[] sizeBytes = binaryReader.ReadBytes(4);
 
-                    if (dataSize > 0)
+                    if (sizeBytes.Length > 0)
                     {
-                        byte[] bytes = binaryReader.ReadBytes(dataSize);
+                        int dataSize = BitConverter.ToInt32(sizeBytes, 0);
 
-                        int msgType = BitConverter.ToInt32(bytes, 0);
-
-                        if (bytes != null && Enum.IsDefined(typeof(MsgType), msgType))
+                        if (dataSize > 0)
                         {
-                            switch ((MsgType)msgType)
+                            byte[] bytes = binaryReader.ReadBytes(dataSize);
+
+                            int msgType = BitConverter.ToInt32(bytes, 0);
+
+                            if (bytes != null && Enum.IsDefined(typeof(MsgType), msgType))
                             {
-                                case MsgType.KeepAlive:
-                                    HandleKeepAlive(binaryWriter);
-                                    break;
+                                switch ((MsgType)msgType)
+                                {
+                                    case MsgType.KeepAlive:
+                                        HandleKeepAlive(binaryWriter);
+                                        break;
 
-                                case MsgType.Path:
+                                    case MsgType.Path:
 
-                                    if (bytes.Length == sizeof(PathRequest))
-                                    {
-                                        HandlePathRequest(binaryWriter, bytes);
-                                    }
-                                    else
-                                    {
-                                        LogQueue.Enqueue(new LogEntry("Received malformed PathRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
-                                    }
+                                        if (bytes.Length == sizeof(PathRequest))
+                                        {
+                                            HandlePathRequest(binaryWriter, bytes);
+                                        }
+                                        else
+                                        {
+                                            LogQueue.Enqueue(new LogEntry("Received malformed PathRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
+                                        }
 
-                                    break;
+                                        break;
 
-                                case MsgType.RandomPoint:
+                                    case MsgType.RandomPoint:
 
-                                    if (bytes.Length == sizeof(RandomPointRequest))
-                                    {
-                                        Stopwatch swRandomPoint = new Stopwatch();
-                                        swRandomPoint.Start();
+                                        if (bytes.Length == sizeof(RandomPointRequest))
+                                        {
+                                            Stopwatch swRandomPoint = new Stopwatch();
+                                            swRandomPoint.Start();
 
-                                        HandleRandomPointRequest(binaryWriter, bytes);
+                                            HandleRandomPointRequest(binaryWriter, bytes);
 
-                                        swRandomPoint.Stop();
-                                        LogQueue.Enqueue(new LogEntry("[RANDOMPOINT] ", ConsoleColor.Green, $"FindRandomPoint took {swRandomPoint.ElapsedMilliseconds}ms ({swRandomPoint.ElapsedTicks} ticks)", LogLevel.INFO));
-                                    }
-                                    else
-                                    {
-                                        LogQueue.Enqueue(new LogEntry("Received malformed RandomPointRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
-                                    }
+                                            swRandomPoint.Stop();
+                                            LogQueue.Enqueue(new LogEntry("[RANDOMPOINT] ", ConsoleColor.Green, $"FindRandomPoint took {swRandomPoint.ElapsedMilliseconds}ms ({swRandomPoint.ElapsedTicks} ticks)", LogLevel.INFO));
+                                        }
+                                        else
+                                        {
+                                            LogQueue.Enqueue(new LogEntry("Received malformed RandomPointRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
+                                        }
 
-                                    break;
+                                        break;
+                                }
                             }
                         }
                     }
@@ -143,7 +152,7 @@ namespace AmeisenNavigation.Server
                 }
                 catch (Exception e)
                 {
-                    string errorMsg = $"{e.GetType()} occured at client ";
+                    string errorMsg = $"{e.GetType()} occured at client: \n{e.StackTrace}";
                     LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
 
                     isClientConnected = false;
@@ -250,7 +259,7 @@ namespace AmeisenNavigation.Server
 
         private static void HandleKeepAlive(BinaryWriter writer)
         {
-            writer.Write(new byte[] { 0, 0, 0, 1, 1 }, 0, 5);
+            writer.Write(new byte[] { 1, 0, 0, 0, 1 }, 0, 5);
             writer.Flush();
         }
 
@@ -278,9 +287,23 @@ namespace AmeisenNavigation.Server
 
                         Stopwatch swPath = Stopwatch.StartNew();
 
-                        lock (querylock) { movePath = AmeisenNav.GetPath(request.MapId, pStartPosition, pEndPosition, &pathSize); }
+                        try
+                        {
+                            lock (querylock) { movePath = AmeisenNav.GetPath(request.MapId, pStartPosition, pEndPosition, &pathSize); }
+                        }
+                        catch { movePath = null; }
 
-                        List<Vector3> path = new List<Vector3>(movePath.Length * 3);
+                        List<Vector3> path = new List<Vector3>(movePath != null ? movePath.Length * 3 : 1);
+
+                        if (movePath == null || movePath.Length == 0)
+                        {
+                            path.Add(Vector3.Zero);
+
+                            fixed (Vector3* pPath = path.ToArray())
+                                SendData(writer, pPath, sizeof(Vector3));
+
+                            return;
+                        }
 
                         for (int i = 0; i < pathSize * 3; i += 3)
                         {
@@ -311,20 +334,10 @@ namespace AmeisenNavigation.Server
                             }
                         }
 
-                        if (path.Count == 0)
-                        {
-                            path.Add(Vector3.Zero);
+                        int size = sizeof(Vector3) * path.Count;
 
-                            fixed (Vector3* pPath = path.ToArray())
-                                SendData(writer, pPath, sizeof(Vector3));
-                        }
-                        else
-                        {
-                            int size = sizeof(Vector3) * path.Count;
-
-                            fixed (Vector3* pPath = path.ToArray())
-                                SendData(writer, pPath, size);
-                        }
+                        fixed (Vector3* pPath = path.ToArray())
+                            SendData(writer, pPath, size);
 
                         swPath.Stop();
                         LogQueue.Enqueue(new LogEntry("[FINDPATH] ", ConsoleColor.Green, $"Generating path with {path.Count}/{Settings.MaxPointPathCount} nodes took {swPath.ElapsedMilliseconds}ms ({swPath.ElapsedTicks} ticks) (Flags: {request.Flags})", LogLevel.INFO));
