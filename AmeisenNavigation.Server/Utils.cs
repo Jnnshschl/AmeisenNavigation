@@ -1,38 +1,32 @@
-﻿using AmeisenNavigation.Server.Objects;
-using System.Text;
+﻿using System;
+using System.Runtime.CompilerServices;
 
 namespace AmeisenNavigation.Server
 {
     public static class Utils
     {
-        public static string CleanString(string input)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public unsafe static byte[] ToBytes<T>(T* obj, int size) where T : unmanaged
         {
-            StringBuilder sb = new StringBuilder(input.Length);
+            if ((int)obj == 0) return null;
 
-            foreach (char c in input)
-            {
-                if (c != '\n' && c != '\r' && c != '\t')
-                {
-                    sb.Append(c);
-                }
-            }
+            byte[] bytes = new byte[size];
 
-            return sb.ToString();
+            fixed (byte* pBytes = bytes)            
+                Buffer.MemoryCopy(obj, pBytes, size, size);            
+
+            return bytes;
         }
 
-        public static Vector3 Normalize(Vector3 vector, float max)
-                    => new Vector3(vector.X / max, vector.Y / max, vector.Z / max);
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public unsafe static T FromBytes<T>(byte[] bytes) where T : unmanaged
+        {
+            if (bytes == null || bytes.Length == 0 || bytes.Length < sizeof(T)) return default;
 
-        public static Vector3 Truncate(Vector3 vector, float max)
-            => new Vector3(
-                vector.X < 0 ?
-                    vector.X <= max * -1 ? max * -1 : vector.X
-                    : vector.X >= max ? max : vector.X,
-                vector.Y < 0 ?
-                    vector.Y <= max * -1 ? max * -1 : vector.Y
-                    : vector.Y >= max ? max : vector.Y,
-                vector.Z < 0 ?
-                    vector.Z <= max * -1 ? max * -1 : vector.Z
-                    : vector.Z >= max ? max : vector.Z);
+            fixed (byte* pBytes = bytes)
+            {
+                return *(T*)pBytes;
+            }
+        }
     }
 }

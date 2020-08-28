@@ -16,6 +16,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Demo", "A
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Wrapper", "AmeisenNavigation.Wrapper\AmeisenNavigation.Wrapper.vcxproj", "{2110AD21-04ED-423C-97A4-B68AC46C39F7}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.ServerX", "AmeisenNavigation.ServerX\AmeisenNavigation.ServerX.vcxproj", "{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -86,6 +88,16 @@ Global
 		{2110AD21-04ED-423C-97A4-B68AC46C39F7}.Release|x64.Build.0 = Debug|Win32
 		{2110AD21-04ED-423C-97A4-B68AC46C39F7}.Release|x86.ActiveCfg = Debug|Win32
 		{2110AD21-04ED-423C-97A4-B68AC46C39F7}.Release|x86.Build.0 = Debug|Win32
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Debug|Any CPU.ActiveCfg = Debug|Win32
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Debug|x64.ActiveCfg = Debug|x64
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Debug|x64.Build.0 = Debug|x64
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Debug|x86.ActiveCfg = Debug|Win32
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Debug|x86.Build.0 = Debug|Win32
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Release|Any CPU.ActiveCfg = Release|Win32
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Release|x64.ActiveCfg = Release|x64
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Release|x64.Build.0 = Release|x64
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Release|x86.ActiveCfg = Release|Win32
+		{040950C3-6E0D-44D1-9CA9-0ED35ABE005A}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

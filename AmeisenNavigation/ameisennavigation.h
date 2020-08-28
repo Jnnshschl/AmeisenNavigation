@@ -56,14 +56,14 @@ class AmeisenNavigation
 private:
 	int maxPolyPath;
 	int maxPointPath;
-	std::string m_MmapFolder;
-	dtQueryFilter m_QueryFilter;
-	std::unordered_map<int, dtNavMesh*> m_NavMeshMap;
-	std::unordered_map<int, dtNavMeshQuery*> m_NavMeshQueryMap;
+	std::string mMmapFolder;
+	dtQueryFilter mQueryFilter;
+	std::unordered_map<int, dtNavMesh*> mNavMeshMap;
+	std::unordered_map<int, dtNavMeshQuery*> mNavMeshQueryMap;
 
 	Vector3 RDToWowCoords(const Vector3& pos);
 	Vector3 WowToRDCoords(const Vector3& pos);
-	bool PreparePathfinding(const int mapId, int* pathSize);
+	bool PreparePathfinding(const int mapId);
 	std::string FormatTrailingZeros(const int number, const int zeroCount);
 
 public:
