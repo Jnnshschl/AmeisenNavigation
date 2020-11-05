@@ -293,7 +293,7 @@ bool AmeisenNavigation::LoadMmapsForContinent(const int mapId)
 				return false;
 			}
 
-			if (mmapTileHeader.mmapVersion != MMAP_VERSION)
+			if (mmapTileHeader.mmapVersion < MMAP_VERSION)
 			{
 				std::cerr << ">> Wrong MMAP version (got:" << mmapTileHeader.mmapVersion << ", expected:" << MMAP_VERSION << ") dtTile " << x << " " << y << " (mapId: " << mapId << ")" << std::endl;
 				return false;
