@@ -15,12 +15,12 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Main.cpp">
+    <ClCompile Include="AmeisenNavigationServerX.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Main.hpp">
+    <ClInclude Include="AmeisenNavigationServerX.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
   </ItemGroup>
