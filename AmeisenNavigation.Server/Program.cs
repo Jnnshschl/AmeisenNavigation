@@ -5,7 +5,6 @@ using AmeisenNavigationWrapper;
 using Newtonsoft.Json;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
 using System.Net;
@@ -19,9 +18,7 @@ namespace AmeisenNavigation.Server
     internal static class Program
     {
         private static readonly object querylock = new object();
-        private static readonly string SettingsPath = AppDomain.CurrentDomain.BaseDirectory + "config.json";
         private static int clientCount = 0;
-        private static bool stopServer = false;
 
         private static AmeisenNav AmeisenNav { get; set; }
 
@@ -31,10 +28,14 @@ namespace AmeisenNavigation.Server
 
         private static Settings Settings { get; set; }
 
+        private static string SettingsPath { get; } = AppDomain.CurrentDomain.BaseDirectory + "config.json";
+
+        private static bool StopServer { get; set; }
+
         private static TcpListener TcpListener { get; set; }
 
         public static string BuildLog(string s, LogLevel logLevel)
-            => $"[{DateTime.Now.ToLongTimeString()}] {$"[{logLevel}]",9} >> {s}";
+            => $"{$"[{logLevel}]",9} >> {s}";
 
         public static string ColoredPrint(string s, ConsoleColor color, string uncoloredOutput = "", LogLevel logLevel = LogLevel.INFO)
         {
@@ -48,125 +49,9 @@ namespace AmeisenNavigation.Server
             return $"{logString}{uncoloredOutput}";
         }
 
-        public static void EnterServerLoop()
+        public static void LogThreadRoutine()
         {
-            while (!stopServer)
-            {
-                try
-                {
-                    TcpClient newClient = TcpListener.AcceptTcpClient();
-                    Thread userThread = new Thread(new ThreadStart(() => HandleClient(newClient)));
-                    userThread.Start();
-                }
-                catch (Exception e)
-                {
-                    if (!stopServer)
-                    {
-                        string errorMsg = $"{e.GetType()} occured while at the TcpListener\n";
-                        LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, e.ToString(), LogLevel.ERROR));
-                    }
-                }
-            }
-        }
-
-        public unsafe static void HandleClient(TcpClient client)
-        {
-            LogQueue.Enqueue(new LogEntry($"Client connected: {client.Client.RemoteEndPoint}", ConsoleColor.Cyan));
-
-            using Stream stream = client.GetStream();
-
-            // stream.ReadTimeout = 500;
-            // stream.WriteTimeout = 500;
-
-            using BinaryReader binaryReader = new BinaryReader(stream);
-            using BinaryWriter binaryWriter = new BinaryWriter(stream);
-
-            bool isClientConnected = true;
-            Interlocked.Increment(ref clientCount);
-            UpdateConnectedClientCount();
-
-            while (isClientConnected)
-            {
-                try
-                {
-                    byte[] sizeBytes = binaryReader.ReadBytes(4);
-
-                    if (sizeBytes.Length > 0)
-                    {
-                        int dataSize = BitConverter.ToInt32(sizeBytes, 0);
-
-                        if (dataSize > 0)
-                        {
-                            byte[] bytes = binaryReader.ReadBytes(dataSize);
-
-                            int msgType = BitConverter.ToInt32(bytes, 0);
-
-                            if (bytes != null && Enum.IsDefined(typeof(MsgType), msgType))
-                            {
-                                switch ((MsgType)msgType)
-                                {
-                                    case MsgType.KeepAlive:
-                                        HandleKeepAlive(binaryWriter);
-                                        break;
-
-                                    case MsgType.Path:
-
-                                        if (bytes.Length == sizeof(PathRequest))
-                                        {
-                                            HandlePathRequest(binaryWriter, bytes);
-                                        }
-                                        else
-                                        {
-                                            LogQueue.Enqueue(new LogEntry("Received malformed PathRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
-                                        }
-
-                                        break;
-
-                                    case MsgType.RandomPoint:
-
-                                        if (bytes.Length == sizeof(RandomPointRequest))
-                                        {
-                                            Stopwatch swRandomPoint = new Stopwatch();
-                                            swRandomPoint.Start();
-
-                                            HandleRandomPointRequest(binaryWriter, bytes);
-
-                                            swRandomPoint.Stop();
-                                            LogQueue.Enqueue(new LogEntry("[RANDOMPOINT] ", ConsoleColor.Green, $"FindRandomPoint took {swRandomPoint.ElapsedMilliseconds}ms ({swRandomPoint.ElapsedTicks} ticks)", LogLevel.INFO));
-                                        }
-                                        else
-                                        {
-                                            LogQueue.Enqueue(new LogEntry("Received malformed RandomPointRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
-                                        }
-
-                                        break;
-                                }
-                            }
-                        }
-                    }
-                }
-                catch (IOException)
-                {
-                    // occurs when client disconnects
-                    isClientConnected = false;
-                }
-                catch (Exception e)
-                {
-                    string errorMsg = $"{e.GetType()} occured at client: \n{e.StackTrace}";
-                    LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
-
-                    isClientConnected = false;
-                }
-            }
-
-            Interlocked.Decrement(ref clientCount);
-            UpdateConnectedClientCount();
-            LogQueue.Enqueue(new LogEntry("Client disconnected: ", ConsoleColor.Cyan, client.Client.RemoteEndPoint.ToString()));
-        }
-
-        public static void LoggingThreadRoutine()
-        {
-            while (!stopServer || LogQueue.Count > 0)
+            while (!StopServer || LogQueue.Count > 0)
             {
                 StringBuilder sb = new StringBuilder();
 
@@ -200,7 +85,7 @@ namespace AmeisenNavigation.Server
             LogQueue = new ConcurrentQueue<LogEntry>();
             Settings = LoadConfigFile();
 
-            SetupLogging();
+            LogSetup();
 
             UpdateConnectedClientCount();
 
@@ -228,13 +113,174 @@ namespace AmeisenNavigation.Server
 
                 LogQueue.Enqueue(new LogEntry($"Listening on {Settings.IpAddress}:{Settings.Port} press Ctrl + C to exit...", ConsoleColor.Green, string.Empty, LogLevel.MASTER));
 
-                EnterServerLoop();
+                TcpEnterServerLoop();
 
                 AmeisenNav.Dispose();
             }
         }
 
-        private static void CheckForLogFileExistence()
+        public static void TcpEnterServerLoop()
+        {
+            while (!StopServer)
+            {
+                try
+                {
+                    TcpClient newClient = TcpListener.AcceptTcpClient();
+                    Thread userThread = new Thread(new ThreadStart(() => TcpHandleClient(newClient)));
+                    userThread.Start();
+                }
+                catch (Exception e)
+                {
+                    if (!StopServer)
+                    {
+                        string errorMsg = $"{e.GetType()} occured while at the TcpListener\n";
+                        LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, e.ToString(), LogLevel.ERROR));
+                    }
+                }
+            }
+        }
+
+        public unsafe static void TcpHandleClient(TcpClient client)
+        {
+            LogQueue.Enqueue(new LogEntry($"Client connected: ", ConsoleColor.Cyan, client.Client.RemoteEndPoint.ToString()));
+
+            using Stream stream = client.GetStream();
+            using BinaryReader binaryReader = new BinaryReader(stream);
+            using BinaryWriter binaryWriter = new BinaryWriter(stream);
+
+            stream.ReadTimeout = 3000;
+            stream.WriteTimeout = 3000;
+
+            bool isClientConnected = true;
+            Interlocked.Increment(ref clientCount);
+            UpdateConnectedClientCount();
+
+            int failCounter = 0;
+
+            while (isClientConnected)
+            {
+                try
+                {
+                    byte[] sizeBytes = binaryReader.ReadBytes(4);
+
+                    if (sizeBytes.Length > 0)
+                    {
+                        int dataSize = BitConverter.ToInt32(sizeBytes, 0);
+
+                        if (dataSize > 0)
+                        {
+                            byte[] bytes = binaryReader.ReadBytes(dataSize);
+
+                            int msgType = BitConverter.ToInt32(bytes, 0);
+
+                            if (bytes != null && Enum.IsDefined(typeof(MsgType), msgType))
+                            {
+                                switch ((MsgType)msgType)
+                                {
+                                    case MsgType.KeepAlive:
+                                        TcpHandleKeepAlive(binaryWriter);
+                                        break;
+
+                                    case MsgType.Path:
+                                        if (bytes.Length == sizeof(PathRequest))
+                                        {
+                                            TcpHandlePathRequest(binaryWriter, bytes);
+                                        }
+                                        else
+                                        {
+                                            LogQueue.Enqueue(new LogEntry("Received malformed PathRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
+                                        }
+                                        break;
+
+                                    case MsgType.RandomPoint:
+                                        if (bytes.Length == sizeof(RandomPointRequest))
+                                        {
+                                            Stopwatch sw = Stopwatch.StartNew();
+
+                                            TcpHandleRandomPointRequest(binaryWriter, bytes);
+
+                                            sw.Stop();
+                                            LogQueue.Enqueue(new LogEntry("[RANDOMPOINT] ", ConsoleColor.Green, $"took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)", LogLevel.INFO));
+                                        }
+                                        else
+                                        {
+                                            LogQueue.Enqueue(new LogEntry("Received malformed RandomPointRequest...", ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
+                                        }
+                                        break;
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        if (failCounter >= 5)
+                        {
+                            isClientConnected = false;
+                        }
+
+                        Thread.Sleep(500);
+                        ++failCounter;
+                    }
+                }
+                catch (IOException)
+                {
+                    // occurs when client disconnects
+                    isClientConnected = false;
+                }
+                catch (Exception e)
+                {
+                    string errorMsg = $"{e.GetType()} occured at client: \n{e.StackTrace}";
+                    LogQueue.Enqueue(new LogEntry(errorMsg, ConsoleColor.Red, $"{client.Client.RemoteEndPoint}", LogLevel.ERROR));
+
+                    isClientConnected = false;
+                }
+            }
+
+            Interlocked.Decrement(ref clientCount);
+            UpdateConnectedClientCount();
+            LogQueue.Enqueue(new LogEntry("Client disconnected: ", ConsoleColor.Cyan, client.Client.RemoteEndPoint.ToString()));
+        }
+
+        private static Settings LoadConfigFile()
+        {
+            Settings settings = null;
+
+            try
+            {
+                if (File.Exists(SettingsPath))
+                {
+                    settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(SettingsPath));
+
+                    if (!settings.MmapsFolder.EndsWith("/") && !settings.MmapsFolder.EndsWith("\\"))
+                    {
+                        settings.MmapsFolder += "/";
+                    }
+
+                    if (settings.LogToFile)
+                    {
+                        LogCheckFileExistence();
+                    }
+
+                    LogQueue.Enqueue(new LogEntry($"MaxPolyPathCount = {settings.MaxPolyPathCount}", ConsoleColor.White));
+                    LogQueue.Enqueue(new LogEntry($"MaxPointPathCount = {settings.MaxPointPathCount}", ConsoleColor.White));
+                    LogQueue.Enqueue(new LogEntry("Loaded config file", ConsoleColor.Green));
+                }
+                else
+                {
+                    settings = new Settings();
+                    File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
+                    LogQueue.Enqueue(new LogEntry("Created default config file", ConsoleColor.White));
+                }
+            }
+            catch (Exception ex)
+            {
+                LogQueue.Enqueue(new LogEntry("Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString(), LogLevel.ERROR));
+            }
+
+            return settings;
+        }
+
+        private static void LogCheckFileExistence()
         {
             // create the directory if needed
             if (!Directory.Exists(Settings.LogFilePath))
@@ -257,187 +303,11 @@ namespace AmeisenNavigation.Server
             }
         }
 
-        private static void HandleKeepAlive(BinaryWriter writer)
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void LogSetup()
         {
-            writer.Write(new byte[] { 1, 0, 0, 0, 1 }, 0, 5);
-            writer.Flush();
-        }
-
-        private unsafe static void HandlePathRequest(BinaryWriter writer, byte[] bytes)
-        {
-            PathRequest request = Utils.FromBytes<PathRequest>(bytes);
-
-            lock (querylock)
-            {
-                if (!AmeisenNav.IsMapLoaded(request.MapId))
-                {
-                    LogQueue.Enqueue(new LogEntry("[MMAPS] ", ConsoleColor.Green, $"Loading Map: {request.MapId}", LogLevel.INFO));
-                    AmeisenNav.LoadMap(request.MapId);
-                }
-            }
-
-            fixed (float* pStartPosition = request.A.ToArray())
-            fixed (float* pEndPosition = request.B.ToArray())
-            {
-                switch (request.MovementType)
-                {
-                    case MovementType.FindPath:
-                        int pathSize = 0;
-                        float[] movePath;
-
-                        Stopwatch swPath = Stopwatch.StartNew();
-
-                        try
-                        {
-                            lock (querylock) { movePath = AmeisenNav.GetPath(request.MapId, pStartPosition, pEndPosition, &pathSize); }
-                        }
-                        catch { movePath = null; }
-
-                        List<Vector3> path = new List<Vector3>(movePath != null ? movePath.Length * 3 : 1);
-
-                        if (movePath == null || movePath.Length == 0)
-                        {
-                            path.Add(Vector3.Zero);
-
-                            fixed (Vector3* pPath = path.ToArray())
-                                SendData(writer, pPath, sizeof(Vector3));
-
-                            return;
-                        }
-
-                        for (int i = 0; i < pathSize * 3; i += 3)
-                        {
-                            path.Add(new Vector3(movePath[i], movePath[i + 1], movePath[i + 2]));
-                        }
-
-                        if (request.Flags.HasFlag(PathRequestFlags.ChaikinCurve))
-                        {
-                            if (path.Count > 1)
-                            {
-                                path = ChaikinCurve.Perform(path, Settings.ChaikinIterations);
-                            }
-                            else
-                            {
-                                request.Flags &= ~PathRequestFlags.ChaikinCurve;
-                            }
-                        }
-
-                        if (request.Flags.HasFlag(PathRequestFlags.CatmullRomSpline))
-                        {
-                            if (path.Count >= 4)
-                            {
-                                path = CatmullRomSpline.Perform(path, Settings.CatmullRomSplinePoints);
-                            }
-                            else
-                            {
-                                request.Flags &= ~PathRequestFlags.CatmullRomSpline;
-                            }
-                        }
-
-                        int size = sizeof(Vector3) * path.Count;
-
-                        fixed (Vector3* pPath = path.ToArray())
-                            SendData(writer, pPath, size);
-
-                        swPath.Stop();
-                        LogQueue.Enqueue(new LogEntry("[FINDPATH] ", ConsoleColor.Green, $"Generating path with {path.Count}/{Settings.MaxPointPathCount} nodes took {swPath.ElapsedMilliseconds}ms ({swPath.ElapsedTicks} ticks) (Flags: {request.Flags})", LogLevel.INFO));
-
-                        break;
-
-                    case MovementType.MoveAlongSurface:
-                        Stopwatch swMoveAlongSurface = Stopwatch.StartNew();
-
-                        float[] surfacePath;
-                        lock (querylock) { surfacePath = AmeisenNav.MoveAlongSurface(request.MapId, pStartPosition, pEndPosition); }
-
-                        fixed (float* pSurfacePath = surfacePath)
-                            SendData(writer, pSurfacePath, sizeof(Vector3));
-
-                        swMoveAlongSurface.Stop();
-                        LogQueue.Enqueue(new LogEntry("[MOVEALONGSURFACE] ", ConsoleColor.Green, $"MoveAlongSurface took {swMoveAlongSurface.ElapsedMilliseconds}ms ({swMoveAlongSurface.ElapsedTicks} ticks)", LogLevel.INFO));
-
-                        break;
-
-                    case MovementType.CastMovementRay:
-                        Stopwatch swCastMovementRay = Stopwatch.StartNew();
-
-                        Vector3 castRayResult;
-                        lock (querylock) { castRayResult = AmeisenNav.CastMovementRay(request.MapId, pStartPosition, pEndPosition) ? request.B : Vector3.Zero; }
-
-                        SendData(writer, &castRayResult, sizeof(Vector3));
-
-                        swCastMovementRay.Stop();
-                        LogQueue.Enqueue(new LogEntry("[CASTMOVEMENTRAY] ", ConsoleColor.Green, $"CastMovementRay took {swCastMovementRay.ElapsedMilliseconds}ms ({swCastMovementRay.ElapsedTicks} ticks)", LogLevel.INFO));
-
-                        break;
-                }
-            }
-        }
-
-        private unsafe static void HandleRandomPointRequest(BinaryWriter writer, byte[] bytes)
-        {
-            RandomPointRequest request = Utils.FromBytes<RandomPointRequest>(bytes);
-
-            lock (querylock)
-            {
-                if (!AmeisenNav.IsMapLoaded(request.MapId))
-                {
-                    LogQueue.Enqueue(new LogEntry("[MMAPS] ", ConsoleColor.Green, $"Loading Map: {request.MapId}", LogLevel.INFO));
-                    AmeisenNav.LoadMap(request.MapId);
-                }
-            }
-
-            fixed (float* pointerStart = request.A.ToArray())
-            {
-                float[] randomPoint;
-                lock (querylock)
-                {
-                    randomPoint = request.MaxRadius > 0f ? AmeisenNav.GetRandomPointAround(request.MapId, pointerStart, request.MaxRadius)
-                                                         : AmeisenNav.GetRandomPoint(request.MapId);
-                }
-
-                fixed (float* pRandomPoint = randomPoint)
-                    SendData(writer, pRandomPoint, sizeof(Vector3));
-            }
-        }
-
-        private static Settings LoadConfigFile()
-        {
-            Settings settings = null;
-
-            try
-            {
-                if (File.Exists(SettingsPath))
-                {
-                    settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(SettingsPath));
-
-                    if (!settings.MmapsFolder.EndsWith("/") && !settings.MmapsFolder.EndsWith("\\"))
-                    {
-                        settings.MmapsFolder += "/";
-                    }
-
-                    if (settings.LogToFile)
-                    {
-                        CheckForLogFileExistence();
-                    }
-
-                    LogQueue.Enqueue(new LogEntry($"MaxPolyPathCount = {settings.MaxPolyPathCount}", ConsoleColor.White));
-                    LogQueue.Enqueue(new LogEntry($"MaxPointPathCount = {settings.MaxPointPathCount}", ConsoleColor.White));
-                    LogQueue.Enqueue(new LogEntry("Loaded config file", ConsoleColor.Green));
-                }
-                else
-                {
-                    settings = new Settings();
-                    File.WriteAllText(SettingsPath, JsonConvert.SerializeObject(settings));
-                    LogQueue.Enqueue(new LogEntry("Created default config file", ConsoleColor.White));
-                }
-            }
-            catch (Exception ex)
-            {
-                LogQueue.Enqueue(new LogEntry("Failed to parse config.json...\n", ConsoleColor.Red, ex.ToString(), LogLevel.ERROR));
-            }
-
-            return settings;
+            LoggingThread = new Thread(() => LogThreadRoutine());
+            LoggingThread.Start();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -471,19 +341,139 @@ namespace AmeisenNavigation.Server
             Console.ResetColor();
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private unsafe static void SendData<T>(BinaryWriter writer, T* data, int size) where T : unmanaged
+        private static void TcpHandleKeepAlive(BinaryWriter writer)
         {
-            writer.Write(BitConverter.GetBytes(size), 0, 4);
-            writer.Write(Utils.ToBytes(data, size), 0, size);
+            // write the respose to a hello world, (int size, byte 0x1)
+            writer.Write(new byte[] { 1, 0, 0, 0, 1 }, 0, 5);
             writer.Flush();
         }
 
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static void SetupLogging()
+        private unsafe static void TcpHandlePathRequest(BinaryWriter writer, byte[] bytes)
         {
-            LoggingThread = new Thread(() => LoggingThreadRoutine());
-            LoggingThread.Start();
+            PathRequest request = Utils.FromBytes<PathRequest>(bytes);
+
+            lock (querylock)
+            {
+                if (!AmeisenNav.IsMapLoaded(request.MapId))
+                {
+                    LogQueue.Enqueue(new LogEntry("[MMAPS] ", ConsoleColor.Green, $"Loading Map: {request.MapId}", LogLevel.INFO));
+                    AmeisenNav.LoadMap(request.MapId);
+                }
+            }
+
+            Stopwatch sw = Stopwatch.StartNew();
+
+            fixed (float* pStartPosition = request.A.ToArray())
+            fixed (float* pEndPosition = request.B.ToArray())
+            {
+                switch (request.MovementType)
+                {
+                    case MovementType.FindPath:
+                        int pathSize = 0;
+                        float[] movePath = null;
+
+                        try
+                        {
+                            lock (querylock)
+                            {
+                                movePath = AmeisenNav.GetPath(request.MapId, pStartPosition, pEndPosition, &pathSize);
+                            }
+                        }
+                        catch { }
+
+                        if (movePath != null && movePath.Length != 0)
+                        {
+                            // we can't apply the chaikin-curve on a path that has just a single node
+                            if (request.Flags.HasFlag(PathRequestFlags.ChaikinCurve)
+                                && pathSize > 1)
+                            {
+                                movePath = ChaikinCurve.Perform(movePath, Settings.ChaikinIterations);
+                            }
+
+                            // we can't apply the catmull-rom-spline on a path with less than 4 nodes
+                            if (request.Flags.HasFlag(PathRequestFlags.CatmullRomSpline)
+                                && pathSize >= 4)
+                            {
+                                movePath = CatmullRomSpline.Perform(movePath, Settings.CatmullRomSplinePoints);
+                            }
+
+                            pathSize = movePath.Length / 3;
+
+                            fixed (float* pPath = movePath)
+                            {
+                                TcpSendData(writer, pPath, sizeof(Vector3) * pathSize);
+                            }
+                        }
+
+                        sw.Stop();
+                        LogQueue.Enqueue(new LogEntry("[FINDPATH] ", ConsoleColor.Green, $"took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks) Nodes: {pathSize}/{Settings.MaxPointPathCount} Flags: {request.Flags}"));
+                        break;
+
+                    case MovementType.MoveAlongSurface:
+                        float[] surfacePath;
+                        lock (querylock) { surfacePath = AmeisenNav.MoveAlongSurface(request.MapId, pStartPosition, pEndPosition); }
+
+                        fixed (float* pSurfacePath = surfacePath)
+                        {
+                            TcpSendData(writer, pSurfacePath, sizeof(Vector3));
+                        }
+
+                        sw.Stop();
+                        // LogQueue.Enqueue(new LogEntry("[MOVEALONGSURFACE] ", ConsoleColor.Green, $"took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)"));
+                        break;
+
+                    case MovementType.CastMovementRay:
+                        Vector3 castRayResult;
+                        lock (querylock) { castRayResult = AmeisenNav.CastMovementRay(request.MapId, pStartPosition, pEndPosition) ? request.B : Vector3.Zero; }
+
+                        TcpSendData(writer, &castRayResult, sizeof(Vector3));
+
+                        sw.Stop();
+                        LogQueue.Enqueue(new LogEntry("[CASTMOVEMENTRAY] ", ConsoleColor.Green, $"took {sw.ElapsedMilliseconds}ms ({sw.ElapsedTicks} ticks)"));
+                        break;
+                }
+            }
+        }
+
+        private unsafe static void TcpHandleRandomPointRequest(BinaryWriter writer, byte[] bytes)
+        {
+            RandomPointRequest request = Utils.FromBytes<RandomPointRequest>(bytes);
+
+            lock (querylock)
+            {
+                if (!AmeisenNav.IsMapLoaded(request.MapId))
+                {
+                    LogQueue.Enqueue(new LogEntry("[MMAPS] ", ConsoleColor.Green, $"Loading Map: {request.MapId}", LogLevel.INFO));
+                    AmeisenNav.LoadMap(request.MapId);
+                }
+            }
+
+            fixed (float* pointerStart = request.A.ToArray())
+            {
+                float[] randomPoint;
+
+                lock (querylock)
+                {
+                    randomPoint = request.MaxRadius > 0f ? AmeisenNav.GetRandomPointAround(request.MapId, pointerStart, request.MaxRadius)
+                                                         : AmeisenNav.GetRandomPoint(request.MapId);
+                }
+
+                fixed (float* pRandomPoint = randomPoint)
+                {
+                    TcpSendData(writer, pRandomPoint, sizeof(Vector3));
+                }
+            }
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private unsafe static void TcpSendData<T>(BinaryWriter writer, T* data, int size) where T : unmanaged
+        {
+            // write the size of the data we're going to send
+            writer.Write(BitConverter.GetBytes(size), 0, 4);
+
+            // write the serialized data to the stream
+            writer.Write(Utils.ToBytes(data, size), 0, size);
+            writer.Flush();
         }
 
         [MethodImpl(MethodImplOptions.AggressiveInlining)]

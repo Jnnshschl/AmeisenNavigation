@@ -138,9 +138,7 @@ void HandleClient(SOCKET socket, sockaddr address)
             break;
         }
 
-        receiveBuffer[n] = 0;
-
-        std::cout << receiveBuffer << std::endl;
+        std::cout << "-> 0x" << std::hex << receiveBuffer << std::dec << std::endl;
     }
 
     closesocket(socket);

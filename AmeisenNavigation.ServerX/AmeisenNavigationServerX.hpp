@@ -25,7 +25,7 @@
 
 constexpr auto DEFAULT_BUFFERLENGTH = 1024;
 constexpr auto DEFAULT_ADDRESS = "0.0.0.0";
-constexpr auto DEFAULT_PORT = "4711";
+constexpr auto DEFAULT_PORT = "47110";
 
 constexpr auto VERSION = "0.1.0.0";
 

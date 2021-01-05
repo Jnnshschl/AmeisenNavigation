@@ -6,16 +6,21 @@ namespace AmeisenNavigation.Server.Transformations
 {
     public static class CatmullRomSpline
     {
-        public static List<Vector3> Perform(List<Vector3> input, int numberOfPoints)
+        public static float[] Perform(float[] input, int numberOfPoints)
         {
-            List<Vector3> splinePoints = new List<Vector3> { input[0] };
-
-            for (int i = 1; i < input.Count - 2; ++i)
+            List<float> splinePoints = new List<float>(input.Length * numberOfPoints)
             {
-                Vector3 p0 = input[i - 1];
-                Vector3 p1 = input[i];
-                Vector3 p2 = input[i + 1];
-                Vector3 p3 = input[i + 2];
+                input[0],
+                input[1],
+                input[2]
+            };
+
+            for (int i = 3; i < input.Length - 9; i += 3)
+            {
+                Vector3 p0 = new Vector3(input[i - 3], input[i - 2], input[i - 1]);
+                Vector3 p1 = new Vector3(input[i], input[i + 1], input[i + 2]);
+                Vector3 p2 = new Vector3(input[i + 3], input[i + 4], input[i + 5]);
+                Vector3 p3 = new Vector3(input[i + 6], input[i + 7], input[i + 8]);
 
                 float t0 = 0.0f;
                 float t1 = GetT(t0, p0, p1);
@@ -33,12 +38,16 @@ namespace AmeisenNavigation.Server.Transformations
 
                     Vector3 C = (t2 - t) / (t2 - t1) * B1 + (t - t1) / (t2 - t1) * B2;
 
-                    splinePoints.Add(C);
+                    splinePoints.Add(C.X);
+                    splinePoints.Add(C.Y);
+                    splinePoints.Add(C.Z);
                 }
             }
 
-            splinePoints.Add(input[input.Count - 1]);
-            return splinePoints;
+            splinePoints.Add(input[input.Length - 3]);
+            splinePoints.Add(input[input.Length - 2]);
+            splinePoints.Add(input[input.Length - 1]);
+            return splinePoints.ToArray();
         }
 
         private static float GetT(float t, Vector3 p0, Vector3 p1)

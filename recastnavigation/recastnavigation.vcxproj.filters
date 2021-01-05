@@ -42,6 +42,24 @@
     <ClInclude Include="Detour\Include\DetourStatus.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
+    <ClInclude Include="Detour\Include\DetourObstacleAvoidance.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="Detour\Include\DetourPathCorridor.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="Detour\Include\DetourCrowd.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="Detour\Include\DetourLocalBoundary.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="Detour\Include\DetourPathQueue.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="Detour\Include\DetourProximityGrid.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Detour\Source\DetourAlloc.cpp">
@@ -63,6 +81,24 @@
       <Filter>Quelldateien</Filter>
     </ClCompile>
     <ClCompile Include="Detour\Source\DetourNode.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Detour\Source\DetourObstacleAvoidance.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Detour\Source\DetourPathCorridor.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Detour\Source\DetourPathQueue.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Detour\Source\DetourProximityGrid.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Detour\Source\DetourLocalBoundary.cpp">
+      <Filter>Quelldateien</Filter>
+    </ClCompile>
+    <ClCompile Include="Detour\Source\DetourCrowd.cpp">
       <Filter>Quelldateien</Filter>
     </ClCompile>
   </ItemGroup>

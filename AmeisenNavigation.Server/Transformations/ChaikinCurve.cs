@@ -1,37 +1,38 @@
-﻿using AmeisenNavigation.Server.Objects;
-using System.Collections.Generic;
-
-namespace AmeisenNavigation.Server.Transformations
+﻿namespace AmeisenNavigation.Server.Transformations
 {
     public static class ChaikinCurve
     {
-        public static List<Vector3> Perform(List<Vector3> path, int iterations)
+        public static float[] Perform(float[] path, int iterations)
         {
-            List<Vector3> smoothPath = new List<Vector3>
-                {
-                    path[0]
-                };
+            int orgSize = path.Length;
+            int newSize = (path.Length * 2) - 3;
+            float[] smoothPath = new float[newSize];
 
-            for (int i = 0; i < path.Count - 1; ++i)
+            for (int i = 0; i < orgSize - 3; i += 3)
             {
-                Vector3 p0 = path[i];
-                Vector3 p1 = path[i + 1];
+                int index = i * 2;
 
-                float qx = 0.75f * p0.X + 0.25f * p1.X;
-                float qy = 0.75f * p0.Y + 0.25f * p1.Y;
-                Vector3 Q = new Vector3(qx, qy, p0.Z);
+                // Q.X
+                smoothPath[index] = 0.75f * path[i] + 0.25f * path[i + 3];
+                // Q.Y
+                smoothPath[index + 1] = 0.75f * path[i + 1] + 0.25f * path[i + 4];
+                // Q.Z
+                smoothPath[index + 2] = path[i + 2];
 
-                float rx = 0.25f * p0.X + 0.75f * p1.X;
-                float ry = 0.25f * p0.Y + 0.75f * p1.Y;
-                Vector3 R = new Vector3(rx, ry, p1.Z);
-
-                smoothPath.Add(Q);
-                smoothPath.Add(R);
+                // R.X
+                smoothPath[index + 3] = 0.25f * path[i] + 0.75f * path[i + 3];
+                // R.Y
+                smoothPath[index + 4] = 0.25f * path[i + 1] + 0.75f * path[i + 4];
+                // R.Z
+                smoothPath[index + 5] = path[i + 5];
             }
 
-            smoothPath.Add(path[path.Count - 1]);
+            // last node
+            smoothPath[newSize - 1] = path[orgSize - 1];
+            smoothPath[newSize - 2] = path[orgSize - 2];
+            smoothPath[newSize - 3] = path[orgSize - 3];
 
-            if (iterations > 0)
+            if (iterations > 1)
             {
                 return Perform(smoothPath, --iterations);
             }

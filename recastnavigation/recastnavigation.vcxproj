@@ -22,21 +22,33 @@
     <ClInclude Include="Detour\Include\DetourAlloc.h" />
     <ClInclude Include="Detour\Include\DetourAssert.h" />
     <ClInclude Include="Detour\Include\DetourCommon.h" />
+    <ClInclude Include="Detour\Include\DetourCrowd.h" />
+    <ClInclude Include="Detour\Include\DetourLocalBoundary.h" />
     <ClInclude Include="Detour\Include\DetourMath.h" />
     <ClInclude Include="Detour\Include\DetourNavMesh.h" />
     <ClInclude Include="Detour\Include\DetourNavMeshBuilder.h" />
     <ClInclude Include="Detour\Include\DetourNavMeshQuery.h" />
     <ClInclude Include="Detour\Include\DetourNode.h" />
+    <ClInclude Include="Detour\Include\DetourObstacleAvoidance.h" />
+    <ClInclude Include="Detour\Include\DetourPathCorridor.h" />
+    <ClInclude Include="Detour\Include\DetourPathQueue.h" />
+    <ClInclude Include="Detour\Include\DetourProximityGrid.h" />
     <ClInclude Include="Detour\Include\DetourStatus.h" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="Detour\Source\DetourAlloc.cpp" />
     <ClCompile Include="Detour\Source\DetourAssert.cpp" />
     <ClCompile Include="Detour\Source\DetourCommon.cpp" />
+    <ClCompile Include="Detour\Source\DetourCrowd.cpp" />
+    <ClCompile Include="Detour\Source\DetourLocalBoundary.cpp" />
     <ClCompile Include="Detour\Source\DetourNavMesh.cpp" />
     <ClCompile Include="Detour\Source\DetourNavMeshBuilder.cpp" />
     <ClCompile Include="Detour\Source\DetourNavMeshQuery.cpp" />
     <ClCompile Include="Detour\Source\DetourNode.cpp" />
+    <ClCompile Include="Detour\Source\DetourObstacleAvoidance.cpp" />
+    <ClCompile Include="Detour\Source\DetourPathCorridor.cpp" />
+    <ClCompile Include="Detour\Source\DetourPathQueue.cpp" />
+    <ClCompile Include="Detour\Source\DetourProximityGrid.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" />
@@ -129,6 +141,7 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
       <LanguageStandard>stdcpp17</LanguageStandard>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
