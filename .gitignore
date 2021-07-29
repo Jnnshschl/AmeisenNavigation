@@ -260,3 +260,10 @@ paket-files/
 # Python Tools for Visual Studio (PTVS)
 __pycache__/
 *.pyc
+
+# dependencies
+!AnTCP.Server.lib
+!dep/AnTCP.Server/lib/Debug/x86/AnTCP.Server.lib
+!dep/AnTCP.Server/lib/Debug/x64/AnTCP.Server.lib
+!dep/AnTCP.Server/lib/Release/x86/AnTCP.Server.lib
+!dep/AnTCP.Server/lib/Release/x64/AnTCP.Server.lib
