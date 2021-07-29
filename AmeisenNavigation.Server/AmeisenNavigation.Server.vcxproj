@@ -21,8 +21,8 @@
   <PropertyGroup Label="Globals">
     <VCProjectVersion>16.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
-    <ProjectGuid>{040950c3-6e0d-44d1-9ca9-0ed35abe005a}</ProjectGuid>
-    <RootNamespace>AmeisenNavigationServerX</RootNamespace>
+    <ProjectGuid>{1d74586c-a7cd-4bc6-8c09-4506faa3ddf3}</ProjectGuid>
+    <RootNamespace>AmeisenNavigationServer</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
@@ -72,15 +72,35 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <TargetName>AmeisenNavigationServer</TargetName>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x86\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
+    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <TargetName>AmeisenNavigationServer</TargetName>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x86\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <TargetName>AmeisenNavigationServer</TargetName>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x64\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <TargetName>AmeisenNavigationServer</TargetName>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x64\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -88,11 +108,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Ws2_32.lib;AnTCP.Server.lib;recastnavigation.lib;AmeisenNavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -103,13 +125,15 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Ws2_32.lib;AnTCP.Server.lib;recastnavigation.lib;AmeisenNavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -118,10 +142,13 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>_DEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Ws2_32.lib;AnTCP.Server.lib;recastnavigation.lib;AmeisenNavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -132,19 +159,24 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>NDEBUG;_CONSOLE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
+      <LanguageStandard_C>stdc17</LanguageStandard_C>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
+      <AdditionalDependencies>Ws2_32.lib;AnTCP.Server.lib;recastnavigation.lib;AmeisenNavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="AmeisenNavigationServerX.cpp" />
+    <ClCompile Include="src\Main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="AmeisenNavigationServerX.hpp" />
+    <ClInclude Include="src\Config\Config.hpp" />
+    <ClInclude Include="src\Enums\EMessageType.hpp" />
+    <ClInclude Include="src\Main.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

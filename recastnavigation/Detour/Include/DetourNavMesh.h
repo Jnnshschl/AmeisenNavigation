@@ -31,7 +31,19 @@
 // TODO: figure out a multiplatform version of uint64_t
 // - maybe: https://code.google.com/p/msinttypes/
 // - or: http://www.azillionmonkeys.com/qed/pstdint.h
+#if defined(WIN32) && !defined(__MINGW32__)
+/// Do not rename back to uint64. Otherwise mac complains about typedef redefinition
+typedef unsigned __int64    uint64_d;
+#else
 #include <stdint.h>
+#ifndef uint64_t
+#ifdef __linux__
+#include <linux/types.h>
+#endif
+#endif
+/// Do not rename back to uint64. Otherwise mac complains about typedef redefinition
+typedef uint64_t            uint64_d;
+#endif 
 #endif
 
 // Note: If you want to use 64-bit refs, change the types of both dtPolyRef & dtTileRef.
@@ -43,7 +55,7 @@
 static const unsigned int DT_SALT_BITS = 12;
 static const unsigned int DT_TILE_BITS = 21;
 static const unsigned int DT_POLY_BITS = 31;
-typedef uint64_t dtPolyRef;
+typedef uint64_d dtPolyRef;
 #else
 typedef unsigned int dtPolyRef;
 #endif
@@ -51,7 +63,7 @@ typedef unsigned int dtPolyRef;
 /// A handle to a tile within a navigation mesh.
 /// @ingroup detour
 #ifdef DT_POLYREF64
-typedef uint64_t dtTileRef;
+typedef uint64_d dtTileRef;
 #else
 typedef unsigned int dtTileRef;
 #endif
@@ -329,8 +341,8 @@ struct dtNavMeshParams
 	float orig[3];					///< The world space origin of the navigation mesh's tile space. [(x, y, z)]
 	float tileWidth;				///< The width of each tile. (Along the x-axis.)
 	float tileHeight;				///< The height of each tile. (Along the z-axis.)
-	int maxTiles;					///< The maximum number of tiles the navigation mesh can contain. This and maxPolys are used to calculate how many bits are needed to identify tiles and polygons uniquely.
-	int maxPolys;					///< The maximum number of polygons each tile can contain. This and maxTiles are used to calculate how many bits are needed to identify tiles and polygons uniquely.
+	int maxTiles;					///< The maximum number of tiles the navigation mesh can contain.
+	int maxPolys;					///< The maximum number of polygons each tile can contain.
 };
 
 /// A navigation mesh based on tiles of convex polygons.

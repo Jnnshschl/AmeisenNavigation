@@ -9,11 +9,11 @@
 #include <iostream>
 #include <filesystem>
 
-#include "Vector3.h"
+#include "Vector3.hpp"
 
-#include "../recastnavigation/Detour/Include/DetourNavMesh.h"
-#include "../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
-#include "../recastnavigation/Detour/Include/DetourCrowd.h"
+#include "../../recastnavigation/Detour/Include/DetourNavMesh.h"
+#include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
+#include "../../recastnavigation/Detour/Include/DetourCrowd.h"
 
 #ifdef _DEBUG
 #define D(x) x

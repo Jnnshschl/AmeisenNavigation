@@ -1,4 +1,4 @@
-#include "ameisennavigation.h"
+#include "AmeisenNavigation.hpp"
 
 std::string AmeisenNavigation::FormatTrailingZeros(const int number, const int zeroCount)
 {
