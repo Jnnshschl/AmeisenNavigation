@@ -174,9 +174,16 @@
     <ClCompile Include="src\Main.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="resource.h" />
     <ClInclude Include="src\Config\Config.hpp" />
     <ClInclude Include="src\Enums\EMessageType.hpp" />
     <ClInclude Include="src\Main.hpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="AmeisenNavigation.Server.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="icon.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
