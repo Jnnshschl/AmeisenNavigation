@@ -9,7 +9,7 @@
 #include <iostream>
 #include <filesystem>
 
-#include "Vector3.hpp"
+#include "Vector/Vector3.hpp"
 
 #include "../../recastnavigation/Detour/Include/DetourNavMesh.h"
 #include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"

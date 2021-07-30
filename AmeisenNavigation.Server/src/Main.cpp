@@ -5,11 +5,11 @@ int main(int argc, const char* argv[])
     SetConsoleTitle(L"AmeisenNavigation Server");
 
     std::cout << "    ___                   _                 _   __           " << std::endl
-        << "   /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __" << std::endl
-        << "  / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /" << std::endl
-        << " / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / " << std::endl
-        << "/_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/  " << std::endl
-        << "                                        Server " << AMEISENNAV_VERSION << std::endl << std::endl;
+              << "   /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __" << std::endl
+              << "  / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /" << std::endl
+              << " / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / " << std::endl
+              << "/_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/  " << std::endl
+              << "                                        Server " << AMEISENNAV_VERSION << std::endl << std::endl;
 
     std::filesystem::path configPath(std::filesystem::path(argv[0]).parent_path().string() + "\\config.cfg");
 
@@ -50,13 +50,13 @@ int main(int argc, const char* argv[])
 
     if (Config->maxPointPath <= 0)
     {
-        std::cout << ">> iMaxPointPath has to be a value >0" << std::endl;
+        std::cout << ">> iMaxPointPath has to be a value > 0" << std::endl;
         return 1;
     }
 
     if (Config->maxPolyPath <= 0)
     {
-        std::cout << ">> iMaxPolyPath has to be a value >0" << std::endl;
+        std::cout << ">> iMaxPolyPath has to be a value > 0" << std::endl;
         return 1;
     }
 
@@ -85,6 +85,7 @@ int main(int argc, const char* argv[])
     Server->Run();
 
     std::cout << ">> Stopped server..." << std::endl;
+
     delete Config;
     delete Nav;
     delete Server;
@@ -104,31 +105,39 @@ int __stdcall SigIntHandler(unsigned long signal)
 void PathCallback(ClientHandler* handler, char type, const void* data, int size)
 {
     PathRequestData request = *(PathRequestData*)data;
+
     int pathSize = 0;
     Vector3* path = new Vector3[Config->maxPointPath];
 
     if (Nav->GetPath(request.mapId, request.start, request.end, path, &pathSize))
     {
-        if (Config->catmullRomSpline && pathSize > 3)
+        if ((request.flags & (int)PathRequestFlags::CATMULLROM) && pathSize > 3)
         {
-            // TODO: implement catmull-rom-spline smoothing
-        }
-        else if (Config->chaikinCurve && pathSize > 1)
-        {
-            // TODO: implement chaikin-curve smoothing
-            // int oldPathSize = pathSize;
-            // Vector3* oldPath = path;
-            // path = SmoothPathChaikinCurve(oldPath, oldPathSize, &pathSize, Config->chaikinCurveIterations);
-            // delete[] oldPath;
-        }
+            std::vector<Vector3>* output = new std::vector<Vector3>();
+            SmoothPathCatmullRom(path, pathSize, output, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
 
-        handler->SendData(type, path, sizeof(Vector3) * pathSize);
+            handler->SendData(type, output->data(), sizeof(Vector3) * output->size());
+            delete output;
+        }
+        else if ((request.flags & (int)PathRequestFlags::CHAIKIN) && pathSize > 2)
+        {
+            std::vector<Vector3>* output = new std::vector<Vector3>();
+            SmoothPathChaikinCurve(path, pathSize, output);
+
+            handler->SendData(type, output->data(), sizeof(Vector3) * output->size());
+            delete output;
+        }
+        else
+        {
+            handler->SendData(type, path, sizeof(Vector3) * pathSize);
+        }
     }
     else
     {
-        Vector3 zero = Vector3(0.0f, 0.0f, 0.0f);
-        handler->SendDataPtr(type, &zero);
+        handler->SendDataPtr(type, &Vector3Zero);
     }
+
+    delete[] path;
 }
 
 void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size)
@@ -142,8 +151,7 @@ void RandomPointCallback(ClientHandler* handler, char type, const void* data, in
     }
     else
     {
-        Vector3 zero = Vector3(0.0f, 0.0f, 0.0f);
-        handler->SendDataPtr(type, &zero);
+        handler->SendDataPtr(type, &Vector3Zero);
     }
 }
 
@@ -158,14 +166,13 @@ void RandomPointAroundCallback(ClientHandler* handler, char type, const void* da
     }
     else
     {
-        Vector3 zero = Vector3(0.0f, 0.0f, 0.0f);
-        handler->SendDataPtr(type, &zero);
+        handler->SendDataPtr(type, &Vector3Zero);
     }
 }
 
 void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size)
 {
-    PathRequestData request = *(PathRequestData*)data;
+    MoveRequestData request = *(MoveRequestData*)data;
     Vector3 position;
 
     if (Nav->MoveAlongSurface(request.mapId, request.start, request.end, &position))
@@ -174,7 +181,6 @@ void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* dat
     }
     else
     {
-        Vector3 zero = Vector3(0.0f, 0.0f, 0.0f);
-        handler->SendDataPtr(type, &zero);
+        handler->SendDataPtr(type, &Vector3Zero);
     }
 }

@@ -18,10 +18,8 @@ struct AmeisenNavConfig
 private:
     std::map<std::string, void*> Map
     {
-        { "bCatmullRomSpline", &catmullRomSpline },
-        { "bChaikinCurve", &chaikinCurve },
+        { "fCatmullRomSplineAlpha", &catmullRomSplineAlpha },
         { "iCatmullRomSplinePoints", &catmullRomSplinePoints },
-        { "iChaikinCurveIterations", &chaikinCurveIterations },
         { "iMaxPointPath", &maxPointPath },
         { "iMaxPolyPath", &maxPolyPath },
         { "iPort", &port },
@@ -30,10 +28,8 @@ private:
     };
 
 public:
-    bool catmullRomSpline = true;
-    bool chaikinCurve = false;
+    float catmullRomSplineAlpha = 1.0;
     int catmullRomSplinePoints = 4;
-    int chaikinCurveIterations = 1;
     int maxPointPath = 512;
     int maxPolyPath = 256;
     int port = 47110;
