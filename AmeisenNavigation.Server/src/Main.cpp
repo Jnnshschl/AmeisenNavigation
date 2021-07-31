@@ -76,10 +76,10 @@ int main(int argc, const char* argv[])
     Nav = new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxPointPath);
     Server = new AnTcpServer(Config->ip, Config->port);
 
-    Server->AddCallback((char)MessageType::PATH, PathCallback);
-    Server->AddCallback((char)MessageType::RANDOM_POINT, RandomPointCallback);
-    Server->AddCallback((char)MessageType::RANDOM_POINT_AROUND, RandomPointAroundCallback);
-    Server->AddCallback((char)MessageType::MOVE_ALONG_SURFACE, MoveAlongSurfaceCallback);
+    Server->AddCallback(static_cast<char>(MessageType::PATH), PathCallback);
+    Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT), RandomPointCallback);
+    Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT_AROUND), RandomPointAroundCallback);
+    Server->AddCallback(static_cast<char>(MessageType::MOVE_ALONG_SURFACE), MoveAlongSurfaceCallback);
 
     std::cout << ">> Starting server on: " << Config->ip << ":" << std::to_string(Config->port) << std::endl;
     Server->Run();
@@ -104,28 +104,24 @@ int __stdcall SigIntHandler(unsigned long signal)
 
 void PathCallback(ClientHandler* handler, char type, const void* data, int size)
 {
-    PathRequestData request = *(PathRequestData*)data;
+    const PathRequestData request = *reinterpret_cast<const PathRequestData*>(data);
 
     int pathSize = 0;
     Vector3* path = new Vector3[Config->maxPointPath];
 
     if (Nav->GetPath(request.mapId, request.start, request.end, path, &pathSize))
     {
-        if ((request.flags & (int)PathRequestFlags::CATMULLROM) && pathSize > 3)
+        if ((request.flags & static_cast<int>(PathRequestFlags::CATMULLROM)) && pathSize > 3)
         {
-            std::vector<Vector3>* output = new std::vector<Vector3>();
-            SmoothPathCatmullRom(path, pathSize, output, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
-
-            handler->SendData(type, output->data(), sizeof(Vector3) * output->size());
-            delete output;
+            std::vector<Vector3> output;
+            SmoothPathCatmullRom(path, pathSize, &output, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
+            handler->SendData(type, output.data(), sizeof(Vector3) * output.size());
         }
-        else if ((request.flags & (int)PathRequestFlags::CHAIKIN) && pathSize > 2)
+        else if ((request.flags & static_cast<int>(PathRequestFlags::CHAIKIN)) && pathSize > 2)
         {
-            std::vector<Vector3>* output = new std::vector<Vector3>();
-            SmoothPathChaikinCurve(path, pathSize, output);
-
-            handler->SendData(type, output->data(), sizeof(Vector3) * output->size());
-            delete output;
+            std::vector<Vector3> output;
+            SmoothPathChaikinCurve(path, pathSize, &output);
+            handler->SendData(type, output.data(), sizeof(Vector3) * output.size());
         }
         else
         {
@@ -142,7 +138,7 @@ void PathCallback(ClientHandler* handler, char type, const void* data, int size)
 
 void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size)
 {
-    int mapId = *(int*)data;
+    const int mapId = *reinterpret_cast<const int*>(data);
     Vector3 point;
 
     if (Nav->GetRandomPoint(mapId, &point))
@@ -157,7 +153,7 @@ void RandomPointCallback(ClientHandler* handler, char type, const void* data, in
 
 void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size)
 {
-    RandomPointAroundData request = *(RandomPointAroundData*)data;
+    const RandomPointAroundData request = *reinterpret_cast<const RandomPointAroundData*>(data);
     Vector3 position;
 
     if (Nav->GetRandomPointAround(request.mapId, request.start, request.radius, &position))
@@ -172,7 +168,7 @@ void RandomPointAroundCallback(ClientHandler* handler, char type, const void* da
 
 void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size)
 {
-    MoveRequestData request = *(MoveRequestData*)data;
+    const MoveRequestData request = *reinterpret_cast<const MoveRequestData*>(data);
     Vector3 position;
 
     if (Nav->MoveAlongSurface(request.mapId, request.start, request.end, &position))
