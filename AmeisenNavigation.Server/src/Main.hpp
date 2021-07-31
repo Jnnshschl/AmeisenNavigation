@@ -62,6 +62,19 @@ void RandomPointCallback(ClientHandler* handler, char type, const void* data, in
 void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size);
 void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size);
 
+#if defined(WIN32) || defined(WIN64)
+constexpr int COLOR_WHITE = 7;
+constexpr int COLOR_RED = 12;
+constexpr int COLOR_YELLOW = 14;
+
+inline void ChangeOutputColor(int color)
+{
+    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
+}
+#else
+#define ChangeOutputColor(c)
+#endif
+
 inline void SmoothPathChaikinCurve(Vector3* input, int inputSize, std::vector<Vector3>* output)
 {
     output->reserve(((inputSize - 2) * 2) + 2 + 2);

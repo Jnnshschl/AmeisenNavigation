@@ -2,7 +2,11 @@
 
 int main(int argc, const char* argv[])
 {
-    SetConsoleTitle(L"AmeisenNavigation Server");
+#if defined(WIN32) || defined(WIN64)
+    SetConsoleTitle(L"AmeisenNavigation Server"); 
+#endif
+
+    ChangeOutputColor(COLOR_WHITE);
 
     std::cout << "    ___                   _                 _   __           " << std::endl
               << "   /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __" << std::endl
@@ -21,6 +25,7 @@ int main(int argc, const char* argv[])
 
         if (!std::filesystem::exists(configPath))
         {
+            ChangeOutputColor(COLOR_RED);
             std::cout << ">> Configfile does not exists: \"" << argv[1] << "\"" << std::endl;
             return 1;
         }
@@ -28,7 +33,9 @@ int main(int argc, const char* argv[])
 
     if (std::filesystem::exists(configPath))
     {
+        ChangeOutputColor(COLOR_YELLOW);
         std::cout << ">> Loaded Configfile: \"" << configPath.string() << "\"" << std::endl;
+        ChangeOutputColor(COLOR_WHITE);
         Config->Load(configPath);
 
         // directly save again to add new entries to it
@@ -44,24 +51,28 @@ int main(int argc, const char* argv[])
     // validate config
     if (!std::filesystem::exists(Config->mmapsPath))
     {
+        ChangeOutputColor(COLOR_RED);
         std::cout << ">> MMAPS folder does not exists: \"" << Config->mmapsPath << "\"" << std::endl;
         return 1;
     }
 
     if (Config->maxPointPath <= 0)
     {
+        ChangeOutputColor(COLOR_RED);
         std::cout << ">> iMaxPointPath has to be a value > 0" << std::endl;
         return 1;
     }
 
     if (Config->maxPolyPath <= 0)
     {
+        ChangeOutputColor(COLOR_RED);
         std::cout << ">> iMaxPolyPath has to be a value > 0" << std::endl;
         return 1;
     }
 
     if (Config->port <= 0 || Config->port > 65535)
     {
+        ChangeOutputColor(COLOR_RED);
         std::cout << ">> iMaxPolyPath has to be a value bewtween 1 and 65535" << std::endl;
         return 1;
     }
@@ -69,6 +80,7 @@ int main(int argc, const char* argv[])
     // set ctrl+c handler to cleanup stuff when we exit
     if (!SetConsoleCtrlHandler(SigIntHandler, 1))
     {
+        ChangeOutputColor(COLOR_RED);
         std::cout << ">> SetConsoleCtrlHandler() failed: " << GetLastError() << std::endl;
         return 1;
     }
