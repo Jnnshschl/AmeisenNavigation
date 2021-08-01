@@ -189,6 +189,7 @@
       <AdditionalOptions>
       </AdditionalOptions>
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
+      <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>

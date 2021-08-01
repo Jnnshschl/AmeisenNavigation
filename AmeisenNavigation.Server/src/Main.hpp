@@ -6,11 +6,13 @@
 #include "../../AmeisenNavigation/src/Vector/Vector3.hpp"
 
 #include "Config/Config.hpp"
+#include "Logging/AmeisenLogger.hpp"
 
 #include <filesystem>
 #include <iostream>
+#include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.7.1.0";
+constexpr auto AMEISENNAV_VERSION = "1.7.2.0";
 
 enum class MessageType
 {
@@ -18,6 +20,7 @@ enum class MessageType
     MOVE_ALONG_SURFACE,
     RANDOM_POINT,
     RANDOM_POINT_AROUND,
+    CAST_RAY,
 };
 
 enum class PathRequestFlags : int
@@ -42,6 +45,13 @@ struct MoveRequestData
     Vector3 end;
 };
 
+struct CastRayData
+{
+    int mapId;
+    Vector3 start;
+    Vector3 end;
+};
+
 struct RandomPointAroundData
 {
     int mapId;
@@ -53,6 +63,8 @@ inline AnTcpServer* Server = nullptr;
 inline AmeisenNavigation* Nav = nullptr;
 inline AmeisenNavConfig* Config = nullptr;
 
+inline std::mutex QueryLock;
+inline Vector3* PathBuffer = nullptr;
 inline const Vector3 Vector3Zero = Vector3();
 
 int __stdcall SigIntHandler(unsigned long signal);
@@ -61,19 +73,6 @@ void PathCallback(ClientHandler* handler, char type, const void* data, int size)
 void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size);
 void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size);
 void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size);
-
-#if defined(WIN32) || defined(WIN64)
-constexpr int COLOR_WHITE = 7;
-constexpr int COLOR_RED = 12;
-constexpr int COLOR_YELLOW = 14;
-
-inline void ChangeOutputColor(int color)
-{
-    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), color);
-}
-#else
-#define ChangeOutputColor(c)
-#endif
 
 inline void SmoothPathChaikinCurve(Vector3* input, int inputSize, std::vector<Vector3>* output)
 {

@@ -33,6 +33,9 @@ struct Vector3
     inline Vector3 operator*=(float a) { x *= a; y *= a; z *= a; return *this; }
     inline Vector3 operator/=(float a) { x /= a; y /= a; z /= a; return *this; }
 
+    inline operator float* () { return reinterpret_cast<float*>(this); }
+    inline operator const float* () const { return reinterpret_cast<const float*>(this); }
+
     inline friend std::ostream& operator<<(std::ostream& os, Vector3 const& vector) {
         return os << vector.x << ", " << vector.y << ", " << vector.z;
     }
