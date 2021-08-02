@@ -12,7 +12,7 @@
 #include <iostream>
 #include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.7.2.0";
+constexpr auto AMEISENNAV_VERSION = "1.7.3.0";
 
 enum class MessageType
 {
@@ -73,6 +73,7 @@ void PathCallback(ClientHandler* handler, char type, const void* data, int size)
 void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size);
 void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size);
 void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size);
+void CastRayCallback(ClientHandler* handler, char type, const void* data, int size);
 
 inline void SmoothPathChaikinCurve(Vector3* input, int inputSize, std::vector<Vector3>* output)
 {

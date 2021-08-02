@@ -1,6 +1,7 @@
 #pragma once
 
-#ifdef _DEBUG
+// toggle debug output here
+#if 1
 #define DEBUG_ONLY(x) x
 #define BENCHMARK(x) x
 #else
@@ -23,16 +24,26 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <iphlpapi.h>
-#include <intrin.h>
 
-constexpr auto ANTCP_SERVER_VERSION = "1.0.1.0";
+constexpr auto ANTCP_SERVER_VERSION = "1.1.0.0";
 constexpr auto ANTCP_BUFFER_LENGTH = 512;
 constexpr auto ANTCP_MAX_PACKET_SIZE = 256;
 
 // type used in the payload to specify the size of a packet
 typedef int AnTcpSizeType;
+
 // type used to identy the the type of a message
 typedef char AnTcpMessageType;
+
+enum class AnTcpError
+{
+    Success,
+    Win32WsaStartupFailed,
+    GetAddrInfoFailed,
+    SocketCreationFailed,
+    SocketBindingFailed,
+    SocketListeningFailed
+};
 
 class ClientHandler
 {
@@ -43,8 +54,11 @@ private:
     std::atomic<bool>& ShouldExit;
     std::unordered_map <AnTcpMessageType, std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>>* Callbacks;
 
-    bool IsConnected;
+    bool IsActive;
     std::thread* Thread;
+
+    std::function<void(ClientHandler*)>* OnClientConnected;
+    std::function<void(ClientHandler*)>* OnClientDisconnected;
 
 public:
     /// <summary>
@@ -55,22 +69,32 @@ public:
     /// <param name="socketInfo">Information about the socket, used for logging.</param>
     /// <param name="shouldExit">Atomic bool to notify the handler that the server is going to shutdown.</param>
     /// <param name="callbacks">Pointer to the server callback map.</param>
-    ClientHandler(size_t id, SOCKET socket, const SOCKADDR_IN& socketInfo, std::atomic<bool>& shouldExit, std::unordered_map <AnTcpMessageType, std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>>* callbacks)
-        : IsConnected(true),
+    ClientHandler
+    (
+        size_t id,
+        SOCKET socket,
+        const SOCKADDR_IN& socketInfo,
+        std::atomic<bool>& shouldExit,
+        std::unordered_map <AnTcpMessageType, std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>>* callbacks,
+        std::function<void(ClientHandler*)>* onClientConnected = nullptr,
+        std::function<void(ClientHandler*)>* onClientDisconnected = nullptr
+    )
+        : IsActive(true),
         Id(id),
         Socket(socket),
         SocketInfo(socketInfo),
         ShouldExit(shouldExit),
         Callbacks(callbacks),
-        Thread(new std::thread(&ClientHandler::Listen, this))
+        Thread(new std::thread(&ClientHandler::Listen, this)),
+        OnClientConnected(onClientConnected),
+        OnClientDisconnected(onClientDisconnected)
     {}
 
     ~ClientHandler()
     {
-        DEBUG_ONLY(std::cout << ">> Deleting Handler: " << Id << std::endl);
+        DEBUG_ONLY(std::cout << "[" << Id << "] " << "Deleting Handler: " << Id << std::endl);
 
-        closesocket(Socket);
-        Socket = INVALID_SOCKET;
+        Disconnect();
 
         Thread->join();
         delete Thread;
@@ -79,22 +103,7 @@ public:
     /// <summary>
     /// Used to delete old disconnected clients.
     /// </summary>
-    constexpr bool CanBeDeleted() const noexcept { return !IsConnected; }
-
-    /// <summary>
-    /// Send data to the client.
-    /// </summary>
-    /// <param name="type">Message type (1 byte)</param>
-    /// <param name="data">Data to send.</param>
-    /// <param name="size">Size of the data to send.</param>
-    /// <returns>True if data was sent, false if not.</returns>
-    inline bool SendData(AnTcpMessageType type, const void* data, size_t size) const noexcept
-    {
-        const int packetSize = size + static_cast<int>(sizeof(AnTcpMessageType));
-        return send(Socket, reinterpret_cast<const char*>(&packetSize), sizeof(decltype(packetSize)), 0) != SOCKET_ERROR
-            && send(Socket, &type, sizeof(AnTcpMessageType), 0) != SOCKET_ERROR
-            && send(Socket, reinterpret_cast<const char*>(data), size, 0) != SOCKET_ERROR;
-    }
+    constexpr bool IsConnected() const noexcept { return !IsActive; }
 
     /// <summary>
     /// Send data to the client. Size will be sizeof(T).
@@ -127,6 +136,60 @@ public:
         return SendData(type, data, sizeof(T));
     }
 
+    /// <summary>
+    /// Send data to the client.
+    /// </summary>
+    /// <param name="type">Message type (1 byte)</param>
+    /// <param name="data">Data to send.</param>
+    /// <param name="size">Size of the data to send.</param>
+    /// <returns>True if data was sent, false if not.</returns>
+    inline bool SendData(AnTcpMessageType type, const void* data, size_t size) const noexcept
+    {
+        const int packetSize = size + static_cast<int>(sizeof(AnTcpMessageType));
+        return send(Socket, reinterpret_cast<const char*>(&packetSize), sizeof(decltype(packetSize)), 0) != SOCKET_ERROR
+            && send(Socket, &type, sizeof(AnTcpMessageType), 0) != SOCKET_ERROR
+            && send(Socket, static_cast<const char*>(data), size, 0) != SOCKET_ERROR;
+    }
+
+    /// <summary>
+    /// Disconnect the client.
+    /// </summary>
+    inline void Disconnect() noexcept
+    {
+        if (OnClientDisconnected)
+        {
+            (*OnClientDisconnected)(this);
+        }
+
+        closesocket(Socket);
+        Socket = INVALID_SOCKET;
+        IsActive = false;
+    }
+
+    /// <summary>
+    /// Get the clients ip address.
+    /// </summary>
+    /// <returns>IP address as string.</returns>
+    inline std::string GetIpAddress() noexcept
+    {
+        char ipAddressBuffer[128]{ 0 };
+        inet_ntop(AF_INET, &SocketInfo.sin_addr, ipAddressBuffer, 128);
+        return std::string(ipAddressBuffer);
+    }
+
+    /// <summary>
+    /// Get the client connection port.
+    /// </summary>
+    constexpr unsigned short GetPort() noexcept
+    {
+        return SocketInfo.sin_port;
+    }
+
+    constexpr unsigned short GetAddressFamily() noexcept
+    {
+        return SocketInfo.sin_family;
+    }
+
 private:
     /// <summary>
     /// Routine for new clients, packets will be reassembled
@@ -147,9 +210,21 @@ private:
 
         if ((*Callbacks).contains(msgType))
         {
+            // measure packet processing time in debug mode
+            BENCHMARK(const auto packetStart = std::chrono::high_resolution_clock::now());
+
+            // fire the callback with the raw data
             (*Callbacks)[msgType](this, msgType, data + static_cast<int>(sizeof(AnTcpMessageType)), size - static_cast<int>(sizeof(AnTcpMessageType)));
+
+            BENCHMARK(std::cout << "[" << Id << "] " << "Processing packet of type \""
+                << std::to_string(*reinterpret_cast<const AnTcpMessageType*>(data)) << "\" took: "
+                << std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - packetStart) << std::endl);
+
             return true;
         }
+
+        DEBUG_ONLY(std::cout << "[" << Id << "] " << "\"" << std::to_string(*reinterpret_cast<const AnTcpMessageType*>(data))
+            << "\" is an unknown message type, disconnecting client..." << std::endl);
 
         return false;
     }
@@ -165,6 +240,9 @@ private:
     std::vector<ClientHandler*> Clients;
     std::unordered_map <AnTcpMessageType, std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>> Callbacks;
 
+    std::function<void(ClientHandler*)> OnClientConnected;
+    std::function<void(ClientHandler*)> OnClientDisconnected;
+
 public:
     /// <summary>
     /// Create anew instace of the AnTcpServer to start a new server.
@@ -177,7 +255,9 @@ public:
         ShouldExit(false),
         ListenSocket(INVALID_SOCKET),
         Clients(),
-        Callbacks()
+        Callbacks(),
+        OnClientConnected(nullptr),
+        OnClientDisconnected(nullptr)
     {}
 
     /// <summary>
@@ -191,8 +271,28 @@ public:
         ShouldExit(false),
         ListenSocket(INVALID_SOCKET),
         Clients(),
-        Callbacks()
+        Callbacks(),
+        OnClientConnected(nullptr),
+        OnClientDisconnected(nullptr)
     {}
+
+    /// <summary>
+    /// Set the event handler for the OnClientConnected event.
+    /// </summary>
+    /// <param name="handlerFunction">Handler function, can be nulltpr</param>
+    inline void SetOnClientConnected(std::function<void(ClientHandler*)> handlerFunction)
+    {
+        OnClientConnected = handlerFunction;
+    }
+
+    /// <summary>
+    /// Set the event handler for the OnClientDisconnected event.
+    /// </summary>
+    /// <param name="handlerFunction">Handler function, can be nulltpr</param>
+    inline void SetOnClientDisconnected(std::function<void(ClientHandler*)> handlerFunction)
+    {
+        OnClientDisconnected = handlerFunction;
+    }
 
     /// <summary>
     /// Add a new callback for a message type, will be fired when the server received a message of that type.
@@ -241,7 +341,7 @@ public:
     /// Starts the server, blocking. You may want to start it on a thread.
     /// </summary>
     /// <returns>Status of the server, 1 if an error occured, 0 if not</returns>
-    int Run() noexcept;
+    AnTcpError Run() noexcept;
 
 private:
     /// <summary>
@@ -251,9 +351,18 @@ private:
     {
         for (size_t i = 0; i < Clients.size(); ++i)
         {
-            if (Clients[i] && Clients[i]->CanBeDeleted())
+            if (Clients[i]->IsConnected())
             {
-                delete Clients[i];
+                if (Clients[i])
+                {
+                    if (OnClientDisconnected)
+                    {
+                        OnClientDisconnected(Clients[i]);
+                    }
+
+                    delete Clients[i];
+                }
+
                 Clients.erase(Clients.begin() + i);
             }
         }

@@ -93,6 +93,7 @@ int main(int argc, const char* argv[])
     Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT), RandomPointCallback);
     Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT_AROUND), RandomPointAroundCallback);
     Server->AddCallback(static_cast<char>(MessageType::MOVE_ALONG_SURFACE), MoveAlongSurfaceCallback);
+    Server->AddCallback(static_cast<char>(MessageType::CAST_RAY), CastRayCallback);
 
     LogS("Starting server on: ", Config->ip, ":", std::to_string(Config->port));
     Server->Run();
