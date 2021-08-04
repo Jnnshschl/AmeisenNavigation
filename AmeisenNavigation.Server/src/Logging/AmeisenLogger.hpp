@@ -31,7 +31,7 @@ static std::ofstream LogFileStream;
 template<typename ...Args>
 constexpr void Log(const std::string& tag, int color, int colorSecond, Args&& ...args)
 {
-    static std::string Delimiter = " >> ";
+    static const char* Delimiter = " >> ";
 
 #if defined WIN32 || defined WIN64
     static void* ConsoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);

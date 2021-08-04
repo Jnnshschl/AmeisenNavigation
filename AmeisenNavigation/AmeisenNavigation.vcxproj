@@ -183,7 +183,6 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\AmeisenNavigation.hpp" />
-    <ClInclude Include="src\Vector\Vector3.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />
