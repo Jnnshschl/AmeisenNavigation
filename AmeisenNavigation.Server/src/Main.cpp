@@ -133,19 +133,19 @@ void OnClientConnect(ClientHandler* handler)
 {
     LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
 
-    ClientPathBuffers[handler->GetUniqueId()] = std::make_pair(new float[Config->maxPointPath * 3], new float[Config->maxPointPath * 3]);
-    Nav->NewClient(handler->GetUniqueId());
+    ClientPathBuffers[handler->GetId()] = std::make_pair(new float[Config->maxPointPath * 3], new float[Config->maxPointPath * 3]);
+    Nav->NewClient(handler->GetId());
 }
 
 void OnClientDisconnect(ClientHandler* handler)
 {
-    Nav->FreeClient(handler->GetUniqueId());
+    Nav->FreeClient(handler->GetId());
 
-    delete[] ClientPathBuffers[handler->GetUniqueId()].first;
-    ClientPathBuffers[handler->GetUniqueId()].first = nullptr;
+    delete[] ClientPathBuffers[handler->GetId()].first;
+    ClientPathBuffers[handler->GetId()].first = nullptr;
 
-    delete[] ClientPathBuffers[handler->GetUniqueId()].second;
-    ClientPathBuffers[handler->GetUniqueId()].second = nullptr;
+    delete[] ClientPathBuffers[handler->GetId()].second;
+    ClientPathBuffers[handler->GetId()].second = nullptr;
 
     LogI("Client Disconnected: ", handler->GetIpAddress(), ":", handler->GetPort());
 }
@@ -155,14 +155,14 @@ void PathCallback(ClientHandler* handler, char type, const void* data, int size)
     const PathRequestData request = *reinterpret_cast<const PathRequestData*>(data);
 
     int pathSize = 0;
-    float* pathBuffer = ClientPathBuffers[handler->GetUniqueId()].first;
+    float* pathBuffer = ClientPathBuffers[handler->GetId()].first;
 
-    if (Nav->GetPath(handler->GetUniqueId(), request.mapId, request.start, request.end, pathBuffer, &pathSize))
+    if (Nav->GetPath(handler->GetId(), request.mapId, request.start, request.end, pathBuffer, &pathSize))
     {
         if ((request.flags & static_cast<int>(PathRequestFlags::CATMULLROM)) && pathSize > 9)
         {
             int smoothedPathSize = 0;
-            float* smoothedPathBuffer = ClientPathBuffers[handler->GetUniqueId()].second;
+            float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
             Nav->SmoothPathCatmullRom(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
 
             handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
@@ -170,7 +170,7 @@ void PathCallback(ClientHandler* handler, char type, const void* data, int size)
         else if ((request.flags & static_cast<int>(PathRequestFlags::CHAIKIN)) && pathSize > 6)
         {
             int smoothedPathSize = 0;
-            float* smoothedPathBuffer = ClientPathBuffers[handler->GetUniqueId()].second;
+            float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
             Nav->SmoothPathChaikinCurve(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize);
 
             handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
@@ -192,7 +192,7 @@ void RandomPointCallback(ClientHandler* handler, char type, const void* data, in
     const int mapId = *reinterpret_cast<const int*>(data);
     float point[3]{};
 
-    Nav->GetRandomPoint(handler->GetUniqueId(), mapId, point);
+    Nav->GetRandomPoint(handler->GetId(), mapId, point);
     handler->SendData(type, point, VEC3_SIZE);
 }
 
@@ -201,7 +201,7 @@ void RandomPointAroundCallback(ClientHandler* handler, char type, const void* da
     const RandomPointAroundData request = *reinterpret_cast<const RandomPointAroundData*>(data);
     float point[3]{};
 
-    Nav->GetRandomPointAround(handler->GetUniqueId(), request.mapId, request.start, request.radius, point);
+    Nav->GetRandomPointAround(handler->GetId(), request.mapId, request.start, request.radius, point);
     handler->SendData(type, point, VEC3_SIZE);
 }
 
@@ -210,7 +210,7 @@ void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* dat
     const MoveRequestData request = *reinterpret_cast<const MoveRequestData*>(data);
     float point[3]{};
 
-    Nav->MoveAlongSurface(handler->GetUniqueId(), request.mapId, request.start, request.end, point);
+    Nav->MoveAlongSurface(handler->GetId(), request.mapId, request.start, request.end, point);
     handler->SendData(type, point, VEC3_SIZE);
 }
 
@@ -219,7 +219,7 @@ void CastRayCallback(ClientHandler* handler, char type, const void* data, int si
     const CastRayData request = *reinterpret_cast<const CastRayData*>(data);
     dtRaycastHit hit;
 
-    if (Nav->CastMovementRay(handler->GetUniqueId(), request.mapId, request.start, request.end, &hit))
+    if (Nav->CastMovementRay(handler->GetId(), request.mapId, request.start, request.end, &hit))
     {
         handler->SendData(type, request.end, VEC3_SIZE);
     }

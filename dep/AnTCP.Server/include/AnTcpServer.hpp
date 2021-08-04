@@ -1,7 +1,7 @@
 #pragma once
 
 // toggle debug output here
-#if 1
+#if 0
 #define DEBUG_ONLY(x) x
 #define BENCHMARK(x) x
 #else
@@ -72,7 +72,6 @@ public:
     /// <param name="callbacks">Pointer to the server callback map.</param>
     ClientHandler
     (
-        size_t id,
         SOCKET socket,
         const SOCKADDR_IN& socketInfo,
         std::atomic<bool>& shouldExit,
@@ -81,10 +80,9 @@ public:
         std::function<void(ClientHandler*)>* onClientDisconnected = nullptr
     )
         : IsActive(true),
-        Id(id),
+        Id(static_cast<unsigned int>(socketInfo.sin_addr.S_un.S_addr + socketInfo.sin_port)),
         Socket(socket),
         SocketInfo(socketInfo),
-        UniqueId(static_cast<unsigned int>(socketInfo.sin_addr.S_un.S_addr + socketInfo.sin_port)),
         ShouldExit(shouldExit),
         Callbacks(callbacks),
         Thread(new std::thread(&ClientHandler::Listen, this)),
@@ -109,11 +107,6 @@ public:
     /// Get the AnTCP handler id.
     /// </summary>
     constexpr int GetId() noexcept { return Id; }
-
-    /// <summary>
-    /// Get a unique id based on ip and port of the handler.
-    /// </summary>
-    constexpr unsigned int GetUniqueId() noexcept { return UniqueId; }
 
     /// <summary>
     /// Used to delete old disconnected clients.

@@ -236,8 +236,14 @@ void AmeisenNavigation::SmoothPathChaikinCurve(const float* input, int inputSize
 
     float result[3];
 
+    // make sure we dont go over the buffer bounds
+    // why 10: we add 6 floats in the loop and 3 for the end position
+    const int maxIndex = MaxPointPath - 10;
+
     for (int i = 0; i < inputSize - 3; i += 3)
     {
+        if (*outputSize > maxIndex) { break; }
+
         ScaleAndAddVector3(input + i, 0.75f, input + i + 3, 0.25f, s0, s1, result);
         InsertVector3(output, *outputSize, result, 0);
 
@@ -265,6 +271,10 @@ void AmeisenNavigation::SmoothPathCatmullRom(const float* input, int inputSize, 
 
     float C[3];
 
+    // make sure we dont go over the buffer bounds
+    // why 4: we add 3 floats in the loop
+    const int maxIndex = MaxPointPath - 4;
+
     for (int i = 3; i < inputSize - 6; i += 3)
     {
         const float* p0 = input + i - 3;
@@ -291,6 +301,8 @@ void AmeisenNavigation::SmoothPathCatmullRom(const float* input, int inputSize, 
 
             if (!std::isnan(C[0]) && !std::isnan(C[1]) && !std::isnan(C[2]))
             {
+                if (*outputSize > maxIndex) { return; }
+
                 InsertVector3(output, *outputSize, C, 0);
             }
         }
