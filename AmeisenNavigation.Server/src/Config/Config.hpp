@@ -19,19 +19,21 @@ private:
     std::map<std::string, void*> Map
     {
         { "fCatmullRomSplineAlpha", &catmullRomSplineAlpha },
+        { "fRandomPathMaxDistance", &randomPathMaxDistance },
         { "iCatmullRomSplinePoints", &catmullRomSplinePoints },
-        { "iMaxPointPath", &maxPointPath },
         { "iMaxPolyPath", &maxPolyPath },
+        { "iMaxSearchNodes", &maxSearchNodes },
         { "iPort", &port },
         { "sIp", &ip },
         { "sMmapsPath", &mmapsPath },
     };
 
 public:
-    float catmullRomSplineAlpha = 1.0;
+    float catmullRomSplineAlpha = 1.0f;
+    float randomPathMaxDistance = 1.5f;
     int catmullRomSplinePoints = 4;
-    int maxPointPath = 512;
-    int maxPolyPath = 256;
+    int maxPolyPath = 512;
+    int maxSearchNodes = 65535;
     int port = 47110;
     std::string ip = "127.0.0.1";
     std::string mmapsPath = "C:\\shady stuff\\mmaps\\";

@@ -55,13 +55,6 @@ int main(int argc, const char* argv[])
         return 1;
     }
 
-    if (Config->maxPointPath <= 0)
-    {
-        LogE("iMaxPointPath has to be a value > 0");
-        std::cin.get();
-        return 1;
-    }
-
     if (Config->maxPolyPath <= 0)
     {
         LogE("iMaxPolyPath has to be a value > 0");
@@ -71,7 +64,14 @@ int main(int argc, const char* argv[])
 
     if (Config->port <= 0 || Config->port > 65535)
     {
-        LogE("iMaxPolyPath has to be a value bewtween 1 and 65535");
+        LogE("iPort has to be a value bewtween 1 and 65535");
+        std::cin.get();
+        return 1;
+    }
+
+    if (Config->maxSearchNodes <= 0 || Config->maxSearchNodes > 65535)
+    {
+        LogE("iMaxSearchNodes has to be a value bewtween 1 and 65535");
         std::cin.get();
         return 1;
     }
@@ -84,13 +84,14 @@ int main(int argc, const char* argv[])
         return 1;
     }
 
-    Nav = new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxPointPath);
+    Nav = new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxSearchNodes);
     Server = new AnTcpServer(Config->ip, Config->port);
 
     Server->SetOnClientConnected(OnClientConnect);
     Server->SetOnClientDisconnected(OnClientDisconnect);
 
     Server->AddCallback(static_cast<char>(MessageType::PATH), PathCallback);
+    Server->AddCallback(static_cast<char>(MessageType::RANDOM_PATH), RandomPathCallback);
     Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT), RandomPointCallback);
     Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT_AROUND), RandomPointAroundCallback);
     Server->AddCallback(static_cast<char>(MessageType::MOVE_ALONG_SURFACE), MoveAlongSurfaceCallback);
@@ -106,14 +107,14 @@ int main(int argc, const char* argv[])
 
     for (const auto& kv : ClientPathBuffers)
     {
-        if (kv.second.second)
+        if (kv.second.first)
         {
             delete[] kv.second.first;
         }
 
         if (kv.second.second)
         {
-            delete[] kv.second.first;
+            delete[] kv.second.second;
         }
     }
 }
@@ -129,15 +130,15 @@ int __stdcall SigIntHandler(unsigned long signal)
     return 1;
 }
 
-void OnClientConnect(ClientHandler* handler)
+void OnClientConnect(ClientHandler* handler) noexcept
 {
     LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
 
-    ClientPathBuffers[handler->GetId()] = std::make_pair(new float[Config->maxPointPath * 3], new float[Config->maxPointPath * 3]);
+    ClientPathBuffers[handler->GetId()] = std::make_pair(new float[Config->maxPolyPath * 3], new float[Config->maxPolyPath * 3]);
     Nav->NewClient(handler->GetId());
 }
 
-void OnClientDisconnect(ClientHandler* handler)
+void OnClientDisconnect(ClientHandler* handler) noexcept
 {
     Nav->FreeClient(handler->GetId());
 
@@ -150,14 +151,79 @@ void OnClientDisconnect(ClientHandler* handler)
     LogI("Client Disconnected: ", handler->GetIpAddress(), ":", handler->GetPort());
 }
 
-void PathCallback(ClientHandler* handler, char type, const void* data, int size)
+void PathCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    GenericPathCallback(handler, type, data, size, PathType::STRAIGHT);
+}
+
+void RandomPathCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    GenericPathCallback(handler, type, data, size, PathType::RANDOM);
+}
+
+void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    const int mapId = *reinterpret_cast<const int*>(data);
+    float point[3]{};
+
+    Nav->GetRandomPoint(handler->GetId(), mapId, point);
+    handler->SendData(type, point, VEC3_SIZE);
+}
+
+void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    const RandomPointAroundData request = *reinterpret_cast<const RandomPointAroundData*>(data);
+    float point[3]{};
+
+    Nav->GetRandomPointAround(handler->GetId(), request.mapId, request.start, request.radius, point);
+    handler->SendData(type, point, VEC3_SIZE);
+}
+
+void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    const MoveRequestData request = *reinterpret_cast<const MoveRequestData*>(data);
+    float point[3]{};
+
+    Nav->MoveAlongSurface(handler->GetId(), request.mapId, request.start, request.end, point);
+    handler->SendData(type, point, VEC3_SIZE);
+}
+
+void CastRayCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    const CastRayData request = *reinterpret_cast<const CastRayData*>(data);
+    dtRaycastHit hit;
+
+    if (Nav->CastMovementRay(handler->GetId(), request.mapId, request.start, request.end, &hit))
+    {
+        handler->SendData(type, request.end, VEC3_SIZE);
+    }
+    else
+    {
+        float zero[3]{};
+        handler->SendData(type, zero, VEC3_SIZE);
+    }
+}
+
+void GenericPathCallback(ClientHandler* handler, char type, const void* data, int size, PathType pathType) noexcept
 {
     const PathRequestData request = *reinterpret_cast<const PathRequestData*>(data);
 
     int pathSize = 0;
     float* pathBuffer = ClientPathBuffers[handler->GetId()].first;
 
-    if (Nav->GetPath(handler->GetId(), request.mapId, request.start, request.end, pathBuffer, &pathSize))
+    bool pathGenerated = false;
+
+    switch (pathType)
+    {
+    case PathType::STRAIGHT:
+        pathGenerated = Nav->GetPath(handler->GetId(), request.mapId, request.start, request.end, pathBuffer, &pathSize);
+        break;
+    case PathType::RANDOM:
+        pathGenerated = Nav->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, pathBuffer, &pathSize, Config->randomPathMaxDistance);
+        break;
+    }
+
+    if (pathGenerated)
     {
         if ((request.flags & static_cast<int>(PathRequestFlags::CATMULLROM)) && pathSize > 9)
         {
@@ -179,49 +245,6 @@ void PathCallback(ClientHandler* handler, char type, const void* data, int size)
         {
             handler->SendData(type, pathBuffer, pathSize * sizeof(float));
         }
-    }
-    else
-    {
-        float zero[3]{};
-        handler->SendData(type, zero, VEC3_SIZE);
-    }
-}
-
-void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size)
-{
-    const int mapId = *reinterpret_cast<const int*>(data);
-    float point[3]{};
-
-    Nav->GetRandomPoint(handler->GetId(), mapId, point);
-    handler->SendData(type, point, VEC3_SIZE);
-}
-
-void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size)
-{
-    const RandomPointAroundData request = *reinterpret_cast<const RandomPointAroundData*>(data);
-    float point[3]{};
-
-    Nav->GetRandomPointAround(handler->GetId(), request.mapId, request.start, request.radius, point);
-    handler->SendData(type, point, VEC3_SIZE);
-}
-
-void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size)
-{
-    const MoveRequestData request = *reinterpret_cast<const MoveRequestData*>(data);
-    float point[3]{};
-
-    Nav->MoveAlongSurface(handler->GetId(), request.mapId, request.start, request.end, point);
-    handler->SendData(type, point, VEC3_SIZE);
-}
-
-void CastRayCallback(ClientHandler* handler, char type, const void* data, int size)
-{
-    const CastRayData request = *reinterpret_cast<const CastRayData*>(data);
-    dtRaycastHit hit;
-
-    if (Nav->CastMovementRay(handler->GetId(), request.mapId, request.start, request.end, &hit))
-    {
-        handler->SendData(type, request.end, VEC3_SIZE);
     }
     else
     {

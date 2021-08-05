@@ -5,13 +5,24 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AmeisenNavigation.Tester"
         mc:Ignorable="d"
-        Title="AmeisenNavigation Tester" Height="450" Width="900">
+        Title="AmeisenNavigation Tester" Height="450" Width="900" Loaded="Window_Loaded">
     <Grid>
-        <Button x:Name="ButtonRun" Content="GetPath" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Width="100" Click="ButtonRun_Click" Height="32" />
+        <Button x:Name="ButtonRun" Content="GetPath" HorizontalAlignment="Left" Margin="385,10,0,0" VerticalAlignment="Top" Width="100" Click="ButtonRun_Click" Height="41" />
         <Rectangle x:Name="ImgRect" Margin="10,60,280,10" Fill="Gainsboro" />
         <Image x:Name="ImgCanvas" Margin="10,60,280,10" />
         <ListBox x:Name="PointList" Margin="0,60,10,10" HorizontalAlignment="Right" Width="265" />
-        <Button x:Name="ButtonRunChaikin" Content="GetPath (Chaikin)" HorizontalAlignment="Left" Margin="115,10,0,0" VerticalAlignment="Top" Width="130" Click="ButtonRunChaikin_Click" Height="32" />
-        <Button x:Name="ButtonRunCatmullRom" Content="GetPath (CatmullRom)" HorizontalAlignment="Left" Margin="250,10,0,0" VerticalAlignment="Top" Width="150" Click="ButtonRunCatmullRom_Click" Height="32" />
+        <Button x:Name="ButtonRunChaikin" Content="GetPath (Chaikin)" HorizontalAlignment="Left" Margin="490,10,0,0" VerticalAlignment="Top" Width="130" Click="ButtonRunChaikin_Click" Height="41" />
+        <Button x:Name="ButtonRunCatmullRom" Content="GetPath (CatmullRom)" HorizontalAlignment="Left" Margin="625,10,0,0" VerticalAlignment="Top" Width="154" Click="ButtonRunCatmullRom_Click" Height="41" />
+        <CheckBox x:Name="CheckBoxRandomPath" Content="Randomize" HorizontalAlignment="Left" Margin="784,10,0,0" VerticalAlignment="Top"/>
+        <Label Content="Start" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Padding="1"/>
+        <Label Content="End" HorizontalAlignment="Left" Margin="10,33,0,0" VerticalAlignment="Top" Padding="1"/>
+        <TextBox x:Name="TextBoxStartX" HorizontalAlignment="Left" Margin="41,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
+        <TextBox x:Name="TextBoxStartY" HorizontalAlignment="Left" Margin="146,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
+        <TextBox x:Name="TextBoxStartZ" HorizontalAlignment="Left" Margin="251,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
+        <TextBox x:Name="TextBoxEndX" HorizontalAlignment="Left" Margin="41,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
+        <TextBox x:Name="TextBoxEndY" HorizontalAlignment="Left" Margin="146,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
+        <TextBox x:Name="TextBoxEndZ" HorizontalAlignment="Left" Margin="251,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
+        <Button x:Name="ButtonRandomStart" Content="R" HorizontalAlignment="Left" Margin="356,10,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomStart_Click"/>
+        <Button x:Name="ButtonRandomEnd" Content="R" HorizontalAlignment="Left" Margin="356,33,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomEnd_Click"/>
     </Grid>
 </Window>

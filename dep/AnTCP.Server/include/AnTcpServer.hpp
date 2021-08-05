@@ -54,7 +54,6 @@ private:
     std::atomic<bool>& ShouldExit;
     std::unordered_map <AnTcpMessageType, std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>>* Callbacks;
 
-    unsigned int UniqueId;
     bool IsActive;
     std::thread* Thread;
 
