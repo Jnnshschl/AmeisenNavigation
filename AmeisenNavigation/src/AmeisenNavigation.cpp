@@ -1,11 +1,11 @@
 #include "AmeisenNavigation.hpp"
 
-void AmeisenNavigation::NewClient(int id) noexcept
+void AmeisenNavigation::NewClient(int id, CLIENT_VERSION version) noexcept
 {
     if (IsValidClient(id)) { return; }
 
     ANAV_DEBUG_ONLY(std::cout << ">> New Client: " << id << std::endl);
-    Clients[id] = new AmeisenNavClient(id, MaxPathNodes);
+    Clients[id] = new AmeisenNavClient(id, version, MaxPathNodes);
 }
 
 void AmeisenNavigation::FreeClient(int id) noexcept
@@ -53,12 +53,13 @@ bool AmeisenNavigation::GetRandomPath(int clientId, int mapId, const float* star
         {
             if (i > 0 && i < *pathSize - 3)
             {
-                dtStatus randomPointStatus = Clients[clientId]->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
+                const auto client = Clients[clientId];
+                dtStatus randomPointStatus = client->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
                 (
                     visitedBuffer[i / 3],
                     path + i,
                     maxRandomDistance,
-                    &QueryFilter,
+                    &client->QueryFilter(),
                     GetRandomFloat,
                     &randomRef,
                     path + i
@@ -95,12 +96,14 @@ bool AmeisenNavigation::MoveAlongSurface(int clientId, int mapId, const float* s
 
     int visitedCount;
     dtPolyRef visited[16]{};
-    dtStatus moveAlongSurfaceStatus = Clients[clientId]->GetNavmeshQuery(mapId)->moveAlongSurface
+
+    const auto client = Clients[clientId];
+    dtStatus moveAlongSurfaceStatus = client->GetNavmeshQuery(mapId)->moveAlongSurface
     (
         GetNearestPoly(clientId, mapId, rdStart, rdStart),
         rdStart,
         rdEnd,
-        &QueryFilter,
+        &client->QueryFilter(),
         positionToGoTo,
         visited,
         &visitedCount,
@@ -125,9 +128,11 @@ bool AmeisenNavigation::GetRandomPoint(int clientId, int mapId, float* position)
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetRandomPoint (" << mapId << ")" << std::endl);
 
     dtPolyRef polyRef;
-    dtStatus findRandomPointStatus = Clients[clientId]->GetNavmeshQuery(mapId)->findRandomPoint
+
+    const auto client = Clients[clientId];
+    dtStatus findRandomPointStatus = client->GetNavmeshQuery(mapId)->findRandomPoint
     (
-        &QueryFilter,
+        &client->QueryFilter(),
         GetRandomFloat,
         &polyRef,
         position
@@ -155,12 +160,13 @@ bool AmeisenNavigation::GetRandomPointAround(int clientId, int mapId, const floa
     WowToRDCoords(rdStart);
 
     dtPolyRef polyRef;
-    dtStatus findRandomPointAroundStatus = Clients[clientId]->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
+    const auto client = Clients[clientId];
+    dtStatus findRandomPointAroundStatus = client->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
     (
         GetNearestPoly(clientId, mapId, rdStart, rdStart),
         rdStart,
         radius,
-        &QueryFilter,
+        &client->QueryFilter(),
         GetRandomFloat,
         &polyRef,
         position
@@ -191,12 +197,13 @@ bool AmeisenNavigation::CastMovementRay(int clientId, int mapId, const float* st
     dtVcopy(rdEnd, endPosition);
     WowToRDCoords(rdEnd);
 
-    dtStatus castMovementRayStatus = Clients[clientId]->GetNavmeshQuery(mapId)->raycast
+    const auto client = Clients[clientId];
+    dtStatus castMovementRayStatus = client->GetNavmeshQuery(mapId)->raycast
     (
         GetNearestPoly(clientId, mapId, rdStart, rdStart),
         rdStart,
         rdEnd,
-        &QueryFilter,
+        &client->QueryFilter(),
         0,
         raycastHit
     );
@@ -299,9 +306,26 @@ bool AmeisenNavigation::LoadMmaps(int mapId) noexcept
 
     if (IsMmapLoaded(mapId)) { return true; }
 
+    MMAP_FORMAT mmapFormat = TryDetectMmapFormat();
+
+    if (mmapFormat == MMAP_FORMAT::UNKNOWN)
+    {
+        return false;
+    }
+
     // build the *.mmap filename (example: 001.mmap or 587.mmap)
     std::stringstream mmapFilename;
-    mmapFilename << std::setw(3) << std::setfill('0') << mapId << ".mmap";
+
+    switch (mmapFormat)
+    {
+    case MMAP_FORMAT::TC335A:
+        mmapFilename << std::setw(3) << std::setfill('0') << mapId << ".mmap";
+        break;
+
+    case MMAP_FORMAT::SF548:
+        mmapFilename << std::setw(4) << std::setfill('0') << mapId << ".mmap";
+        break;
+    }
 
     std::filesystem::path mmapFile(MmapFolder);
     mmapFile.append(mmapFilename.str());
@@ -341,7 +365,17 @@ bool AmeisenNavigation::LoadMmaps(int mapId) noexcept
         for (int y = 1; y <= 64; ++y)
         {
             std::stringstream mmapTileFilename;
-            mmapTileFilename << std::setfill('0') << std::setw(3) << mapId << std::setw(2) << x << std::setw(2) << y << ".mmtile";
+
+            switch (mmapFormat)
+            {
+            case MMAP_FORMAT::TC335A:
+                mmapTileFilename << std::setfill('0') << std::setw(3) << mapId << std::setw(2) << x << std::setw(2) << y << ".mmtile";
+                break;
+
+            case MMAP_FORMAT::SF548:
+                mmapTileFilename << std::setfill('0') << std::setw(4) << mapId << "_" << std::setw(2) << x << "_" << std::setw(2) << y << ".mmtile";
+                break;
+            }
 
             std::filesystem::path mmapTileFile(MmapFolder);
             mmapTileFile.append(mmapTileFilename.str());
@@ -434,13 +468,14 @@ bool AmeisenNavigation::CalculateNormalPath(int clientId, int mapId, const float
     dtVcopy(rdEnd, endPosition);
     WowToRDCoords(rdEnd);
 
-    dtStatus polyPathStatus = Clients[clientId]->GetNavmeshQuery(mapId)->findPath
+    const auto client = Clients[clientId];
+    dtStatus polyPathStatus = client->GetNavmeshQuery(mapId)->findPath
     (
         GetNearestPoly(clientId, mapId, rdStart, rdStart),
         GetNearestPoly(clientId, mapId, rdEnd, rdEnd),
         rdStart,
         rdEnd,
-        &QueryFilter,
+        &client->QueryFilter(),
         Clients[clientId]->GetPolyPathBuffer(),
         pathSize,
         MaxPathNodes
@@ -480,4 +515,30 @@ bool AmeisenNavigation::CalculateNormalPath(int clientId, int mapId, const float
     }
 
     return false;
+}
+
+MMAP_FORMAT AmeisenNavigation::TryDetectMmapFormat() noexcept
+{
+    // TrinityCore 3.3.5a format
+    std::filesystem::path mmapTestTileFile(MmapFolder);
+    mmapTestTileFile.append("0002337.mmtile");
+
+    if (std::filesystem::exists(mmapTestTileFile))
+    {
+        ANAV_DEBUG_ONLY(std::cout << ">> MMAP format: TC335A" << std::endl);
+        return MMAP_FORMAT::TC335A;
+    }
+
+    // SkyFire 5.4.8 format
+    std::filesystem::path mmapTestTileFile2(MmapFolder);
+    mmapTestTileFile2.append("0000_22_39.mmtile");
+
+    if (std::filesystem::exists(mmapTestTileFile2))
+    {
+        ANAV_DEBUG_ONLY(std::cout << ">> MMAP format: SF548" << std::endl);
+        return MMAP_FORMAT::SF548;
+    }
+
+    ANAV_DEBUG_ONLY(std::cout << ">> MMAP format unknown" << std::endl);
+    return MMAP_FORMAT::UNKNOWN;
 }

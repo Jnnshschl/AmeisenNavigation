@@ -24,6 +24,7 @@ private:
         { "iMaxPolyPath", &maxPolyPath },
         { "iMaxSearchNodes", &maxSearchNodes },
         { "iPort", &port },
+        { "iClientVersion", &clientVersion },
         { "sIp", &ip },
         { "sMmapsPath", &mmapsPath },
     };
@@ -35,6 +36,7 @@ public:
     int maxPolyPath = 512;
     int maxSearchNodes = 65535;
     int port = 47110;
+    int clientVersion = static_cast<int>(CLIENT_VERSION::V335A);
     std::string ip = "127.0.0.1";
     std::string mmapsPath = "C:\\shady stuff\\mmaps\\";
 

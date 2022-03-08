@@ -27,17 +27,16 @@ constexpr auto CONSOLE_COLOR_YELLOW = 14;
 static bool ConsoleOpened;
 static _iobuf* StdoutHandle;
 static std::ofstream LogFileStream;
+static const char* Delimiter = " >> ";
 
 template<typename ...Args>
 constexpr void Log(const std::string& tag, int color, int colorSecond, Args&& ...args)
 {
-    static const char* Delimiter = " >> ";
-
 #if defined WIN32 || defined WIN64
     static void* ConsoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 #endif
 
-    std::cout << std::setw(8) << tag;
+    std::cout << std::setw(14) << tag;
 
 #if defined WIN32 || defined WIN64
     SetConsoleTextAttribute(ConsoleHandle, color);

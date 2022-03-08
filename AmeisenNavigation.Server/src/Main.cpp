@@ -135,7 +135,7 @@ void OnClientConnect(ClientHandler* handler) noexcept
     LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
 
     ClientPathBuffers[handler->GetId()] = std::make_pair(new float[Config->maxPolyPath * 3], new float[Config->maxPolyPath * 3]);
-    Nav->NewClient(handler->GetId());
+    Nav->NewClient(handler->GetId(), static_cast<CLIENT_VERSION>(Config->clientVersion));
 }
 
 void OnClientDisconnect(ClientHandler* handler) noexcept

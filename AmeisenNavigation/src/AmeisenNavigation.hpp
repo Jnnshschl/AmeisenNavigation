@@ -32,22 +32,11 @@ inline float GetRandomFloat() { return static_cast<float>(rand()) / MAX_RAND_F; 
 // macro to print all values of a vector3
 #define PRINT_VEC3(vec) "[" << vec[0] << ", " << vec[1] << ", " << vec[2] << "]"
 
-enum NavArea
+enum class MMAP_FORMAT
 {
-    NAV_AREA_EMPTY = 0,
-    NAV_AREA_GROUND = 11,
-    NAV_AREA_GROUND_STEEP = 10,
-    NAV_AREA_WATER = 9,
-    NAV_AREA_MAGMA_SLIME = 8,
-};
-
-enum NavTerrainFlag
-{
-    NAV_EMPTY = 0x00,
-    NAV_GROUND = 1 << (NAV_AREA_GROUND - NAV_AREA_GROUND),
-    NAV_GROUND_STEEP = 1 << (NAV_AREA_GROUND - NAV_AREA_GROUND_STEEP),
-    NAV_WATER = 1 << (NAV_AREA_GROUND - NAV_AREA_WATER),
-    NAV_MAGMA_SLIME = 1 << (NAV_AREA_GROUND - NAV_AREA_MAGMA_SLIME)
+    UNKNOWN,
+    TC335A,
+    SF548
 };
 
 struct MmapTileHeader
@@ -67,7 +56,6 @@ private:
     int MaxPathNodes;
     int MaxSearchNodes;
 
-    dtQueryFilter QueryFilter;
     std::unordered_map<int, std::pair<std::mutex, dtNavMesh*>> NavMeshMap;
     std::unordered_map<int, AmeisenNavClient*> Clients;
 
@@ -82,13 +70,9 @@ public:
         : MmapFolder(mmapFolder),
         MaxPathNodes(maxPathNodes),
         MaxSearchNodes(maxSearchNodes),
-        QueryFilter(),
         NavMeshMap(),
         Clients()
     {
-        QueryFilter.setIncludeFlags(NAV_GROUND | NAV_WATER);
-        QueryFilter.setExcludeFlags(NAV_EMPTY | NAV_GROUND_STEEP | NAV_MAGMA_SLIME);
-
         // seed the random generator
         srand(static_cast<unsigned int>(time(0)));
     }
@@ -119,8 +103,9 @@ public:
     /// <summary>
     /// Call this to register a new client.
     /// </summary>
-    /// <param name="id">Uinique id for the client.</param>
-    void NewClient(int id) noexcept;
+    /// <param name="id">Unique id for the client.</param>
+    /// <param name="version">Version of the client.</param>
+    void NewClient(int id, CLIENT_VERSION version) noexcept;
 
     /// <summary>
     /// Call this to free a client.
@@ -235,7 +220,8 @@ private:
     {
         dtPolyRef polyRef;
         float extents[3] = { 6.0f, 6.0f, 6.0f };
-        bool result = dtStatusSucceed(Clients.at(clientId)->GetNavmeshQuery(mapId)->findNearestPoly(position, extents, &QueryFilter, &polyRef, closestPointOnPoly));
+        const auto& client = Clients.at(clientId);
+        bool result = dtStatusSucceed(client->GetNavmeshQuery(mapId)->findNearestPoly(position, extents, &client->QueryFilter(), &polyRef, closestPointOnPoly));
         return result ? polyRef : 0;
     }
 
@@ -302,4 +288,10 @@ private:
     /// Used by the GetPath and GetRandomPath methods to generate a path.
     /// </summary>
     bool CalculateNormalPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, dtPolyRef* visited = nullptr) noexcept;
+
+    /// <summary>
+    /// Used to detect the mmap file format.
+    /// </summary>
+    /// <returns>Mmap format detected or MMAP_FORMAT::UNKNOWN</returns>
+    MMAP_FORMAT TryDetectMmapFormat() noexcept;
 };

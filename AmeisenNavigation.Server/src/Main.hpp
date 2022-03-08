@@ -11,7 +11,7 @@
 #include <iostream>
 #include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.7.5.0";
+constexpr auto AMEISENNAV_VERSION = "1.8.0.0";
 
 constexpr auto VEC3_SIZE = sizeof(float) * 3;
 
