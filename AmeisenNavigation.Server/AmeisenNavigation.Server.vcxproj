@@ -75,7 +75,7 @@
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
-    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x86\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Platform)\$(Configuration)\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
     <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -83,7 +83,7 @@
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
-    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x86\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Platform)\$(Configuration)\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
     <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -91,7 +91,7 @@
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
-    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x64\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Platform)\$(Configuration)\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
     <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -99,7 +99,7 @@
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
-    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Configuration)\x64\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
+    <LibraryPath>$(SolutionDir)dep\AnTCP.Server\lib\$(Platform)\$(Configuration)\;$(SolutionDir)AmeisenNavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(LibraryPath)</LibraryPath>
     <IncludePath>$(SolutionDir)dep\AnTCP.Server\include\;$(IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
