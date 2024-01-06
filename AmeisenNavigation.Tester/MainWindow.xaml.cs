@@ -121,7 +121,7 @@ namespace AmeisenNavigation.Tester
                 int boundsX = (int)(maxX - minX + (padding * 2.0f));
                 int boundsY = (int)(maxY - minY + (padding * 2.0f));
 
-                List<Vector3> normalizedPath = new();
+                List<Vector3> normalizedPath = [];
 
                 foreach (Vector3 v3 in path)
                 {
