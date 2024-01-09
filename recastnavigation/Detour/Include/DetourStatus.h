@@ -34,31 +34,32 @@ static const unsigned int DT_OUT_OF_MEMORY = 1 << 2;	// Operation ran out of mem
 static const unsigned int DT_INVALID_PARAM = 1 << 3;	// An input parameter was invalid.
 static const unsigned int DT_BUFFER_TOO_SMALL = 1 << 4;	// Result buffer for the query was too small to store all results.
 static const unsigned int DT_OUT_OF_NODES = 1 << 5;		// Query ran out of nodes during search.
-static const unsigned int DT_PARTIAL_RESULT = 1 << 6;	// Query did not reach the end location, returning best guess.
+static const unsigned int DT_PARTIAL_RESULT = 1 << 6;	// Query did not reach the end location, returning best guess. 
 static const unsigned int DT_ALREADY_OCCUPIED = 1 << 7;	// A tile has already been assigned to the given x,y coordinate
+
 
 // Returns true of status is success.
 inline bool dtStatusSucceed(dtStatus status)
 {
-    return (status & DT_SUCCESS) != 0;
+	return (status & DT_SUCCESS) != 0;
 }
 
 // Returns true of status is failure.
 inline bool dtStatusFailed(dtStatus status)
 {
-    return (status & DT_FAILURE) != 0;
+	return (status & DT_FAILURE) != 0;
 }
 
 // Returns true of status is in progress.
 inline bool dtStatusInProgress(dtStatus status)
 {
-    return (status & DT_IN_PROGRESS) != 0;
+	return (status & DT_IN_PROGRESS) != 0;
 }
 
 // Returns true if specific detail is set.
 inline bool dtStatusDetail(dtStatus status, unsigned int detail)
 {
-    return (status & detail) != 0;
+	return (status & detail) != 0;
 }
 
 #endif // DETOURSTATUS_H
