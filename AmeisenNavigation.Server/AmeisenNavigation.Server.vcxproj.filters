@@ -23,9 +23,6 @@
     <ClInclude Include="src\Main.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
-    <ClInclude Include="src\Enums\EMessageType.hpp">
-      <Filter>Headerdateien</Filter>
-    </ClInclude>
     <ClInclude Include="src\Config\Config.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>

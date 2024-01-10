@@ -1,7 +1,7 @@
 #pragma once
 
-enum class CLIENT_VERSION : char
+enum class ClientVersion : char
 {
-    V335A,
-    V548,
+    TC335A,
+    SF548,
 };

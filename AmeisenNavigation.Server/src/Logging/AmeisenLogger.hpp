@@ -33,7 +33,7 @@ template<typename ...Args>
 constexpr void Log(const std::string& tag, int color, int colorSecond, Args&& ...args)
 {
 #if defined WIN32 || defined WIN64
-    static void* ConsoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
+    void* ConsoleHandle = GetStdHandle(STD_OUTPUT_HANDLE);
 #endif
 
     std::cout << std::setw(14) << tag;

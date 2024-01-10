@@ -11,18 +11,18 @@
 #include <iostream>
 #include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.8.2.0";
-
+constexpr auto AMEISENNAV_VERSION = "1.8.3.0";
 constexpr auto VEC3_SIZE = sizeof(float) * 3;
 
 enum class MessageType
 {
-    PATH,
-    MOVE_ALONG_SURFACE,
-    RANDOM_POINT,
-    RANDOM_POINT_AROUND,
-    CAST_RAY,
-    RANDOM_PATH,
+    PATH,                   // Generate a simple straight path
+    MOVE_ALONG_SURFACE,     // Move an entity by small deltas using pathfinding (usefull to prevent falling off edges...)
+    RANDOM_POINT,           // Get a random point on the mesh
+    RANDOM_POINT_AROUND,    // Get a random point on the mesh in a circle
+    CAST_RAY,               // Cast a movement ray to test for obstacles
+    RANDOM_PATH,            // Generate a straight path where the nodes get offsetted by a random value
+    EXPLORE_POLY,           // Generate a route to explore the polygon (W.I.P)
 };
 
 enum class PathType
@@ -34,8 +34,8 @@ enum class PathType
 enum class PathRequestFlags : int
 {
     NONE = 0,
-    CHAIKIN = 1,
-    CATMULLROM = 2,
+    SMOOTH_CHAIKIN = 1,
+    SMOOTH_CATMULLROM = 2,
 };
 
 struct PathRequestData
@@ -67,11 +67,21 @@ struct RandomPointAroundData
     float radius;
 };
 
+struct ExplorePolyData
+{
+    int mapId;
+    int flags;
+    float start[3];
+    float viewDistance;
+    int polyPointCount;
+    float firstPolyPoint[3];
+};
+
 inline AnTcpServer* Server = nullptr;
 inline AmeisenNavigation* Nav = nullptr;
 inline AmeisenNavConfig* Config = nullptr;
 
-inline std::unordered_map<int, std::pair<float*, float*>> ClientPathBuffers;
+inline std::unordered_map<size_t, std::pair<float*, float*>> ClientPathBuffers;
 
 int __stdcall SigIntHandler(unsigned long signal);
 
@@ -80,9 +90,33 @@ void OnClientDisconnect(ClientHandler* handler) noexcept;
 
 void PathCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 void RandomPathCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 void CastRayCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-
 void GenericPathCallback(ClientHandler* handler, char type, const void* data, int size, PathType pathType) noexcept;
+
+void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
+void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
+
+void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
+
+inline void HandlePathFlagsAndSendData(ClientHandler* handler, int flags, int pathSize, float* pathBuffer, char type) noexcept
+{
+    if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CATMULLROM)) && pathSize > 9)
+    {
+        int smoothedPathSize = 0;
+        float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
+        Nav->SmoothPathCatmullRom(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
+        handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
+    }
+    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CHAIKIN)) && pathSize > 6)
+    {
+        int smoothedPathSize = 0;
+        float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
+        Nav->SmoothPathChaikinCurve(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize);
+        handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
+    }
+    else
+    {
+        handler->SendData(type, pathBuffer, pathSize * sizeof(float));
+    }
+}

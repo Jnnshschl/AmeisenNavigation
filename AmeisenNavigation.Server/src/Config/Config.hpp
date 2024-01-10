@@ -1,6 +1,6 @@
 #pragma once
 
-#include <map>
+#include <unordered_map>
 #include <string>
 #include <fstream>
 #include <sstream>
@@ -16,7 +16,7 @@ constexpr auto CONFIG_CHAR_DELIMITER = '=';
 struct AmeisenNavConfig
 {
 private:
-    std::map<std::string, void*> Map
+    std::unordered_map<std::string, void*> Map
     {
         { "fCatmullRomSplineAlpha", &catmullRomSplineAlpha },
         { "fRandomPathMaxDistance", &randomPathMaxDistance },
@@ -36,7 +36,7 @@ public:
     int maxPolyPath = 512;
     int maxSearchNodes = 65535;
     int port = 47110;
-    int clientVersion = static_cast<int>(CLIENT_VERSION::V335A);
+    int clientVersion = static_cast<int>(ClientVersion::TC335A);
     std::string ip = "127.0.0.1";
     std::string mmapsPath = "C:\\shady stuff\\mmaps\\";
 

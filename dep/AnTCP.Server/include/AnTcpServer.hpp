@@ -151,10 +151,10 @@ public:
     /// <returns>True if data was sent, false if not.</returns>
     inline bool SendData(AnTcpMessageType type, const void* data, size_t size) const noexcept
     {
-        const int packetSize = size + static_cast<int>(sizeof(AnTcpMessageType));
-        return send(Socket, reinterpret_cast<const char*>(&packetSize), sizeof(decltype(packetSize)), 0) != SOCKET_ERROR
-            && send(Socket, &type, sizeof(AnTcpMessageType), 0) != SOCKET_ERROR
-            && send(Socket, static_cast<const char*>(data), size, 0) != SOCKET_ERROR;
+        const int packetSize = static_cast<int>(size) + static_cast<int>(sizeof(AnTcpMessageType));
+        return send(Socket, reinterpret_cast<const char*>(&packetSize), static_cast<int>(sizeof(decltype(packetSize))), 0) != SOCKET_ERROR
+            && send(Socket, &type, static_cast<int>(sizeof(AnTcpMessageType)), 0) != SOCKET_ERROR
+            && send(Socket, static_cast<const char*>(data), static_cast<int>(size), 0) != SOCKET_ERROR;
     }
 
     /// <summary>

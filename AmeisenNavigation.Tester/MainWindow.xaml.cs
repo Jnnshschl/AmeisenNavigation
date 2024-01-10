@@ -41,11 +41,11 @@ namespace AmeisenNavigation.Tester
         {
             try
             {
-                return Client.IsConnected ? Client.Send((byte)msgType, (mapId, flags, start, end)).AsArray<Vector3>() : Array.Empty<Vector3>();
+                return Client.IsConnected ? Client.Send((byte)msgType, (mapId, flags, start, end)).AsArray<Vector3>() : [];
             }
             catch
             {
-                return Array.Empty<Vector3>();
+                return [];
             }
         }
 
@@ -53,11 +53,11 @@ namespace AmeisenNavigation.Tester
         {
             try
             {
-                return Client.IsConnected ? Client.Send((byte)MessageType.RANDOM_POINT, mapId).As<Vector3>() : new Vector3();
+                return Client.IsConnected ? Client.Send((byte)MessageType.RANDOM_POINT, mapId).As<Vector3>() : new();
             }
             catch
             {
-                return new Vector3();
+                return new();
             }
         }
 
@@ -187,7 +187,7 @@ namespace AmeisenNavigation.Tester
             TextBoxEndZ.Text = end.Z.ToString();
         }
 
-        private bool TryLoadFloat(TextBox textBox, out float f)
+        private static bool TryLoadFloat(TextBox textBox, out float f)
         {
             bool result = float.TryParse(textBox.Text, out f);
             // mark textbox red

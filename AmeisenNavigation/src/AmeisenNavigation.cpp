@@ -1,24 +1,24 @@
 #include "AmeisenNavigation.hpp"
 
-void AmeisenNavigation::NewClient(int id, CLIENT_VERSION version) noexcept
+void AmeisenNavigation::NewClient(size_t clientId, ClientVersion version) noexcept
 {
-    if (IsValidClient(id)) { return; }
+    if (IsValidClient(clientId)) { return; }
 
-    ANAV_DEBUG_ONLY(std::cout << ">> New Client: " << id << std::endl);
-    Clients[id] = new AmeisenNavClient(id, version, MaxPathNodes);
+    ANAV_DEBUG_ONLY(std::cout << ">> New Client: " << clientId << std::endl);
+    Clients[clientId] = new AmeisenNavClient(clientId, version, MaxPathNodes);
 }
 
-void AmeisenNavigation::FreeClient(int id) noexcept
+void AmeisenNavigation::FreeClient(size_t clientId) noexcept
 {
-    if (!IsValidClient(id)) { return; }
+    if (!IsValidClient(clientId)) { return; }
 
-    delete Clients[id];
-    Clients[id] = nullptr;
+    delete Clients[clientId];
+    Clients[clientId] = nullptr;
 
-    ANAV_DEBUG_ONLY(std::cout << ">> Freed Client: " << id << std::endl);
+    ANAV_DEBUG_ONLY(std::cout << ">> Freed Client: " << clientId << std::endl);
 }
 
-bool AmeisenNavigation::GetPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize) noexcept
+bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
 
@@ -37,7 +37,7 @@ bool AmeisenNavigation::GetPath(int clientId, int mapId, const float* startPosit
     return false;
 }
 
-bool AmeisenNavigation::GetRandomPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, float maxRandomDistance) noexcept
+bool AmeisenNavigation::GetRandomPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, float maxRandomDistance) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
 
@@ -80,7 +80,7 @@ bool AmeisenNavigation::GetRandomPath(int clientId, int mapId, const float* star
     return false;
 }
 
-bool AmeisenNavigation::MoveAlongSurface(int clientId, int mapId, const float* startPosition, const float* endPosition, float* positionToGoTo) noexcept
+bool AmeisenNavigation::MoveAlongSurface(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* positionToGoTo) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
 
@@ -121,7 +121,7 @@ bool AmeisenNavigation::MoveAlongSurface(int clientId, int mapId, const float* s
     return false;
 }
 
-bool AmeisenNavigation::GetRandomPoint(int clientId, int mapId, float* position) noexcept
+bool AmeisenNavigation::GetRandomPoint(size_t clientId, int mapId, float* position) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
 
@@ -149,7 +149,7 @@ bool AmeisenNavigation::GetRandomPoint(int clientId, int mapId, float* position)
     return false;
 }
 
-bool AmeisenNavigation::GetRandomPointAround(int clientId, int mapId, const float* startPosition, float radius, float* position) noexcept
+bool AmeisenNavigation::GetRandomPointAround(size_t clientId, int mapId, const float* startPosition, float radius, float* position) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
 
@@ -183,7 +183,7 @@ bool AmeisenNavigation::GetRandomPointAround(int clientId, int mapId, const floa
     return false;
 }
 
-bool AmeisenNavigation::CastMovementRay(int clientId, int mapId, const float* startPosition, const float* endPosition, dtRaycastHit* raycastHit) noexcept
+bool AmeisenNavigation::CastMovementRay(size_t clientId, int mapId, const float* startPosition, const float* endPosition, dtRaycastHit* raycastHit) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
 
@@ -214,6 +214,22 @@ bool AmeisenNavigation::CastMovementRay(int clientId, int mapId, const float* st
     }
 
     ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call raycast: " << castMovementRayStatus << std::endl);
+    return false;
+}
+
+bool AmeisenNavigation::GetExplorePolyPath(size_t clientId, int mapId, const float* polyPoints, int inputSize, float* output, int* outputSize, const float* startPosition, float viewDistance) noexcept
+{
+    if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
+
+    ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetExplorePolyPath (" << mapId << ") " << PRINT_VEC3(startPosition) << " -> " << PRINT_VEC3(inputSize) << " polys" << std::endl);
+
+    float rdStart[3];
+    dtVcopy(rdStart, startPosition);
+    WowToRDCoords(rdStart);
+
+
+
+    ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call ...: " << "" << std::endl);
     return false;
 }
 
@@ -424,7 +440,7 @@ bool AmeisenNavigation::LoadMmaps(int mapId) noexcept
     return true;
 }
 
-bool AmeisenNavigation::InitQueryAndLoadMmaps(int clientId, int mapId) noexcept
+bool AmeisenNavigation::InitQueryAndLoadMmaps(size_t clientId, int mapId) noexcept
 {
     // we already have a query
     if (Clients[clientId]->GetNavmeshQuery(mapId)) { return true; }
@@ -458,7 +474,7 @@ bool AmeisenNavigation::InitQueryAndLoadMmaps(int clientId, int mapId) noexcept
     return true;
 }
 
-bool AmeisenNavigation::CalculateNormalPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, dtPolyRef* visited) noexcept
+bool AmeisenNavigation::CalculateNormalPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, dtPolyRef* visited) noexcept
 {
     float rdStart[3];
     dtVcopy(rdStart, startPosition);

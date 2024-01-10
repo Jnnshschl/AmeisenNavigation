@@ -15,6 +15,8 @@
 
 #include "Clients/AmeisenNavClient.hpp"
 
+#include "Helpers/Polygon.hpp"
+
 #ifdef _DEBUG
 #define ANAV_DEBUG_ONLY(x) x
 #define ANAV_ERROR_MSG(x) x
@@ -56,8 +58,8 @@ private:
     int MaxPathNodes;
     int MaxSearchNodes;
 
-    std::unordered_map<int, std::pair<std::mutex, dtNavMesh*>> NavMeshMap;
-    std::unordered_map<int, AmeisenNavClient*> Clients;
+    std::unordered_map<size_t, std::pair<std::mutex, dtNavMesh*>> NavMeshMap;
+    std::unordered_map<size_t, AmeisenNavClient*> Clients;
 
 public:
     /// <summary>
@@ -105,13 +107,13 @@ public:
     /// </summary>
     /// <param name="id">Unique id for the client.</param>
     /// <param name="version">Version of the client.</param>
-    void NewClient(int id, CLIENT_VERSION version) noexcept;
+    void NewClient(size_t clientId, ClientVersion version) noexcept;
 
     /// <summary>
     /// Call this to free a client.
     /// </summary>
     /// <param name="id">Uinique id of the client.</param>
-    void FreeClient(int id) noexcept;
+    void FreeClient(size_t clientId) noexcept;
 
     /// <summary>
     /// Try to find a path from start to end.
@@ -123,7 +125,7 @@ public:
     /// <param name="path">Path buffer.</param>
     /// <param name="pathSize">The paths size.</param>
     /// <returns>True when a path was found, false if not.</returns>
-    bool GetPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize) noexcept;
+    bool GetPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize) noexcept;
 
     /// <summary>
     /// Try to find a path from start to end but randomize the final positions by x meters.
@@ -136,7 +138,7 @@ public:
     /// <param name="pathSize">The paths size.</param>
     /// <param name="maxRandomDistance">Max distance to the original psoition.</param>
     /// <returns>True when a path was found, false if not.</returns>
-    bool GetRandomPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, float maxRandomDistance) noexcept;
+    bool GetRandomPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, float maxRandomDistance) noexcept;
 
     /// <summary>
     /// Try to move towards a specific location.
@@ -147,7 +149,7 @@ public:
     /// <param name="endPosition">End position vector.</param>
     /// <param name="positionToGoTo">Target position.</param>
     /// <returns>True when a path was found, false if not.</returns>
-    bool MoveAlongSurface(int clientId, int mapId, const float* startPosition, const float* endPosition, float* positionToGoTo) noexcept;
+    bool MoveAlongSurface(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* positionToGoTo) noexcept;
 
     /// <summary>
     /// Get a random point anywhere on the map.
@@ -156,7 +158,7 @@ public:
     /// <param name="mapId">The map id to search a path on.</param>
     /// <param name="position">Random position.</param>
     /// <returns>True when a point has been found, fals eif not.</returns>
-    bool GetRandomPoint(int clientId, int mapId, float* position) noexcept;
+    bool GetRandomPoint(size_t clientId, int mapId, float* position) noexcept;
 
     /// <summary>
     /// Get a random point within x meters of the start position.
@@ -167,7 +169,7 @@ public:
     /// <param name="radius">Max distance to search for a random position.</param>
     /// <param name="position">Random position.</param>
     /// <returns>True when a point has been found, fals eif not.</returns>
-    bool GetRandomPointAround(int clientId, int mapId, const float* startPosition, float radius, float* position) noexcept;
+    bool GetRandomPointAround(size_t clientId, int mapId, const float* startPosition, float radius, float* position) noexcept;
 
     /// <summary>
     /// Cast a movement ray along the mesh and see whether it collides with a wall or not.
@@ -178,7 +180,21 @@ public:
     /// <param name="endPosition">End position vector.</param>
     /// <param name="raycastHit">Detour raycast result.</param>
     /// <returns>True when the ray hited no wall, false if it did.</returns>
-    bool CastMovementRay(int clientId, int mapId, const float* startPosition, const float* endPosition, dtRaycastHit* raycastHit) noexcept;
+    bool CastMovementRay(size_t clientId, int mapId, const float* startPosition, const float* endPosition, dtRaycastHit* raycastHit) noexcept;
+
+    /// <summary>
+    /// Create a path to explore a polygon. Path will cover the area of the polygon and be created using a TSP algorithm to ensure efficiency.
+    /// </summary>
+    /// <param name="clientId">Id of the client to run this on.</param>
+    /// <param name="mapId">The map id to search a path on.</param>
+    /// <param name="polyPoints">Input polygon points.</param>
+    /// <param name="inputSize">Input polygon point count.</param>
+    /// <param name="output">Output path.</param>
+    /// <param name="outputSize">Output paths size.</param>
+    /// <param name="startPosition">From where to start exploring the polygon.</param>
+    /// <param name="viewDistance">How far can the agent see, lower values will result in more path points.</param>
+    /// <returns>True when a path was found, false if not.</returns>
+    bool GetExplorePolyPath(size_t clientId, int mapId, const float* polyPoints, int inputSize, float* output, int* outputSize, const float* startPosition, float viewDistance) noexcept;
 
     /// <summary>
     /// Smooth a path using the chaikin-curve algorithm.
@@ -209,6 +225,39 @@ public:
 
 private:
     /// <summary>
+    /// Helper function to insert a vector3 into a float buffer.
+    /// </summary>
+    constexpr void InsertVector3(float* target, int& index, const float* vec, int offset) const noexcept
+    {
+        target[index] = vec[offset + 0];
+        target[index + 1] = vec[offset + 1];
+        target[index + 2] = vec[offset + 2];
+        index += 3;
+    }
+
+    /// <summary>
+    /// Convert the recast and detour coordinates to wow coordinates.
+    /// </summary>
+    constexpr void RDToWowCoords(float* pos) const noexcept
+    {
+        float oz = pos[2];
+        pos[2] = pos[1];
+        pos[1] = pos[0];
+        pos[0] = oz;
+    }
+
+    /// <summary>
+    /// Convert the wow coordinates to recast and detour coordinates.
+    /// </summary>
+    constexpr void WowToRDCoords(float* pos) const noexcept
+    {
+        float ox = pos[0];
+        pos[0] = pos[1];
+        pos[1] = pos[2];
+        pos[2] = ox;
+    }
+
+    /// <summary>
     /// Try to find the nearest poly for a given position.
     /// </summary>
     /// <param name="clientId">Id of the client to run this on.</param>
@@ -216,24 +265,13 @@ private:
     /// <param name="position">Current position.</param>
     /// <param name="closestPointOnPoly">Closest point on the found poly.</param>
     /// <returns>Reference to the found poly if found, else 0.</returns>
-    inline dtPolyRef GetNearestPoly(int clientId, int mapId, float* position, float* closestPointOnPoly) const noexcept
+    inline dtPolyRef GetNearestPoly(size_t clientId, int mapId, float* position, float* closestPointOnPoly) const noexcept
     {
         dtPolyRef polyRef;
         float extents[3] = { 6.0f, 6.0f, 6.0f };
         const auto& client = Clients.at(clientId);
         bool result = dtStatusSucceed(client->GetNavmeshQuery(mapId)->findNearestPoly(position, extents, &client->QueryFilter(), &polyRef, closestPointOnPoly));
         return result ? polyRef : 0;
-    }
-
-    /// <summary>
-    /// Helper function to insert a vector3 into a float buffer.
-    /// </summary>
-    inline void InsertVector3(float* target, int& index, const float* vec, int offset) const noexcept
-    {
-        target[index] = vec[offset + 0];
-        target[index + 1] = vec[offset + 1];
-        target[index + 2] = vec[offset + 2];
-        index += 3;
     }
 
     /// <summary>
@@ -248,28 +286,6 @@ private:
     }
 
     /// <summary>
-    /// Convert the recast and detour coordinates to wow coordinates.
-    /// </summary>
-    inline void RDToWowCoords(float* pos) const noexcept
-    {
-        float oz = pos[2];
-        pos[2] = pos[1];
-        pos[1] = pos[0];
-        pos[0] = oz;
-    }
-
-    /// <summary>
-    /// Convert the wow coordinates to recast and detour coordinates.
-    /// </summary>
-    inline void WowToRDCoords(float* pos) const noexcept
-    {
-        float ox = pos[0];
-        pos[0] = pos[1];
-        pos[1] = pos[2];
-        pos[2] = ox;
-    }
-
-    /// <summary>
     /// Returns true when th mmaps are loaded for the given continent.
     /// </summary>
     inline bool IsMmapLoaded(int mapId) noexcept { return NavMeshMap[mapId].second != nullptr; }
@@ -277,17 +293,17 @@ private:
     /// <summary>
     /// Returns true when the given client id is valid.
     /// </summary>
-    inline bool IsValidClient(int clientId) noexcept { return Clients[clientId] != nullptr; }
+    inline bool IsValidClient(size_t clientId) noexcept { return Clients[clientId] != nullptr; }
 
     /// <summary>
     /// Initializes a NavMeshQuery for the given client.
     /// </summary>
-    bool InitQueryAndLoadMmaps(int clientId, int mapId) noexcept;
+    bool InitQueryAndLoadMmaps(size_t clientId, int mapId) noexcept;
 
     /// <summary>
     /// Used by the GetPath and GetRandomPath methods to generate a path.
     /// </summary>
-    bool CalculateNormalPath(int clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, dtPolyRef* visited = nullptr) noexcept;
+    bool CalculateNormalPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, dtPolyRef* visited = nullptr) noexcept;
 
     /// <summary>
     /// Used to detect the mmap file format.
