@@ -98,7 +98,7 @@ int main(int argc, const char* argv[])
     Server->AddCallback(static_cast<char>(MessageType::RANDOM_PATH), RandomPathCallback);
     Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT), RandomPointCallback);
 
-    Server->AddCallback(static_cast<char>(MessageType::EXPLORE_POLY), CastRayCallback);
+    Server->AddCallback(static_cast<char>(MessageType::EXPLORE_POLY), ExplorePolyCallback);
 
     LogS("Starting server on: ", Config->ip, ":", std::to_string(Config->port));
     Server->Run();
@@ -138,7 +138,7 @@ void OnClientConnect(ClientHandler* handler) noexcept
     LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
 
     ClientPathBuffers[handler->GetId()] = std::make_pair(new float[Config->maxPolyPath * 3], new float[Config->maxPolyPath * 3]);
-    Nav->NewClient(handler->GetId(), static_cast<ClientVersion>(Config->clientVersion));
+    Nav->NewClient(handler->GetId(), static_cast<MmapFormat>(Config->mmapFormat));
 }
 
 void OnClientDisconnect(ClientHandler* handler) noexcept
@@ -183,7 +183,7 @@ void CastRayCallback(ClientHandler* handler, char type, const void* data, int si
     }
     else
     {
-        float zero[3]{};
+        float zero[3]{ 0.0f };
         handler->SendData(type, zero, VEC3_SIZE);
     }
 }
@@ -213,7 +213,7 @@ void GenericPathCallback(ClientHandler* handler, char type, const void* data, in
     }
     else
     {
-        float zero[3]{};
+        float zero[3]{ 0.0f };
         handler->SendData(type, zero, VEC3_SIZE);
     }
 }
@@ -240,15 +240,17 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
 
     int pathSize = 0;
     float* pathBuffer = ClientPathBuffers[handler->GetId()].first;
-    bool pathGenerated = Nav->GetExplorePolyPath
+    float* tmpBuffer = ClientPathBuffers[handler->GetId()].second;
+    bool pathGenerated = Nav->GetPolyExplorationPath
     (
         handler->GetId(),
-        request.mapId, 
-        request.firstPolyPoint, 
-        request.polyPointCount, 
-        pathBuffer, 
-        &pathSize, 
-        request.start, 
+        request.mapId,
+        request.firstPolyPoint,
+        request.polyPointCount,
+        pathBuffer,
+        &pathSize,
+        tmpBuffer,
+        request.start,
         request.viewDistance
     );
 
@@ -258,7 +260,7 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
     }
     else
     {
-        float zero[3]{};
+        float zero[3]{ 0.0f };
         handler->SendData(type, zero, VEC3_SIZE);
     }
 }

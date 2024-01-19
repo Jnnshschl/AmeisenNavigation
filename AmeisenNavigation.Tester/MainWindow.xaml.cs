@@ -61,9 +61,63 @@ namespace AmeisenNavigation.Tester
             }
         }
 
+        private static bool TryLoadFloat(TextBox textBox, out float f)
+        {
+            bool result = float.TryParse(textBox.Text, out f);
+            // mark textbox red
+            return result;
+        }
+
+        private void ButtonRandomEnd_Click(object sender, RoutedEventArgs e)
+        {
+            if (!Client.IsConnected)
+            {
+                try
+                {
+                    Client.Connect();
+                }
+                catch
+                {
+                    // ignored, will happen when we cant connect
+                    return;
+                }
+            }
+
+            Vector3 pos = GetPoint(0);
+            TextBoxEndX.Text = pos.X.ToString();
+            TextBoxEndY.Text = pos.Y.ToString();
+            TextBoxEndZ.Text = pos.Z.ToString();
+        }
+
+        private void ButtonRandomStart_Click(object sender, RoutedEventArgs e)
+        {
+            if (!Client.IsConnected)
+            {
+                try
+                {
+                    Client.Connect();
+                }
+                catch
+                {
+                    // ignored, will happen when we cant connect
+                    return;
+                }
+            }
+
+            Vector3 pos = GetPoint(0);
+            TextBoxStartX.Text = pos.X.ToString();
+            TextBoxStartY.Text = pos.Y.ToString();
+            TextBoxStartZ.Text = pos.Z.ToString();
+        }
+
         private void ButtonRun_Click(object sender, RoutedEventArgs e)
         {
             Run(0, CheckBoxRandomPath.IsChecked == true ? PathType.RANDOM : PathType.STRAIGHT);
+        }
+
+        private void ButtonRunBezier_Click(object sender, RoutedEventArgs e)
+        {
+            Run(4, CheckBoxRandomPath.IsChecked == true ? PathType.RANDOM : PathType.STRAIGHT);
         }
 
         private void ButtonRunCatmullRom_Click(object sender, RoutedEventArgs e)
@@ -185,55 +239,6 @@ namespace AmeisenNavigation.Tester
             TextBoxEndX.Text = end.X.ToString();
             TextBoxEndY.Text = end.Y.ToString();
             TextBoxEndZ.Text = end.Z.ToString();
-        }
-
-        private static bool TryLoadFloat(TextBox textBox, out float f)
-        {
-            bool result = float.TryParse(textBox.Text, out f);
-            // mark textbox red
-            return result;
-        }
-
-        private void ButtonRandomStart_Click(object sender, RoutedEventArgs e)
-        {
-            if (!Client.IsConnected)
-            {
-                try
-                {
-                    Client.Connect();
-                }
-                catch
-                {
-                    // ignored, will happen when we cant connect
-                    return;
-                }
-            }
-
-            Vector3 pos = GetPoint(0);
-            TextBoxStartX.Text = pos.X.ToString();
-            TextBoxStartY.Text = pos.Y.ToString();
-            TextBoxStartZ.Text = pos.Z.ToString();
-        }
-
-        private void ButtonRandomEnd_Click(object sender, RoutedEventArgs e)
-        {
-            if (!Client.IsConnected)
-            {
-                try
-                {
-                    Client.Connect();
-                }
-                catch
-                {
-                    // ignored, will happen when we cant connect
-                    return;
-                }
-            }
-
-            Vector3 pos = GetPoint(0);
-            TextBoxEndX.Text = pos.X.ToString();
-            TextBoxEndY.Text = pos.Y.ToString();
-            TextBoxEndZ.Text = pos.Z.ToString();
         }
     }
 }

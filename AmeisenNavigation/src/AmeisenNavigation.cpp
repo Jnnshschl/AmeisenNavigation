@@ -1,6 +1,6 @@
 #include "AmeisenNavigation.hpp"
 
-void AmeisenNavigation::NewClient(size_t clientId, ClientVersion version) noexcept
+void AmeisenNavigation::NewClient(size_t clientId, MmapFormat version) noexcept
 {
     if (IsValidClient(clientId)) { return; }
 
@@ -14,14 +14,12 @@ void AmeisenNavigation::FreeClient(size_t clientId) noexcept
 
     delete Clients[clientId];
     Clients[clientId] = nullptr;
-
     ANAV_DEBUG_ONLY(std::cout << ">> Freed Client: " << clientId << std::endl);
 }
 
 bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetPath (" << mapId << ") " << PRINT_VEC3(startPosition) << " -> " << PRINT_VEC3(endPosition) << std::endl);
 
     if (CalculateNormalPath(clientId, mapId, startPosition, endPosition, path, pathSize))
@@ -40,20 +38,18 @@ bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const float* startPo
 bool AmeisenNavigation::GetRandomPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, float maxRandomDistance) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetRandomPath (" << mapId << ") " << PRINT_VEC3(startPosition) << " -> " << PRINT_VEC3(endPosition) << std::endl);
 
-    dtPolyRef* visitedBuffer = Clients[clientId]->GetMiscPathBuffer();
+    const auto client = Clients.at(clientId);
+    auto visitedBuffer = client->GetMiscPathBuffer();
 
     if (CalculateNormalPath(clientId, mapId, startPosition, endPosition, path, pathSize, visitedBuffer))
     {
-        dtPolyRef randomRef;
-
         for (int i = 0; i < *pathSize; i += 3)
         {
             if (i > 0 && i < *pathSize - 3)
             {
-                const auto client = Clients[clientId];
+                dtPolyRef randomRef;
                 dtStatus randomPointStatus = client->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
                 (
                     visitedBuffer[i / 3],
@@ -83,53 +79,55 @@ bool AmeisenNavigation::GetRandomPath(size_t clientId, int mapId, const float* s
 bool AmeisenNavigation::MoveAlongSurface(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* positionToGoTo) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] MoveAlongSurface (" << mapId << ") " << PRINT_VEC3(startPosition) << " -> " << PRINT_VEC3(endPosition) << std::endl);
 
     float rdStart[3];
-    dtVcopy(rdStart, startPosition);
-    WowToRDCoords(rdStart);
+    CopyWowToRDCoords(startPosition, rdStart);
 
-    float rdEnd[3];
-    dtVcopy(rdEnd, endPosition);
-    WowToRDCoords(rdEnd);
+    const auto client = Clients.at(clientId);
 
-    int visitedCount;
-    dtPolyRef visited[16]{};
-
-    const auto client = Clients[clientId];
-    dtStatus moveAlongSurfaceStatus = client->GetNavmeshQuery(mapId)->moveAlongSurface
-    (
-        GetNearestPoly(clientId, mapId, rdStart, rdStart),
-        rdStart,
-        rdEnd,
-        &client->QueryFilter(),
-        positionToGoTo,
-        visited,
-        &visitedCount,
-        sizeof(visited) / sizeof(dtPolyRef)
-    );
-
-    if (dtStatusSucceed(moveAlongSurfaceStatus))
+    if (dtPolyRef polyStart; dtStatusSucceed(GetNearestPoly(client, mapId, rdStart, rdStart, &polyStart)))
     {
-        RDToWowCoords(positionToGoTo);
-        ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] moveAlongSurface: " << PRINT_VEC3(positionToGoTo) << std::endl);
-        return true;
+        float rdEnd[3];
+        CopyWowToRDCoords(endPosition, rdEnd);
+
+        int visitedCount;
+        dtPolyRef visited[16]{ 0 };
+        dtStatus moveAlongSurfaceStatus = client->GetNavmeshQuery(mapId)->moveAlongSurface
+        (
+            polyStart,
+            rdStart,
+            rdEnd,
+            &client->QueryFilter(),
+            positionToGoTo,
+            visited,
+            &visitedCount,
+            sizeof(visited) / sizeof(dtPolyRef)
+        );
+
+        if (dtStatusSucceed(moveAlongSurfaceStatus))
+        {
+            RDToWowCoords(positionToGoTo);
+            ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] moveAlongSurface: " << PRINT_VEC3(positionToGoTo) << std::endl);
+            return true;
+        }
+        else
+        {
+            ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call moveAlongSurface: " << moveAlongSurfaceStatus << std::endl);
+        }
     }
 
-    ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call moveAlongSurface: " << moveAlongSurfaceStatus << std::endl);
     return false;
 }
 
 bool AmeisenNavigation::GetRandomPoint(size_t clientId, int mapId, float* position) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetRandomPoint (" << mapId << ")" << std::endl);
 
-    dtPolyRef polyRef;
+    const auto client = Clients.at(clientId);
 
-    const auto client = Clients[clientId];
+    dtPolyRef polyRef;
     dtStatus findRandomPointStatus = client->GetNavmeshQuery(mapId)->findRandomPoint
     (
         &client->QueryFilter(),
@@ -152,82 +150,91 @@ bool AmeisenNavigation::GetRandomPoint(size_t clientId, int mapId, float* positi
 bool AmeisenNavigation::GetRandomPointAround(size_t clientId, int mapId, const float* startPosition, float radius, float* position) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetRandomPointAround (" << mapId << ") startPosition: " << PRINT_VEC3(startPosition) << " radius: " << radius << std::endl);
 
     float rdStart[3];
-    dtVcopy(rdStart, startPosition);
-    WowToRDCoords(rdStart);
+    CopyWowToRDCoords(startPosition, rdStart);
 
-    dtPolyRef polyRef;
-    const auto client = Clients[clientId];
-    dtStatus findRandomPointAroundStatus = client->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
-    (
-        GetNearestPoly(clientId, mapId, rdStart, rdStart),
-        rdStart,
-        radius,
-        &client->QueryFilter(),
-        GetRandomFloat,
-        &polyRef,
-        position
-    );
+    const auto client = Clients.at(clientId);
 
-    if (dtStatusSucceed(findRandomPointAroundStatus))
+    if (dtPolyRef polyStart; dtStatusSucceed(GetNearestPoly(client, mapId, rdStart, rdStart, &polyStart)))
     {
-        RDToWowCoords(position);
-        ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] findRandomPointAroundCircle: " << PRINT_VEC3(position) << std::endl);
-        return true;
+        dtPolyRef polyRef;
+        dtStatus findRandomPointAroundStatus = client->GetNavmeshQuery(mapId)->findRandomPointAroundCircle
+        (
+            polyStart,
+            rdStart,
+            radius,
+            &client->QueryFilter(),
+            GetRandomFloat,
+            &polyRef,
+            position
+        );
+
+        if (dtStatusSucceed(findRandomPointAroundStatus))
+        {
+            RDToWowCoords(position);
+            ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] findRandomPointAroundCircle: " << PRINT_VEC3(position) << std::endl);
+            return true;
+        }
+        else
+        {
+            ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call findRandomPointAroundCircle: " << findRandomPointAroundStatus << std::endl);
+        }
     }
 
-    ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call findRandomPointAroundCircle: " << findRandomPointAroundStatus << std::endl);
     return false;
 }
 
 bool AmeisenNavigation::CastMovementRay(size_t clientId, int mapId, const float* startPosition, const float* endPosition, dtRaycastHit* raycastHit) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
     ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] CastMovementRay (" << mapId << ") " << PRINT_VEC3(startPosition) << " -> " << PRINT_VEC3(endPosition) << std::endl);
 
     float rdStart[3];
-    dtVcopy(rdStart, startPosition);
-    WowToRDCoords(rdStart);
+    CopyWowToRDCoords(startPosition, rdStart);
 
-    float rdEnd[3];
-    dtVcopy(rdEnd, endPosition);
-    WowToRDCoords(rdEnd);
+    const auto client = Clients.at(clientId);
 
-    const auto client = Clients[clientId];
-    dtStatus castMovementRayStatus = client->GetNavmeshQuery(mapId)->raycast
-    (
-        GetNearestPoly(clientId, mapId, rdStart, rdStart),
-        rdStart,
-        rdEnd,
-        &client->QueryFilter(),
-        0,
-        raycastHit
-    );
-
-    if (dtStatusSucceed(castMovementRayStatus))
+    if (dtPolyRef polyStart; dtStatusSucceed(GetNearestPoly(client, mapId, rdStart, rdStart, &polyStart)))
     {
-        return raycastHit->t == FLT_MAX;
+        float rdEnd[3];
+        CopyWowToRDCoords(endPosition, rdEnd);
+
+        dtStatus castMovementRayStatus = client->GetNavmeshQuery(mapId)->raycast
+        (
+            polyStart,
+            rdStart,
+            rdEnd,
+            &client->QueryFilter(),
+            0,
+            raycastHit
+        );
+
+        if (dtStatusSucceed(castMovementRayStatus))
+        {
+            return raycastHit->t == FLT_MAX;
+        }
+        else
+        {
+            ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call raycast: " << castMovementRayStatus << std::endl);
+        }
     }
 
-    ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call raycast: " << castMovementRayStatus << std::endl);
     return false;
 }
 
-bool AmeisenNavigation::GetExplorePolyPath(size_t clientId, int mapId, const float* polyPoints, int inputSize, float* output, int* outputSize, const float* startPosition, float viewDistance) noexcept
+bool AmeisenNavigation::GetPolyExplorationPath(size_t clientId, int mapId, const float* polyPoints, int inputSize, float* output, int* outputSize, float* tmpBuffer, const float* startPosition, float viewDistance) noexcept
 {
     if (!IsValidClient(clientId) || !InitQueryAndLoadMmaps(clientId, mapId)) { return false; }
-
-    ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetExplorePolyPath (" << mapId << ") " << PRINT_VEC3(startPosition) << " -> " << PRINT_VEC3(inputSize) << " polys" << std::endl);
+    ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] GetExplorePolyPath (" << mapId << ") " << PRINT_VEC3(startPosition) << ": " << inputSize << " points" << std::endl);
 
     float rdStart[3];
-    dtVcopy(rdStart, startPosition);
-    WowToRDCoords(rdStart);
+    CopyWowToRDCoords(startPosition, rdStart);
 
+    const auto client = Clients.at(clientId);
 
+    PolygonMath::BridsonsPoissonDiskSampling(polyPoints, inputSize, output, outputSize, tmpBuffer, MaxPathNodes * 3, viewDistance);
 
     ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call ...: " << "" << std::endl);
     return false;
@@ -316,35 +323,55 @@ void AmeisenNavigation::SmoothPathCatmullRom(const float* input, int inputSize, 
     }
 }
 
-bool AmeisenNavigation::LoadMmaps(int mapId) noexcept
+void AmeisenNavigation::SmoothPathBezier(const float* input, int inputSize, float* output, int* outputSize, int points) const noexcept
 {
-    const std::lock_guard<std::mutex> lock(NavMeshMap[mapId].first);
+    const int maxIndex = MaxPathNodes - 3;
 
-    if (IsMmapLoaded(mapId)) { return true; }
-
-    MMAP_FORMAT mmapFormat = TryDetectMmapFormat();
-
-    if (mmapFormat == MMAP_FORMAT::UNKNOWN)
+    for (int i = 0; i < inputSize - 9; i += 9)
     {
-        return false;
+        const auto* p0 = input + i;
+        const auto* p1 = input + i + 3;
+        const auto* p2 = input + i + 6;
+        const auto* p3 = input + i + 9;
+
+        for (int j = 0; j < points; ++j)
+        {
+            const float t = static_cast<float>(j) / static_cast<float>(points - 1);
+
+            float v[3]{};
+            BezierCurveInterpolation(p0, p1, p2, p3, v, t);
+
+            if (!std::isnan(v[0]) && !std::isnan(v[1]) && !std::isnan(v[2]))
+            {
+                if (*outputSize > maxIndex) { return; }
+
+                InsertVector3(output, *outputSize, v, 0);
+            }
+        }
+    }
+}
+
+bool AmeisenNavigation::LoadMmaps(MmapFormat& mmapFormat, int mapId) noexcept
+{
+    if (mmapFormat == MmapFormat::UNKNOWN)
+    {
+        mmapFormat = TryDetectMmapFormat();
+
+        if (mmapFormat == MmapFormat::UNKNOWN)
+        {
+            return false;
+        }
     }
 
-    // build the *.mmap filename (example: 001.mmap or 587.mmap)
-    std::stringstream mmapFilename;
+    const std::lock_guard<std::mutex> lock(NavMeshMap[mmapFormat][mapId].first);
 
-    switch (mmapFormat)
-    {
-    case MMAP_FORMAT::TC335A:
-        mmapFilename << std::setw(3) << std::setfill('0') << mapId << ".mmap";
-        break;
+    if (IsMmapLoaded(mmapFormat, mapId)) { return true; }
 
-    case MMAP_FORMAT::SF548:
-        mmapFilename << std::setw(4) << std::setfill('0') << mapId << ".mmap";
-        break;
-    }
+    const auto& filenameFormat = MmapFormatPatterns.at(mmapFormat);
 
     std::filesystem::path mmapFile(MmapFolder);
-    mmapFile.append(mmapFilename.str());
+    std::string filename = std::vformat(filenameFormat.first, std::make_format_args(mapId));
+    mmapFile.append(filename);
 
     if (!std::filesystem::exists(mmapFile))
     {
@@ -359,81 +386,75 @@ bool AmeisenNavigation::LoadMmaps(int mapId) noexcept
     mmapStream.read(reinterpret_cast<char*>(&params), sizeof(dtNavMeshParams));
     mmapStream.close();
 
-    NavMeshMap[mapId].second = dtAllocNavMesh();
+    NavMeshMap[mmapFormat][mapId].second = dtAllocNavMesh();
 
-    if (!NavMeshMap[mapId].second)
+    if (!NavMeshMap[mmapFormat][mapId].second)
     {
         ANAV_ERROR_MSG(std::cout << ">> Failed to allocate NavMesh for map '" << mapId << "'" << std::endl);
         return false;
     }
 
-    dtStatus initStatus = NavMeshMap[mapId].second->init(&params);
+    dtStatus initStatus = NavMeshMap[mmapFormat][mapId].second->init(&params);
 
     if (dtStatusFailed(initStatus))
     {
-        dtFreeNavMesh(NavMeshMap[mapId].second);
+        dtFreeNavMesh(NavMeshMap[mmapFormat][mapId].second);
         ANAV_ERROR_MSG(std::cout << ">> Failed to init NavMesh for map '" << mapId << "': " << initStatus << std::endl);
         return false;
     }
 
-    for (int x = 1; x <= 64; ++x)
+#ifndef _DEBUG
+#pragma omp parallel for schedule(dynamic)
+#endif
+    for (int i = 1; i <= 64 * 64; ++i)
     {
-        for (int y = 1; y <= 64; ++y)
+        const auto x = i / 64;
+        const auto y = i % 64;
+
+        std::filesystem::path mmapTileFile(MmapFolder);
+        mmapTileFile.append(std::vformat(filenameFormat.second, std::make_format_args(mapId, x, y)));
+
+        if (!std::filesystem::exists(mmapTileFile))
         {
-            std::stringstream mmapTileFilename;
+            continue;
+        }
 
-            switch (mmapFormat)
-            {
-            case MMAP_FORMAT::TC335A:
-                mmapTileFilename << std::setfill('0') << std::setw(3) << mapId << std::setw(2) << x << std::setw(2) << y << ".mmtile";
-                break;
+        ANAV_DEBUG_ONLY(std::cout << ">> Reading dtTile for map '" << mapId << "': " << mmapTileFile << std::endl);
 
-            case MMAP_FORMAT::SF548:
-                mmapTileFilename << std::setfill('0') << std::setw(4) << mapId << "_" << std::setw(2) << x << "_" << std::setw(2) << y << ".mmtile";
-                break;
-            }
+        std::ifstream mmapTileStream;
+        mmapTileStream.open(mmapTileFile, std::ifstream::binary);
 
-            std::filesystem::path mmapTileFile(MmapFolder);
-            mmapTileFile.append(mmapTileFilename.str());
+        MmapTileHeader mmapTileHeader{};
+        mmapTileStream.read(reinterpret_cast<char*>(&mmapTileHeader), sizeof(MmapTileHeader));
 
-            if (!std::filesystem::exists(mmapTileFile))
-            {
-                continue;
-            }
+        if (mmapTileHeader.mmapMagic != MMAP_MAGIC)
+        {
+            ANAV_ERROR_MSG(std::cout << ">> Wrong MMAP header for map '" << mapId << "': " << mmapTileFile << std::endl);
+            continue;
+        }
 
-            ANAV_DEBUG_ONLY(std::cout << ">> Reading dtTile for map '" << mapId << "': " << mmapTileFile << std::endl);
+        if (mmapTileHeader.mmapVersion < MMAP_VERSION)
+        {
+            ANAV_ERROR_MSG(std::cout << ">> Wrong MMAP version for map '" << mapId << "': " << mmapTileHeader.mmapVersion << " < " << MMAP_VERSION << std::endl);
+        }
 
-            std::ifstream mmapTileStream;
-            mmapTileStream.open(mmapTileFile, std::ifstream::binary);
+        void* mmapTileData = malloc(mmapTileHeader.size);
+        mmapTileStream.read(static_cast<char*>(mmapTileData), mmapTileHeader.size);
+        mmapTileStream.close();
 
-            MmapTileHeader mmapTileHeader{};
-            mmapTileStream.read(reinterpret_cast<char*>(&mmapTileHeader), sizeof(MmapTileHeader));
+        dtStatus addTileStatus = NavMeshMap[mmapFormat][mapId].second->addTile
+        (
+            static_cast<unsigned char*>(mmapTileData),
+            mmapTileHeader.size,
+            DT_TILE_FREE_DATA,
+            0,
+            nullptr
+        );
 
-            if (mmapTileHeader.mmapMagic != MMAP_MAGIC)
-            {
-                ANAV_ERROR_MSG(std::cout << ">> Wrong MMAP header for map '" << mapId << "': " << mmapTileFile << std::endl);
-                return false;
-            }
-
-            if (mmapTileHeader.mmapVersion < MMAP_VERSION)
-            {
-                ANAV_ERROR_MSG(std::cout << ">> Wrong MMAP version for map '" << mapId << "': " << mmapTileHeader.mmapVersion << " < " << MMAP_VERSION << std::endl);
-            }
-
-            void* mmapTileData = dtAlloc(mmapTileHeader.size, DT_ALLOC_PERM);
-            mmapTileStream.read(static_cast<char*>(mmapTileData), mmapTileHeader.size);
-            mmapTileStream.close();
-
-            dtTileRef tileRef;
-            dtStatus addTileStatus = NavMeshMap[mapId].second->addTile(static_cast<unsigned char*>(mmapTileData), mmapTileHeader.size, DT_TILE_FREE_DATA, 0, &tileRef);
-
-            if (dtStatusFailed(addTileStatus))
-            {
-                dtFree(mmapTileData);
-                dtFreeNavMesh(NavMeshMap[mapId].second);
-                ANAV_DEBUG_ONLY(std::cout << ">> Adding Tile to NavMesh for map '" << mapId << "' failed: " << addTileStatus << std::endl);
-                return false;
-            }
+        if (dtStatusFailed(addTileStatus))
+        {
+            free(mmapTileData);
+            ANAV_ERROR_MSG(std::cout << ">> Adding Tile to NavMesh for map '" << mapId << "' failed: " << addTileStatus << std::endl);
         }
     }
 
@@ -442,119 +463,110 @@ bool AmeisenNavigation::LoadMmaps(int mapId) noexcept
 
 bool AmeisenNavigation::InitQueryAndLoadMmaps(size_t clientId, int mapId) noexcept
 {
+    const auto client = Clients.at(clientId);
+    auto& format = client->GetMmapFormat();
+
     // we already have a query
-    if (Clients[clientId]->GetNavmeshQuery(mapId)) { return true; }
+    if (client->GetNavmeshQuery(mapId)) { return true; }
 
     // we need to allocate a new query, but first check wheter we need to load a map or not
-    if (!LoadMmaps(mapId))
+    if (!LoadMmaps(format, mapId))
     {
         ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed load MMAPs for map '" << mapId << "'" << std::endl);
         return false;
     }
 
     // allocate and init the new query
-    Clients[clientId]->SetNavmeshQuery(mapId, dtAllocNavMeshQuery());
+    auto navmeshQuery = dtAllocNavMeshQuery();
 
-    if (!Clients[clientId]->GetNavmeshQuery(mapId))
+    if (!navmeshQuery)
     {
         ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed allocate NavMeshQuery for map '" << mapId << "'" << std::endl);
         return false;
     }
 
-    dtStatus initQueryStatus = Clients[clientId]->GetNavmeshQuery(mapId)->init(NavMeshMap[mapId].second, MaxSearchNodes);
+    const auto& navMesh = NavMeshMap[format][mapId].second;
+
+    if (!navMesh)
+    {
+        dtFreeNavMeshQuery(navmeshQuery);
+        ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to init NavMeshQuery for map '" << mapId << "': navMesh is null" << std::endl);
+        return false;
+    }
+
+    dtStatus initQueryStatus = navmeshQuery->init(navMesh, MaxSearchNodes);
 
     if (dtStatusFailed(initQueryStatus))
     {
-        dtFreeNavMeshQuery(Clients[clientId]->GetNavmeshQuery(mapId));
-        Clients[clientId]->SetNavmeshQuery(mapId, nullptr);
+        dtFreeNavMeshQuery(navmeshQuery);
         ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to init NavMeshQuery for map '" << mapId << "': " << initQueryStatus << std::endl);
         return false;
     }
 
+    client->SetNavmeshQuery(mapId, navmeshQuery);
     return true;
 }
 
 bool AmeisenNavigation::CalculateNormalPath(size_t clientId, int mapId, const float* startPosition, const float* endPosition, float* path, int* pathSize, dtPolyRef* visited) noexcept
 {
     float rdStart[3];
-    dtVcopy(rdStart, startPosition);
-    WowToRDCoords(rdStart);
+    CopyWowToRDCoords(startPosition, rdStart);
 
-    float rdEnd[3];
-    dtVcopy(rdEnd, endPosition);
-    WowToRDCoords(rdEnd);
+    const auto client = Clients.at(clientId);
 
-    const auto client = Clients[clientId];
-    dtStatus polyPathStatus = client->GetNavmeshQuery(mapId)->findPath
-    (
-        GetNearestPoly(clientId, mapId, rdStart, rdStart),
-        GetNearestPoly(clientId, mapId, rdEnd, rdEnd),
-        rdStart,
-        rdEnd,
-        &client->QueryFilter(),
-        Clients[clientId]->GetPolyPathBuffer(),
-        pathSize,
-        MaxPathNodes
-    );
-
-    if (dtStatusSucceed(polyPathStatus))
+    if (dtPolyRef polyStart; dtStatusSucceed(GetNearestPoly(client, mapId, rdStart, rdStart, &polyStart)))
     {
-        ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] findPath: " << *pathSize << "/" << MaxPathNodes << std::endl);
+        float rdEnd[3];
+        CopyWowToRDCoords(endPosition, rdEnd);
 
-        dtStatus straightPathStatus = Clients[clientId]->GetNavmeshQuery(mapId)->findStraightPath
-        (
-            rdStart,
-            rdEnd,
-            Clients[clientId]->GetPolyPathBuffer(),
-            *pathSize,
-            path,
-            nullptr,
-            visited,
-            pathSize,
-            MaxPathNodes * 3
-        );
+        if (dtPolyRef polyEnd; dtStatusSucceed(GetNearestPoly(client, mapId, rdEnd, rdEnd, &polyEnd)))
+        {
+            dtStatus polyPathStatus = client->GetNavmeshQuery(mapId)->findPath
+            (
+                polyStart,
+                polyEnd,
+                rdStart,
+                rdEnd,
+                &client->QueryFilter(),
+                client->GetPolyPathBuffer(),
+                pathSize,
+                MaxPathNodes
+            );
 
-        if (dtStatusSucceed(straightPathStatus))
-        {
-            ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] findStraightPath: " << (*pathSize) << "/" << MaxPathNodes << std::endl);
-            (*pathSize) *= 3;
-            return true;
+            if (dtStatusSucceed(polyPathStatus))
+            {
+                ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] findPath: " << *pathSize << "/" << MaxPathNodes << std::endl);
+
+                dtStatus straightPathStatus = client->GetNavmeshQuery(mapId)->findStraightPath
+                (
+                    rdStart,
+                    rdEnd,
+                    client->GetPolyPathBuffer(),
+                    *pathSize,
+                    path,
+                    nullptr,
+                    visited,
+                    pathSize,
+                    MaxPathNodes * 3
+                );
+
+                if (dtStatusSucceed(straightPathStatus))
+                {
+                    ANAV_DEBUG_ONLY(std::cout << ">> [" << clientId << "] findStraightPath: " << (*pathSize) << "/" << MaxPathNodes << std::endl);
+                    (*pathSize) *= 3;
+                    return true;
+                }
+                else
+                {
+                    ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call findStraightPath: " << straightPathStatus << std::endl);
+                }
+            }
+            else
+            {
+                ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call findPath: " << polyPathStatus << std::endl);
+            }
         }
-        else
-        {
-            ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call findStraightPath: " << straightPathStatus << std::endl);
-        }
-    }
-    else
-    {
-        ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to call findPath: " << polyPathStatus << std::endl);
     }
 
     return false;
-}
-
-MMAP_FORMAT AmeisenNavigation::TryDetectMmapFormat() noexcept
-{
-    // TrinityCore 3.3.5a format
-    std::filesystem::path mmapTestTileFile(MmapFolder);
-    mmapTestTileFile.append("0002337.mmtile");
-
-    if (std::filesystem::exists(mmapTestTileFile))
-    {
-        ANAV_DEBUG_ONLY(std::cout << ">> MMAP format: TC335A" << std::endl);
-        return MMAP_FORMAT::TC335A;
-    }
-
-    // SkyFire 5.4.8 format
-    std::filesystem::path mmapTestTileFile2(MmapFolder);
-    mmapTestTileFile2.append("0000_22_39.mmtile");
-
-    if (std::filesystem::exists(mmapTestTileFile2))
-    {
-        ANAV_DEBUG_ONLY(std::cout << ">> MMAP format: SF548" << std::endl);
-        return MMAP_FORMAT::SF548;
-    }
-
-    ANAV_DEBUG_ONLY(std::cout << ">> MMAP format unknown" << std::endl);
-    return MMAP_FORMAT::UNKNOWN;
 }

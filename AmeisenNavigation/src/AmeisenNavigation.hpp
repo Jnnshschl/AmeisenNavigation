@@ -1,10 +1,11 @@
 #pragma once
 
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <mutex>
-#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -13,9 +14,13 @@
 #include "../../recastnavigation/Detour/Include/DetourNavMesh.h"
 #include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
+#include "Mmap/MmapFormat.hpp"
+#include "Mmap/MmapTileHeader.hpp"
+
 #include "Clients/AmeisenNavClient.hpp"
 
 #include "Helpers/Polygon.hpp"
+#include "Utils/VectorUtils.hpp"
 
 #ifdef _DEBUG
 #define ANAV_DEBUG_ONLY(x) x
@@ -34,32 +39,21 @@ inline float GetRandomFloat() { return static_cast<float>(rand()) / MAX_RAND_F; 
 // macro to print all values of a vector3
 #define PRINT_VEC3(vec) "[" << vec[0] << ", " << vec[1] << ", " << vec[2] << "]"
 
-enum class MMAP_FORMAT
-{
-    UNKNOWN,
-    TC335A,
-    SF548
-};
-
-struct MmapTileHeader
-{
-    unsigned int mmapMagic;
-    unsigned int dtVersion;
-    unsigned int mmapVersion;
-    unsigned int size;
-    char usesLiquids;
-    char padding[3];
-};
-
 class AmeisenNavigation
 {
 private:
-    std::string MmapFolder;
+    std::filesystem::path MmapFolder;
     int MaxPathNodes;
     int MaxSearchNodes;
 
-    std::unordered_map<size_t, std::pair<std::mutex, dtNavMesh*>> NavMeshMap;
+    std::unordered_map<MmapFormat, std::unordered_map<size_t, std::pair<std::mutex, dtNavMesh*>>> NavMeshMap;
     std::unordered_map<size_t, AmeisenNavClient*> Clients;
+
+    std::map<MmapFormat, std::pair<std::string_view, std::string_view>> MmapFormatPatterns
+    {
+        { MmapFormat::TC335A, std::make_pair("{:03}.mmap", "{:03}{:02}{:02}.mmtile") },
+        { MmapFormat::SF548, std::make_pair("{:04}.mmap", "{:04}_{:02}_{:02}.mmtile") },
+    };
 
 public:
     /// <summary>
@@ -89,12 +83,15 @@ public:
             }
         }
 
-        for (auto& client : NavMeshMap)
+        for (auto& [format, map] : NavMeshMap)
         {
-            if (client.second.second)
+            for (auto& [id, mtxNavMesh] : map)
             {
-                const std::lock_guard<std::mutex> lock(client.second.first);
-                dtFreeNavMesh(client.second.second);
+                if (mtxNavMesh.second)
+                {
+                    const std::lock_guard<std::mutex> lock(mtxNavMesh.first);
+                    dtFreeNavMesh(mtxNavMesh.second);
+                }
             }
         }
     }
@@ -107,13 +104,18 @@ public:
     /// </summary>
     /// <param name="id">Unique id for the client.</param>
     /// <param name="version">Version of the client.</param>
-    void NewClient(size_t clientId, ClientVersion version) noexcept;
+    void NewClient(size_t clientId, MmapFormat version) noexcept;
 
     /// <summary>
     /// Call this to free a client.
     /// </summary>
     /// <param name="id">Uinique id of the client.</param>
     void FreeClient(size_t clientId) noexcept;
+
+    constexpr inline void SetCustomMmapFormat(const std::string& mmapPattern, const std::string& mmtilePattern, MmapFormat format = MmapFormat::CUSTOM) noexcept
+    {
+        MmapFormatPatterns[format] = std::make_pair(mmapPattern, mmtilePattern);
+    }
 
     /// <summary>
     /// Try to find a path from start to end.
@@ -194,7 +196,7 @@ public:
     /// <param name="startPosition">From where to start exploring the polygon.</param>
     /// <param name="viewDistance">How far can the agent see, lower values will result in more path points.</param>
     /// <returns>True when a path was found, false if not.</returns>
-    bool GetExplorePolyPath(size_t clientId, int mapId, const float* polyPoints, int inputSize, float* output, int* outputSize, const float* startPosition, float viewDistance) noexcept;
+    bool GetPolyExplorationPath(size_t clientId, int mapId, const float* polyPoints, int inputSize, float* output, int* outputSize, float* tmpBuffer, const float* startPosition, float viewDistance) noexcept;
 
     /// <summary>
     /// Smooth a path using the chaikin-curve algorithm.
@@ -217,78 +219,107 @@ public:
     void SmoothPathCatmullRom(const float* input, int inputSize, float* output, int* outputSize, int points, float alpha) const noexcept;
 
     /// <summary>
+    /// Smooth a path using the bezier-curve algorithm.
+    /// </summary>
+    /// <param name="input">Input path.</param>
+    /// <param name="inputSize">Input path size.</param>
+    /// <param name="output">Output path.</param>
+    /// <param name="outputSize">Output paths size.</param>
+    /// <param name="points">How many points to generate, the more the smoother the path will be.</param>
+    void SmoothPathBezier(const float* input, int inputSize, float* output, int* outputSize, int points) const noexcept;
+
+    /// <summary>
     /// Load the MMAPs for a map.
     /// </summary>
+    /// <param name="mmapFormat">Format of the MMAPs, may be 0 (auto).</param>
     /// <param name="mapId">Id of the mmaps to load.</param>
     /// <returns>True if loaded, false if something went wrong.</returns>
-    bool LoadMmaps(int mapId) noexcept;
+    bool LoadMmaps(MmapFormat& mmapFormat, int mapId) noexcept;
 
 private:
     /// <summary>
-    /// Helper function to insert a vector3 into a float buffer.
+    /// Convert the recast and detour coordinates to wow coordinates.
     /// </summary>
-    constexpr void InsertVector3(float* target, int& index, const float* vec, int offset) const noexcept
+    constexpr inline void RDToWowCoords(float* pos) const noexcept
     {
-        target[index] = vec[offset + 0];
-        target[index + 1] = vec[offset + 1];
-        target[index + 2] = vec[offset + 2];
-        index += 3;
+        std::swap(pos[2], pos[1]);
+        std::swap(pos[1], pos[0]);
     }
 
     /// <summary>
     /// Convert the recast and detour coordinates to wow coordinates.
     /// </summary>
-    constexpr void RDToWowCoords(float* pos) const noexcept
+    constexpr inline void CopyRDToWowCoords(const float* in, float* out) const noexcept
     {
-        float oz = pos[2];
-        pos[2] = pos[1];
-        pos[1] = pos[0];
-        pos[0] = oz;
+        out[0] = in[2];
+        out[1] = in[0];
+        out[2] = in[1];
     }
 
     /// <summary>
     /// Convert the wow coordinates to recast and detour coordinates.
     /// </summary>
-    constexpr void WowToRDCoords(float* pos) const noexcept
+    constexpr inline void WowToRDCoords(float* pos) const noexcept
     {
-        float ox = pos[0];
-        pos[0] = pos[1];
-        pos[1] = pos[2];
-        pos[2] = ox;
+        std::swap(pos[0], pos[1]);
+        std::swap(pos[1], pos[2]);
+    }
+
+    /// <summary>
+    /// Convert the wow coordinates to recast and detour coordinates.
+    /// </summary>
+    constexpr inline void CopyWowToRDCoords(const float* in, float* out) const noexcept
+    {
+        out[0] = in[1];
+        out[1] = in[2];
+        out[2] = in[0];
+    }
+
+    inline void BezierCurveInterpolation(const float* p0, const float* p1, const float* p2, const float* p3, float* p, float t) const noexcept
+    {
+        const float u = 1.0f - t;
+        const float tt = t * t;
+        const float uu = u * u;
+        const float uuu = uu * u;
+        const float ttt = tt * t;
+
+        float pTemp[3]{ 0.0f };
+
+        // (1-t)^3 * P0
+        dtVscale(p, p0, uuu);
+
+        // 3(1-t)^2 * t * P1
+        dtVscale(pTemp, p1, 3.0f * uu * t);
+        dtVadd(p, p, pTemp);
+
+        // 3(1-t) * t^2 * P2
+        dtVscale(pTemp, p2, 3.0f * u * tt);
+        dtVadd(p, p, pTemp);
+
+        // t^3 * P3
+        dtVscale(pTemp, p3, ttt);
+        dtVadd(p, p, pTemp);
     }
 
     /// <summary>
     /// Try to find the nearest poly for a given position.
     /// </summary>
-    /// <param name="clientId">Id of the client to run this on.</param>
+    /// <param name="client">The client to run this on.</param>
     /// <param name="mapId">The map id to search a path on.</param>
     /// <param name="position">Current position.</param>
     /// <param name="closestPointOnPoly">Closest point on the found poly.</param>
+    /// <param name="polyRef">dtPolyRef of the found poly.</param>
     /// <returns>Reference to the found poly if found, else 0.</returns>
-    inline dtPolyRef GetNearestPoly(size_t clientId, int mapId, float* position, float* closestPointOnPoly) const noexcept
+    inline dtStatus GetNearestPoly(AmeisenNavClient* client, int mapId, float* position, float* closestPointOnPoly, dtPolyRef* polyRef) const noexcept
     {
-        dtPolyRef polyRef;
-        float extents[3] = { 6.0f, 6.0f, 6.0f };
-        const auto& client = Clients.at(clientId);
-        bool result = dtStatusSucceed(client->GetNavmeshQuery(mapId)->findNearestPoly(position, extents, &client->QueryFilter(), &polyRef, closestPointOnPoly));
-        return result ? polyRef : 0;
-    }
-
-    /// <summary>
-    /// Helper function to scale two vectors and add them. 
-    /// Used by the smoothing algorithms.
-    /// </summary>
-    inline void ScaleAndAddVector3(const float* vec0, float fac0, const float* vec1, float fac1, float* s0, float* s1, float* output) const noexcept
-    {
-        dtVscale(s0, vec0, fac0);
-        dtVscale(s1, vec1, fac1);
-        dtVadd(output, s0, s1);
+        const float extents[3] = { 6.0f, 6.0f, 6.0f };
+        return client->GetNavmeshQuery(mapId)->findNearestPoly(position, extents, &client->QueryFilter(), polyRef, closestPointOnPoly);
     }
 
     /// <summary>
     /// Returns true when th mmaps are loaded for the given continent.
     /// </summary>
-    inline bool IsMmapLoaded(int mapId) noexcept { return NavMeshMap[mapId].second != nullptr; }
+    inline bool IsMmapLoaded(MmapFormat format, int mapId) noexcept { return NavMeshMap[format][mapId].second != nullptr; }
 
     /// <summary>
     /// Returns true when the given client id is valid.
@@ -309,5 +340,18 @@ private:
     /// Used to detect the mmap file format.
     /// </summary>
     /// <returns>Mmap format detected or MMAP_FORMAT::UNKNOWN</returns>
-    MMAP_FORMAT TryDetectMmapFormat() noexcept;
+    inline MmapFormat TryDetectMmapFormat() noexcept
+    {
+        for (const auto& [format, pattern] : MmapFormatPatterns)
+        {
+            if (std::filesystem::exists(MmapFolder / std::vformat(pattern.second, std::make_format_args(0, 27, 27))))
+            {
+                ANAV_DEBUG_ONLY(std::cout << ">> MMAP format: " << static_cast<int>(format) << std::endl);
+                return format;
+            }
+        }
+
+        ANAV_DEBUG_ONLY(std::cout << ">> MMAP format unknown" << std::endl);
+        return MmapFormat::UNKNOWN;
+    }
 };

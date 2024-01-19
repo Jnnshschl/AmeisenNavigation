@@ -10,10 +10,10 @@
         <Button x:Name="ButtonRun" Content="GetPath" HorizontalAlignment="Left" Margin="385,10,0,0" VerticalAlignment="Top" Width="100" Click="ButtonRun_Click" Height="41" />
         <Rectangle x:Name="ImgRect" Margin="10,60,280,10" Fill="Gainsboro" />
         <Image x:Name="ImgCanvas" Margin="10,60,280,10" />
-        <ListBox x:Name="PointList" Margin="0,60,10,10" HorizontalAlignment="Right" Width="265" />
-        <Button x:Name="ButtonRunChaikin" Content="GetPath (Chaikin)" HorizontalAlignment="Left" Margin="490,10,0,0" VerticalAlignment="Top" Width="130" Click="ButtonRunChaikin_Click" Height="41" />
-        <Button x:Name="ButtonRunCatmullRom" Content="GetPath (CatmullRom)" HorizontalAlignment="Left" Margin="625,10,0,0" VerticalAlignment="Top" Width="154" Click="ButtonRunCatmullRom_Click" Height="41" />
-        <CheckBox x:Name="CheckBoxRandomPath" Content="Randomize" HorizontalAlignment="Left" Margin="784,10,0,0" VerticalAlignment="Top"/>
+        <ListBox x:Name="PointList" Margin="0,80,10,10" HorizontalAlignment="Right" Width="265" />
+        <Button x:Name="ButtonRunChaikin" Content="GetPath (Chaikin)" HorizontalAlignment="Left" Margin="490,10,0,0" VerticalAlignment="Top" Width="110" Click="ButtonRunChaikin_Click" Height="41" />
+        <Button x:Name="ButtonRunCatmullRom" Content="GetPath (CatmullRom)" HorizontalAlignment="Left" Margin="605,10,0,0" VerticalAlignment="Top" Width="133" Click="ButtonRunCatmullRom_Click" Height="41" />
+        <CheckBox x:Name="CheckBoxRandomPath" Content="Randomize" HorizontalAlignment="Left" Margin="625,60,0,0" VerticalAlignment="Top"/>
         <Label Content="Start" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Padding="1"/>
         <Label Content="End" HorizontalAlignment="Left" Margin="10,33,0,0" VerticalAlignment="Top" Padding="1"/>
         <TextBox x:Name="TextBoxStartX" HorizontalAlignment="Left" Margin="41,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
@@ -24,5 +24,6 @@
         <TextBox x:Name="TextBoxEndZ" HorizontalAlignment="Left" Margin="251,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
         <Button x:Name="ButtonRandomStart" Content="R" HorizontalAlignment="Left" Margin="356,10,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomStart_Click"/>
         <Button x:Name="ButtonRandomEnd" Content="R" HorizontalAlignment="Left" Margin="356,33,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomEnd_Click"/>
+        <Button x:Name="ButtonRunBezier" Content="GetPath (Bezier)" HorizontalAlignment="Left" Margin="743,10,0,0" VerticalAlignment="Top" Width="147" Click="ButtonRunBezier_Click" Height="41" />
     </Grid>
 </Window>

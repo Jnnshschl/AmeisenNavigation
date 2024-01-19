@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
-# Visual Studio Version 16
-VisualStudioVersion = 16.0.29911.84
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.34330.188
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "recastnavigation", "recastnavigation\recastnavigation.vcxproj", "{E1E5031F-CCFD-45B9-9DB1-57050AABCCFA}"
 EndProject
@@ -15,7 +15,9 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Server", 
 		{DBB5FF6E-3829-4045-875F-F35A7CBC9ECA} = {DBB5FF6E-3829-4045-875F-F35A7CBC9ECA}
 	EndProjectSection
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AmeisenNavigation.Tester", "AmeisenNavigation.Tester\AmeisenNavigation.Tester.csproj", "{5A492273-7EE0-4DC9-9DFD-D6F1E9CEE33B}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AmeisenNavigation.Tester", "AmeisenNavigation.Tester\AmeisenNavigation.Tester.csproj", "{5A492273-7EE0-4DC9-9DFD-D6F1E9CEE33B}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Exporter", "AmeisenNavigation.Exporter\AmeisenNavigation.Exporter.vcxproj", "{85CBBE30-3458-438A-BEE6-432685BF1FD8}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -73,6 +75,18 @@ Global
 		{5A492273-7EE0-4DC9-9DFD-D6F1E9CEE33B}.Release|x64.Build.0 = Release|Any CPU
 		{5A492273-7EE0-4DC9-9DFD-D6F1E9CEE33B}.Release|x86.ActiveCfg = Release|Any CPU
 		{5A492273-7EE0-4DC9-9DFD-D6F1E9CEE33B}.Release|x86.Build.0 = Release|Any CPU
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Debug|Any CPU.ActiveCfg = Debug|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Debug|Any CPU.Build.0 = Debug|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Debug|x64.ActiveCfg = Debug|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Debug|x64.Build.0 = Debug|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Debug|x86.ActiveCfg = Debug|Win32
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Debug|x86.Build.0 = Debug|Win32
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Release|Any CPU.ActiveCfg = Release|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Release|Any CPU.Build.0 = Release|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Release|x64.ActiveCfg = Release|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Release|x64.Build.0 = Release|x64
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Release|x86.ActiveCfg = Release|Win32
+		{85CBBE30-3458-438A-BEE6-432685BF1FD8}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

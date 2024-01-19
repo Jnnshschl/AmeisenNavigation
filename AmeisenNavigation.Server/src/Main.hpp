@@ -11,7 +11,7 @@
 #include <iostream>
 #include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.8.3.0";
+constexpr auto AMEISENNAV_VERSION = "1.8.3.1";
 constexpr auto VEC3_SIZE = sizeof(float) * 3;
 
 enum class MessageType
@@ -36,6 +36,7 @@ enum class PathRequestFlags : int
     NONE = 0,
     SMOOTH_CHAIKIN = 1,
     SMOOTH_CATMULLROM = 2,
+    SMOOTH_BEZIERCURVE = 4,
 };
 
 struct PathRequestData
@@ -101,18 +102,22 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
 
 inline void HandlePathFlagsAndSendData(ClientHandler* handler, int flags, int pathSize, float* pathBuffer, char type) noexcept
 {
-    if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CATMULLROM)) && pathSize > 9)
+    int smoothedPathSize = 0;
+    float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
+
+    if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CATMULLROM)) && pathSize >= 12)
     {
-        int smoothedPathSize = 0;
-        float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
         Nav->SmoothPathCatmullRom(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
         handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
     }
-    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CHAIKIN)) && pathSize > 6)
+    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CHAIKIN)) && pathSize >= 9)
     {
-        int smoothedPathSize = 0;
-        float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
         Nav->SmoothPathChaikinCurve(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize);
+        handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
+    }
+    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_BEZIERCURVE)) && pathSize >= 12)
+    {
+        Nav->SmoothPathBezier(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize, Config->bezierCurvePoints);
         handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
     }
     else

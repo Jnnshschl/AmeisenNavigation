@@ -110,6 +110,7 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>
       </AdditionalOptions>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <Link>
       <AdditionalDependencies>recastnavigation.lib</AdditionalDependencies>
@@ -126,6 +127,7 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>
       </AdditionalOptions>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <Link>
       <AdditionalDependencies>recastnavigation.lib</AdditionalDependencies>
@@ -148,6 +150,7 @@
       <AdditionalOptions>
       </AdditionalOptions>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -172,6 +175,7 @@
       <AdditionalOptions>
       </AdditionalOptions>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
+      <OpenMPSupport>true</OpenMPSupport>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -187,9 +191,10 @@
     <ClInclude Include="src\Clients\335a\NavArea335a.hpp" />
     <ClInclude Include="src\Clients\548\NavArea548.hpp" />
     <ClInclude Include="src\Clients\AmeisenNavClient.hpp" />
-    <ClInclude Include="src\Clients\ClientVersion.hpp" />
-    <ClInclude Include="src\Helpers\Point.hpp" />
     <ClInclude Include="src\Helpers\Polygon.hpp" />
+    <ClInclude Include="src\Mmap\MmapFormat.hpp" />
+    <ClInclude Include="src\Mmap\MmapTileHeader.hpp" />
+    <ClInclude Include="src\Utils\VectorUtils.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets" />

@@ -3,11 +3,12 @@
   <ItemGroup>
     <ClInclude Include="src\AmeisenNavigation.hpp" />
     <ClInclude Include="src\Clients\AmeisenNavClient.hpp" />
-    <ClInclude Include="src\Clients\ClientVersion.hpp" />
     <ClInclude Include="src\Clients\335a\NavArea335a.hpp" />
     <ClInclude Include="src\Clients\548\NavArea548.hpp" />
     <ClInclude Include="src\Helpers\Polygon.hpp" />
-    <ClInclude Include="src\Helpers\Point.hpp" />
+    <ClInclude Include="src\Mmap\MmapFormat.hpp" />
+    <ClInclude Include="src\Mmap\MmapTileHeader.hpp" />
+    <ClInclude Include="src\Utils\VectorUtils.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\AmeisenNavigation.cpp" />

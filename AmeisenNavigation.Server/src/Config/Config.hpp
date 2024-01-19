@@ -1,10 +1,10 @@
 #pragma once
 
-#include <unordered_map>
-#include <string>
-#include <fstream>
-#include <sstream>
 #include <filesystem>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
 
 constexpr auto CONFIG_CHAR_BOOL = 'b';
 constexpr auto CONFIG_CHAR_INT = 'i';
@@ -16,29 +16,35 @@ constexpr auto CONFIG_CHAR_DELIMITER = '=';
 struct AmeisenNavConfig
 {
 private:
-    std::unordered_map<std::string, void*> Map
+    std::map<std::string, void*> Map
     {
         { "fCatmullRomSplineAlpha", &catmullRomSplineAlpha },
         { "fRandomPathMaxDistance", &randomPathMaxDistance },
+        { "iBezierCurvePoints", &bezierCurvePoints },
         { "iCatmullRomSplinePoints", &catmullRomSplinePoints },
         { "iMaxPolyPath", &maxPolyPath },
         { "iMaxSearchNodes", &maxSearchNodes },
+        { "iMmapFormat", &mmapFormat },
         { "iPort", &port },
-        { "iClientVersion", &clientVersion },
         { "sIp", &ip },
+        { "sMmapsFilenameFormat", &mmapsFilenameFormat },
         { "sMmapsPath", &mmapsPath },
+        { "sMmtileFilenameFormat", &mmtileFilenameFormat },
     };
 
 public:
     float catmullRomSplineAlpha = 1.0f;
     float randomPathMaxDistance = 1.5f;
+    int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;
     int maxPolyPath = 512;
     int maxSearchNodes = 65535;
+    int mmapFormat = static_cast<int>(MmapFormat::UNKNOWN);
     int port = 47110;
-    int clientVersion = static_cast<int>(ClientVersion::TC335A);
     std::string ip = "127.0.0.1";
+    std::string mmapsFilenameFormat = "{:03}.mmap";
     std::string mmapsPath = "C:\\shady stuff\\mmaps\\";
+    std::string mmtileFilenameFormat = "{:03}{:02}{:02}.mmtile";
 
     void Save(const std::filesystem::path& path)
     {
