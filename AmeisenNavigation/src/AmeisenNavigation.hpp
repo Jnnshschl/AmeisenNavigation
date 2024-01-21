@@ -10,9 +10,9 @@
 #include <unordered_map>
 #include <vector>
 
-#include <DetourCommon.h>
-#include <DetourNavMesh.h>
-#include <DetourNavMeshQuery.h>
+#include "../../recastnavigation/Detour/Include/DetourCommon.h"
+#include "../../recastnavigation/Detour/Include/DetourNavMesh.h"
+#include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
 #include "Clients/AmeisenNavClient.hpp"
 #include "Helpers/Polygon.hpp"

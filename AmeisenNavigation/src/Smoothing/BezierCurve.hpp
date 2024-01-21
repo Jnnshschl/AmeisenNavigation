@@ -1,32 +1,11 @@
 #pragma once
 
-#include "../Utils/VectorUtils.hpp"
+#include "../../recastnavigation/Detour/Include/DetourCommon.h"
 
-#include <DetourCommon.h>
+#include "../Utils/VectorUtils.hpp"
 
 namespace BezierCurve
 {
-    void SmoothPath(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize, int points) noexcept
-    {
-        float c[3]{};
-
-        for (int i = 0; i < inputSize - 9; i += 9)
-        {
-            const auto* p0 = input + i;
-            const auto* p1 = input + i + 3;
-            const auto* p2 = input + i + 6;
-            const auto* p3 = input + i + 9;
-
-            for (int j = 0; j < points; ++j)
-            {
-                Interpolate(p0, p1, p2, p3, c, static_cast<float>(j) / static_cast<float>(points - 1));
-                InsertVector3(output, *outputSize, c, 0);
-
-                if (*outputSize > outputMaxSize - 3) { return; }
-            }
-        }
-    }
-
     /// <summary>
     /// Interpolate points using a Bezier-Curve.
     /// </summary>
@@ -36,7 +15,7 @@ namespace BezierCurve
     /// <param name="p3">Point3.</param>
     /// <param name="p">Interpolated point.</param>
     /// <param name="t">Curve progress.</param>
-    inline void Interpolate(const float* p0, const float* p1, const float* p2, const float* p3, float* p, float t) const noexcept
+    inline void Interpolate(const float* p0, const float* p1, const float* p2, const float* p3, float* p, float t) noexcept
     {
         const float u = 1.0f - t;
         const float tt = t * t;
@@ -60,5 +39,26 @@ namespace BezierCurve
         // t^3 * P3
         dtVscale(pTemp, p3, ttt);
         dtVadd(p, p, pTemp);
+    }
+
+    static void SmoothPath(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize, int points) noexcept
+    {
+        float c[3]{};
+
+        for (int i = 0; i < inputSize - 9; i += 9)
+        {
+            const auto* p0 = input + i;
+            const auto* p1 = input + i + 3;
+            const auto* p2 = input + i + 6;
+            const auto* p3 = input + i + 9;
+
+            for (int j = 0; j < points; ++j)
+            {
+                Interpolate(p0, p1, p2, p3, c, static_cast<float>(j) / static_cast<float>(points - 1));
+                InsertVector3(output, *outputSize, c, 0);
+
+                if (*outputSize > outputMaxSize - 3) { return; }
+            }
+        }
     }
 }

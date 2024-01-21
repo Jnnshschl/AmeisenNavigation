@@ -4,7 +4,7 @@
 
 namespace ChaikinCurve
 {
-    void SmoothPath(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize) noexcept
+    static void SmoothPath(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize) noexcept
     {
         InsertVector3(output, *outputSize, input, 0);
 

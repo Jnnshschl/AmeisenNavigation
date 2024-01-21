@@ -247,44 +247,7 @@ void AmeisenNavigation::SmoothPathChaikinCurve(const float* input, int inputSize
 
 void AmeisenNavigation::SmoothPathCatmullRom(const float* input, int inputSize, float* output, int* outputSize, int points, float alpha) const noexcept
 {
-    const int maxIndex = MaxPathNodes - 3;
-
-    // Ensure that there are enough input points
-    if (inputSize < 9 || *outputSize > maxIndex)
-        return;
-
-    // Insert the first point
-    InsertVector3(output, *outputSize, input, 0);
-
-    float c[3]{};
-
-    // Reuse tDelta calculation
-    const float tDelta = 1.0f / points;
-
-    for (int i = 3; i < inputSize - 6; i += 3)
-    {
-        const auto p0 = input + i - 3;
-        const auto p1 = p0 + 3;
-        const auto p2 = p1 + 3;
-        const auto p3 = p2 + 3;
-
-        for (int j = 0; j < points; ++j)
-        {
-            const float t = j * tDelta;
-
-            for (int d = 0; d < 3; ++d)
-            {
-                c[d] = CatmullRomInterpolate(p0[d], p1[d], p2[d], p3[d], t, alpha);
-            }
-
-            InsertVector3(output, *outputSize, c, 0);
-
-            if (*outputSize > MaxPathNodes)
-            {
-                break;
-            }
-        }
-    }
+    CatmullRomSpline::SmoothPath(input, inputSize, output, outputSize, MaxPathNodes, points, alpha);
 }
 
 void AmeisenNavigation::SmoothPathBezier(const float* input, int inputSize, float* output, int* outputSize, int points) const noexcept

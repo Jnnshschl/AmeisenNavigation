@@ -1,8 +1,20 @@
 #pragma once
 
+#include "../Utils/VectorUtils.hpp"
+
 namespace CatmullRomSpline
 {
-    void SmoothPathCatmullRom(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize, int points, float alpha) noexcept
+    inline float Interpolate(float p0, float p1, float p2, float p3, float t, float alpha) noexcept
+    {
+        float t2 = std::powf(t, alpha);
+        float t3 = t2 * t;
+        return 0.5f * ((2.0f * p1) +
+            (-p0 + p2) * t +
+            (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
+            (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
+    }
+
+    static void SmoothPath(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize, int points, float alpha) noexcept
     {
         InsertVector3(output, *outputSize, input, 0);
 
@@ -33,15 +45,5 @@ namespace CatmullRomSpline
                 }
             }
         }
-    }
-
-    inline float Interpolate(float p0, float p1, float p2, float p3, float t, float alpha) noexcept
-    {
-        float t2 = std::pow(t, alpha);
-        float t3 = t2 * t;
-        return 0.5f * ((2.0f * p1) +
-            (-p0 + p2) * t +
-            (2.0f * p0 - 5.0f * p1 + 4.0f * p2 - p3) * t2 +
-            (-p0 + 3.0f * p1 - 3.0f * p2 + p3) * t3);
     }
 }
