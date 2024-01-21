@@ -11,7 +11,7 @@
 #include <iostream>
 #include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.8.3.1";
+constexpr auto AMEISENNAV_VERSION = "1.8.3.2";
 constexpr auto VEC3_SIZE = sizeof(float) * 3;
 
 enum class MessageType

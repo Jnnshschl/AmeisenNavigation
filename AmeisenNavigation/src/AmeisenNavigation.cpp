@@ -242,82 +242,46 @@ bool AmeisenNavigation::GetPolyExplorationPath(size_t clientId, int mapId, const
 
 void AmeisenNavigation::SmoothPathChaikinCurve(const float* input, int inputSize, float* output, int* outputSize) const noexcept
 {
-    InsertVector3(output, *outputSize, input, 0);
-
-    // buffers to scale and add vectors
-    float s0[3];
-    float s1[3];
-
-    float result[3];
-
-    // make sure we dont go over the buffer bounds
-    // why 9: we add 6 floats in the loop and 3 for the end position
-    const int maxIndex = MaxPathNodes - 9;
-
-    for (int i = 0; i < inputSize - 3; i += 3)
-    {
-        if (*outputSize > maxIndex) { break; }
-
-        ScaleAndAddVector3(input + i, 0.75f, input + i + 3, 0.25f, s0, s1, result);
-        InsertVector3(output, *outputSize, result, 0);
-
-        ScaleAndAddVector3(input + i, 0.25f, input + i + 3, 0.75f, s0, s1, result);
-        InsertVector3(output, *outputSize, result, 0);
-    }
-
-    InsertVector3(output, *outputSize, input, inputSize - 3);
+    ChaikinCurve::SmoothPath(input, inputSize, output, outputSize, MaxPathNodes);
 }
 
 void AmeisenNavigation::SmoothPathCatmullRom(const float* input, int inputSize, float* output, int* outputSize, int points, float alpha) const noexcept
 {
+    const int maxIndex = MaxPathNodes - 3;
+
+    // Ensure that there are enough input points
+    if (inputSize < 9 || *outputSize > maxIndex)
+        return;
+
+    // Insert the first point
     InsertVector3(output, *outputSize, input, 0);
 
-    // buffers to scale and add vectors
-    float s0[3];
-    float s1[3];
+    float c[3]{};
 
-    float A1[3];
-    float A2[3];
-    float A3[3];
-
-    float B1[3];
-    float B2[3];
-
-    float C[3];
-
-    // make sure we dont go over the buffer bounds
-    // why 3: we add 3 floats in the loop
-    const int maxIndex = MaxPathNodes - 3;
+    // Reuse tDelta calculation
+    const float tDelta = 1.0f / points;
 
     for (int i = 3; i < inputSize - 6; i += 3)
     {
-        const float* p0 = input + i - 3;
-        const float* p1 = input + i;
-        const float* p2 = input + i + 3;
-        const float* p3 = input + i + 6;
+        const auto p0 = input + i - 3;
+        const auto p1 = p0 + 3;
+        const auto p2 = p1 + 3;
+        const auto p3 = p2 + 3;
 
-        const float t0 = 0.0f;
-
-        const float t1 = std::powf(std::powf(p1[0] - p0[0], 2.0f) + std::powf(p1[1] - p0[1], 2.0f) + std::powf(p1[2] - p0[2], 2.0f), alpha * 0.5f) + t0;
-        const float t2 = std::powf(std::powf(p2[0] - p1[0], 2.0f) + std::powf(p2[1] - p1[1], 2.0f) + std::powf(p2[2] - p1[2], 2.0f), alpha * 0.5f) + t1;
-        const float t3 = std::powf(std::powf(p3[0] - p2[0], 2.0f) + std::powf(p3[1] - p2[1], 2.0f) + std::powf(p3[2] - p2[2], 2.0f), alpha * 0.5f) + t2;
-
-        for (float t = t1; t < t2; t += ((t2 - t1) / static_cast<float>(points)))
+        for (int j = 0; j < points; ++j)
         {
-            ScaleAndAddVector3(p0, (t1 - t) / (t1 - t0), p1, (t - t0) / (t1 - t0), s0, s1, A1);
-            ScaleAndAddVector3(p1, (t2 - t) / (t2 - t1), p2, (t - t1) / (t2 - t1), s0, s1, A2);
-            ScaleAndAddVector3(p2, (t3 - t) / (t3 - t2), p3, (t - t2) / (t3 - t2), s0, s1, A3);
+            const float t = j * tDelta;
 
-            ScaleAndAddVector3(A1, (t2 - t) / (t2 - t0), A2, (t - t0) / (t2 - t0), s0, s1, B1);
-            ScaleAndAddVector3(A2, (t3 - t) / (t3 - t1), A3, (t - t1) / (t3 - t1), s0, s1, B2);
-
-            ScaleAndAddVector3(B1, (t2 - t) / (t2 - t1), B2, (t - t1) / (t2 - t1), s0, s1, C);
-
-            if (!std::isnan(C[0]) && !std::isnan(C[1]) && !std::isnan(C[2]))
+            for (int d = 0; d < 3; ++d)
             {
-                if (*outputSize > maxIndex) { return; }
+                c[d] = CatmullRomInterpolate(p0[d], p1[d], p2[d], p3[d], t, alpha);
+            }
 
-                InsertVector3(output, *outputSize, C, 0);
+            InsertVector3(output, *outputSize, c, 0);
+
+            if (*outputSize > MaxPathNodes)
+            {
+                break;
             }
         }
     }
@@ -325,30 +289,7 @@ void AmeisenNavigation::SmoothPathCatmullRom(const float* input, int inputSize, 
 
 void AmeisenNavigation::SmoothPathBezier(const float* input, int inputSize, float* output, int* outputSize, int points) const noexcept
 {
-    const int maxIndex = MaxPathNodes - 3;
-
-    for (int i = 0; i < inputSize - 9; i += 9)
-    {
-        const auto* p0 = input + i;
-        const auto* p1 = input + i + 3;
-        const auto* p2 = input + i + 6;
-        const auto* p3 = input + i + 9;
-
-        for (int j = 0; j < points; ++j)
-        {
-            const float t = static_cast<float>(j) / static_cast<float>(points - 1);
-
-            float v[3]{};
-            BezierCurveInterpolation(p0, p1, p2, p3, v, t);
-
-            if (!std::isnan(v[0]) && !std::isnan(v[1]) && !std::isnan(v[2]))
-            {
-                if (*outputSize > maxIndex) { return; }
-
-                InsertVector3(output, *outputSize, v, 0);
-            }
-        }
-    }
+    BezierCurve::SmoothPath(input, inputSize, output, outputSize, MaxPathNodes, points);
 }
 
 bool AmeisenNavigation::LoadMmaps(MmapFormat& mmapFormat, int mapId) noexcept

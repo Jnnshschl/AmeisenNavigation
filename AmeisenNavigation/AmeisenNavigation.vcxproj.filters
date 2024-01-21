@@ -9,6 +9,9 @@
     <ClInclude Include="src\Mmap\MmapFormat.hpp" />
     <ClInclude Include="src\Mmap\MmapTileHeader.hpp" />
     <ClInclude Include="src\Utils\VectorUtils.hpp" />
+    <ClInclude Include="src\Smoothing\ChaikinCurve.hpp" />
+    <ClInclude Include="src\Smoothing\BezierCurve.hpp" />
+    <ClInclude Include="src\Smoothing\CatmullRomSpline.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\AmeisenNavigation.cpp" />

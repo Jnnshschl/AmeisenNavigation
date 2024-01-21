@@ -10,16 +10,17 @@
 #include <unordered_map>
 #include <vector>
 
-#include "../../recastnavigation/Detour/Include/DetourCommon.h"
-#include "../../recastnavigation/Detour/Include/DetourNavMesh.h"
-#include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
-
-#include "Mmap/MmapFormat.hpp"
-#include "Mmap/MmapTileHeader.hpp"
+#include <DetourCommon.h>
+#include <DetourNavMesh.h>
+#include <DetourNavMeshQuery.h>
 
 #include "Clients/AmeisenNavClient.hpp"
-
 #include "Helpers/Polygon.hpp"
+#include "Mmap/MmapFormat.hpp"
+#include "Mmap/MmapTileHeader.hpp"
+#include "Smoothing/BezierCurve.hpp"
+#include "Smoothing/CatmullRomSpline.hpp"
+#include "Smoothing/ChaikinCurve.hpp"
 #include "Utils/VectorUtils.hpp"
 
 #ifdef _DEBUG
@@ -112,6 +113,12 @@ public:
     /// <param name="id">Uinique id of the client.</param>
     void FreeClient(size_t clientId) noexcept;
 
+    /// <summary>
+    /// Set a custom MMAP filename format. Patterns need to be in std::format style.
+    /// </summary>
+    /// <param name="mmapPattern">Pattern for the .map files.</param>
+    /// <param name="mmtilePattern">Pattern for the .mmtile files.</param>
+    /// <param name="format">Format to change, default is -1 (CUSTOM)</param>
     constexpr inline void SetCustomMmapFormat(const std::string& mmapPattern, const std::string& mmtilePattern, MmapFormat format = MmapFormat::CUSTOM) noexcept
     {
         MmapFormatPatterns[format] = std::make_pair(mmapPattern, mmtilePattern);
@@ -273,32 +280,6 @@ private:
         out[0] = in[1];
         out[1] = in[2];
         out[2] = in[0];
-    }
-
-    inline void BezierCurveInterpolation(const float* p0, const float* p1, const float* p2, const float* p3, float* p, float t) const noexcept
-    {
-        const float u = 1.0f - t;
-        const float tt = t * t;
-        const float uu = u * u;
-        const float uuu = uu * u;
-        const float ttt = tt * t;
-
-        float pTemp[3]{ 0.0f };
-
-        // (1-t)^3 * P0
-        dtVscale(p, p0, uuu);
-
-        // 3(1-t)^2 * t * P1
-        dtVscale(pTemp, p1, 3.0f * uu * t);
-        dtVadd(p, p, pTemp);
-
-        // 3(1-t) * t^2 * P2
-        dtVscale(pTemp, p2, 3.0f * u * tt);
-        dtVadd(p, p, pTemp);
-
-        // t^3 * P3
-        dtVscale(pTemp, p3, ttt);
-        dtVadd(p, p, pTemp);
     }
 
     /// <summary>

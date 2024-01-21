@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstring>
-#include "../../../recastnavigation/Detour/Include/DetourCommon.h"
 
 /// <summary>
 /// Helper function to insert a vector3 into a float buffer.
@@ -26,9 +25,9 @@ inline void EraseVector3(float* target, int count, int& index) noexcept
 /// Helper function to scale two vectors and add them. 
 /// Used by the smoothing algorithms.
 /// </summary>
-inline void ScaleAndAddVector3(const float* vec0, float fac0, const float* vec1, float fac1, float* s0, float* s1, float* output) noexcept
+inline void ScaleAndAddVector3(const float* vec0, float fac0, const float* vec1, float fac1, float* output) noexcept
 {
-    dtVscale(s0, vec0, fac0);
-    dtVscale(s1, vec1, fac1);
-    dtVadd(output, s0, s1);
+    output[0] = vec0[0] * fac0 + vec1[0] * fac1;
+    output[1] = vec0[1] * fac0 + vec1[1] * fac1;
+    output[2] = vec0[2] * fac0 + vec1[2] * fac1;
 }
