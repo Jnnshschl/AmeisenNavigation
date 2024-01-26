@@ -455,7 +455,7 @@ bool AmeisenNavigation::TryGetClientAndQuery(size_t clientId, int mapId, Ameisen
     if (!IsValidClient(clientId)) { return false; }
 
     client = Clients.at(clientId);
-    auto& format = client->GetMmapFormat();
+    auto format = client->GetMmapFormat();
 
     // we already have a query
     if (query = client->GetNavmeshQuery(mapId)) { return true; }

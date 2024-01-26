@@ -46,12 +46,9 @@ namespace CatmullRomSpline
 
                 ScaleAndAddVector3(B1, (t2 - t) / (t2 - t1), B2, (t - t1) / (t2 - t1), C);
 
-                if (!std::isnan(C.x) && !std::isnan(C.y) && !std::isnan(C.z))
-                {
-                    if (*outputSize > maxIndex) { return; }
+                InsertVector3(output, *outputSize, &C, 0);
 
-                    InsertVector3(output, *outputSize, &C, 0);
-                }
+                if (*outputSize > outputMaxSize - 1) { return; }
             }
         }
     }

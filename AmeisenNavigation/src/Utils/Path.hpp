@@ -21,7 +21,9 @@ struct Path
     {}
 
     constexpr inline auto& operator[](int i) noexcept { return points[i]; }
+
     constexpr inline Vector3* begin() const noexcept { return points; }
     constexpr inline Vector3* end() const noexcept { return points + pointCount; }
+
     constexpr inline int GetSpace() const noexcept { return maxSize - pointCount; }
 };
