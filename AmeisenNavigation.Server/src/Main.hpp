@@ -12,7 +12,6 @@
 #include <mutex>
 
 constexpr auto AMEISENNAV_VERSION = "1.8.3.2";
-constexpr auto VEC3_SIZE = sizeof(float) * 3;
 
 enum class MessageType
 {
@@ -27,44 +26,46 @@ enum class MessageType
 
 enum class PathType
 {
-    STRAIGHT,
-    RANDOM,
+    STRAIGHT,   // Request a simple straight path
+    RANDOM,     // Request a path where every position will be move by a small random delta
 };
 
 enum class PathRequestFlags : int
 {
     NONE = 0,
-    SMOOTH_CHAIKIN = 1,
-    SMOOTH_CATMULLROM = 2,
-    SMOOTH_BEZIERCURVE = 4,
+    SMOOTH_CHAIKIN = 1 << 0,        // Smooth path using Chaikin Curve
+    SMOOTH_CATMULLROM = 1 << 1,     // Smooth path using Catmull-Rom Spline
+    SMOOTH_BEZIERCURVE = 1 << 2,    // Smooth path using Bezier Curve
+    VALIDATE_CPOP = 1 << 3,         // Validate smoothed path using closestPointOnPoly
+    VALIDATE_MAS = 1 << 4,          // Validate smoothed path using moveAlongSurface
 };
 
 struct PathRequestData
 {
     int mapId;
     int flags;
-    float start[3];
-    float end[3];
+    Vector3 start;
+    Vector3 end;
 };
 
 struct MoveRequestData
 {
     int mapId;
-    float start[3];
-    float end[3];
+    Vector3 start;
+    Vector3 end;
 };
 
 struct CastRayData
 {
     int mapId;
-    float start[3];
-    float end[3];
+    Vector3 start;
+    Vector3 end;
 };
 
 struct RandomPointAroundData
 {
     int mapId;
-    float start[3];
+    Vector3 start;
     float radius;
 };
 
@@ -72,17 +73,17 @@ struct ExplorePolyData
 {
     int mapId;
     int flags;
-    float start[3];
+    Vector3 start;
     float viewDistance;
     int polyPointCount;
-    float firstPolyPoint[3];
+    Vector3 firstPolyPoint;
 };
 
 inline AnTcpServer* Server = nullptr;
 inline AmeisenNavigation* Nav = nullptr;
 inline AmeisenNavConfig* Config = nullptr;
 
-inline std::unordered_map<size_t, std::pair<float*, float*>> ClientPathBuffers;
+inline std::unordered_map<size_t, std::pair<Path*, Path*>> ClientPathBuffers;
 
 int __stdcall SigIntHandler(unsigned long signal);
 
@@ -100,28 +101,55 @@ void RandomPointAroundCallback(ClientHandler* handler, char type, const void* da
 
 void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 
-inline void HandlePathFlagsAndSendData(ClientHandler* handler, int flags, int pathSize, float* pathBuffer, char type) noexcept
+inline void HandlePathFlagsAndSendData(ClientHandler* handler, int mapId, int flags, Path& path, Path& smoothPath, char type, PathType pathType) noexcept
 {
-    int smoothedPathSize = 0;
-    float* smoothedPathBuffer = ClientPathBuffers[handler->GetId()].second;
+    Path* pathToSend = &path;
+    Path* altPath = &smoothPath;
+    bool shouldValidate = false;
 
-    if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CATMULLROM)) && pathSize >= 12)
+    if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CHAIKIN)) && path.pointCount >= 3)
     {
-        Nav->SmoothPathCatmullRom(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
-        handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
+        Nav->SmoothPathChaikinCurve(path, smoothPath);
+        pathToSend = &smoothPath;
+        altPath = &path;
+        shouldValidate = true;
     }
-    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CHAIKIN)) && pathSize >= 9)
+    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_CATMULLROM)) && path.pointCount >= 4)
     {
-        Nav->SmoothPathChaikinCurve(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize);
-        handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
+        Nav->SmoothPathCatmullRom(path, smoothPath, Config->catmullRomSplinePoints, Config->catmullRomSplineAlpha);
+        pathToSend = &smoothPath;
+        altPath = &path;
+        shouldValidate = true;
     }
-    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_BEZIERCURVE)) && pathSize >= 12)
+    else if ((flags & static_cast<int>(PathRequestFlags::SMOOTH_BEZIERCURVE)) && path.pointCount >= 4)
     {
-        Nav->SmoothPathBezier(pathBuffer, pathSize, smoothedPathBuffer, &smoothedPathSize, Config->bezierCurvePoints);
-        handler->SendData(type, smoothedPathBuffer, smoothedPathSize * sizeof(float));
+        Nav->SmoothPathBezier(path, smoothPath, Config->bezierCurvePoints);
+        pathToSend = &smoothPath;
+        altPath = &path;
+        shouldValidate = true;
     }
-    else
+
+    if (pathType == PathType::RANDOM)
     {
-        handler->SendData(type, pathBuffer, pathSize * sizeof(float));
+        shouldValidate = true;
     }
+
+    // validate random paths
+    if (shouldValidate && pathToSend->pointCount > 0)
+    {
+        if ((flags & static_cast<int>(PathRequestFlags::VALIDATE_CPOP)))
+        {
+            path.pointCount = 0;
+            Nav->PostProcessClosestPointOnPoly(handler->GetId(), mapId, *pathToSend, *altPath);
+            pathToSend = altPath;
+        }
+        else if ((flags & static_cast<int>(PathRequestFlags::VALIDATE_MAS)))
+        {
+            path.pointCount = 0;
+            Nav->PostProcessMoveAlongSurface(handler->GetId(), mapId, *pathToSend, *altPath);
+            pathToSend = altPath;
+        }
+    }
+
+    handler->SendData(type, pathToSend->points, pathToSend->pointCount * sizeof(Vector3));
 }

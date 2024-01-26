@@ -5,15 +5,12 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:AmeisenNavigation.Tester"
         mc:Ignorable="d"
-        Title="AmeisenNavigation Tester" Height="450" Width="900" Loaded="Window_Loaded">
+        Title="AmeisenNavigation Tester" Height="450" Width="900" MinHeight="450" MinWidth="900" Loaded="Window_Loaded">
     <Grid>
-        <Button x:Name="ButtonRun" Content="GetPath" HorizontalAlignment="Left" Margin="385,10,0,0" VerticalAlignment="Top" Width="100" Click="ButtonRun_Click" Height="41" />
+        <Button x:Name="ButtonRun" Content="GetPath" Margin="385,10,387,0" VerticalAlignment="Top" Click="ButtonRun_Click" Height="41" />
         <Rectangle x:Name="ImgRect" Margin="10,60,280,10" Fill="Gainsboro" />
         <Image x:Name="ImgCanvas" Margin="10,60,280,10" />
-        <ListBox x:Name="PointList" Margin="0,80,10,10" HorizontalAlignment="Right" Width="265" />
-        <Button x:Name="ButtonRunChaikin" Content="GetPath (Chaikin)" HorizontalAlignment="Left" Margin="490,10,0,0" VerticalAlignment="Top" Width="110" Click="ButtonRunChaikin_Click" Height="41" />
-        <Button x:Name="ButtonRunCatmullRom" Content="GetPath (CatmullRom)" HorizontalAlignment="Left" Margin="605,10,0,0" VerticalAlignment="Top" Width="133" Click="ButtonRunCatmullRom_Click" Height="41" />
-        <CheckBox x:Name="CheckBoxRandomPath" Content="Randomize" HorizontalAlignment="Left" Margin="625,60,0,0" VerticalAlignment="Top"/>
+        <ListBox x:Name="PointList" Margin="0,122,10,10" HorizontalAlignment="Right" Width="265" />
         <Label Content="Start" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Padding="1"/>
         <Label Content="End" HorizontalAlignment="Left" Margin="10,33,0,0" VerticalAlignment="Top" Padding="1"/>
         <TextBox x:Name="TextBoxStartX" HorizontalAlignment="Left" Margin="41,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
@@ -24,6 +21,16 @@
         <TextBox x:Name="TextBoxEndZ" HorizontalAlignment="Left" Margin="251,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
         <Button x:Name="ButtonRandomStart" Content="R" HorizontalAlignment="Left" Margin="356,10,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomStart_Click"/>
         <Button x:Name="ButtonRandomEnd" Content="R" HorizontalAlignment="Left" Margin="356,33,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomEnd_Click"/>
-        <Button x:Name="ButtonRunBezier" Content="GetPath (Bezier)" HorizontalAlignment="Left" Margin="743,10,0,0" VerticalAlignment="Top" Width="147" Click="ButtonRunBezier_Click" Height="41" />
+        <Label Content="PathType" Margin="0,2,218,0" VerticalAlignment="Top" FontWeight="Bold" HorizontalAlignment="Right" Width="62"/>
+        <RadioButton x:Name="rbPathTypeStraight" Content="STRAIGHT" Margin="0,32,202,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" IsChecked="True" GroupName="pathType" Click="TypeFlags_Click"/>
+        <RadioButton x:Name="rbPathTypeRandom" Content="RANDOM" Margin="0,32,126,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="71" GroupName="pathType" Click="TypeFlags_Click"/>
+        <Label Content="Flags" Margin="0,52,218,0" VerticalAlignment="Top" FontWeight="Bold" HorizontalAlignment="Right" Width="62"/>
+        <CheckBox x:Name="rbPathFlagsChaikin" Content="CHAIKIN" Margin="0,82,202,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" Checked="RbPathFlagsChaikin_Checked" Click="TypeFlags_Click"/>
+        <CheckBox x:Name="rbPathFlagsCatmullRom" Content="CATMULLROM" Margin="0,82,99,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="98" Checked="RbPathFlagsCatmullRom_Checked" Click="TypeFlags_Click"/>
+        <CheckBox x:Name="rbPathFlagsBezier" Content="BEZIER" Margin="0,82,16,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" Checked="RbPathFlagsBezier_Checked" Click="TypeFlags_Click"/>
+        <CheckBox x:Name="rbPathFlagsValidateCpop" Content="VALIDATE_CPOP" Margin="0,102,173,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="102" Checked="RbPathFlagsValidateCpop_Checked" Click="TypeFlags_Click"/>
+        <CheckBox x:Name="rbPathFlagsValidateMas" Content="VALIDATE_MAS" Margin="0,102,60,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="102" Checked="RbPathFlagsValidateMas_Checked" Click="TypeFlags_Click"/>
+        <Label x:Name="lblPointCount" Content="Points: 0" Margin="0,2,280,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="102"/>
+        <Label x:Name="lblDistance" Content="0 m" Margin="0,28,280,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="102"/>
     </Grid>
 </Window>

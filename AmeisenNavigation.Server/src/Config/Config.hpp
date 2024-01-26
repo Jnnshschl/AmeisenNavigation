@@ -22,6 +22,7 @@ private:
         { "fRandomPathMaxDistance", &randomPathMaxDistance },
         { "iBezierCurvePoints", &bezierCurvePoints },
         { "iCatmullRomSplinePoints", &catmullRomSplinePoints },
+        { "iMaxPointPath", &maxPointPath },
         { "iMaxPolyPath", &maxPolyPath },
         { "iMaxSearchNodes", &maxSearchNodes },
         { "iMmapFormat", &mmapFormat },
@@ -33,11 +34,12 @@ private:
     };
 
 public:
-    float catmullRomSplineAlpha = 1.0f;
+    float catmullRomSplineAlpha = 0.5f;
     float randomPathMaxDistance = 1.5f;
     int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;
-    int maxPolyPath = 512;
+    int maxPointPath = 512;
+    int maxPolyPath = 2048;
     int maxSearchNodes = 65535;
     int mmapFormat = static_cast<int>(MmapFormat::UNKNOWN);
     int port = 47110;

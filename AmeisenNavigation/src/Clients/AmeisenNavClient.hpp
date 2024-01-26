@@ -13,19 +13,27 @@ class AmeisenNavClient
     size_t Id;
     MmapFormat Format;
     dtQueryFilter Filter;
+
+    // Holds a dtNavMeshQuery for every map
     std::unordered_map<int, dtNavMeshQuery*> NavMeshQuery;
-    size_t BufferSize;
+
+    // dtPolyRef buffer for path calculation
+    int PolyPathBufferSize;
     dtPolyRef* PolyPathBuffer;
-    dtPolyRef* MiscPathBuffer;
 
 public:
-    AmeisenNavClient(size_t id, MmapFormat mmapFormat, size_t polypathBufferSize)
+    /// <summary>
+    /// Initializes a new AmeisenNavClient, that is used to perform queries on the navmesh.
+    /// </summary>
+    /// <param name="id">Id of the client.</param>
+    /// <param name="mmapFormat">MMAP format to use.</param>
+    /// <param name="polyPathBufferSize">Size of the polypath buffer for recast and detour.</param>
+    AmeisenNavClient(size_t id, MmapFormat mmapFormat, int polyPathBufferSize = 512) noexcept
         : Id(id),
         Format(mmapFormat),
-        BufferSize(polypathBufferSize),
         NavMeshQuery(),
-        PolyPathBuffer(new dtPolyRef[polypathBufferSize]),
-        MiscPathBuffer(nullptr),
+        PolyPathBufferSize(polyPathBufferSize),
+        PolyPathBuffer(nullptr),
         Filter()
     {
         switch (mmapFormat)
@@ -45,31 +53,28 @@ public:
         }
     }
 
-    ~AmeisenNavClient()
+    ~AmeisenNavClient() noexcept
     {
         for (const auto& query : NavMeshQuery)
         {
             dtFreeNavMeshQuery(query.second);
         }
 
-        delete[] PolyPathBuffer;
-
-        if (MiscPathBuffer)
-        {
-            delete[] MiscPathBuffer;
-        }
+        if (PolyPathBuffer) delete[] PolyPathBuffer;
     }
 
     AmeisenNavClient(const AmeisenNavClient&) = delete;
     AmeisenNavClient& operator=(const AmeisenNavClient&) = delete;
 
-    constexpr size_t GetId() const noexcept { return Id; }
-    constexpr MmapFormat& GetMmapFormat() noexcept { return Format; }
-    constexpr dtQueryFilter& QueryFilter() noexcept { return Filter; }
-    constexpr dtPolyRef* GetPolyPathBuffer() noexcept { return PolyPathBuffer; }
-    constexpr dtPolyRef* GetMiscPathBuffer() noexcept { return MiscPathBuffer ? MiscPathBuffer : MiscPathBuffer = new dtPolyRef[BufferSize]; }
+    constexpr inline size_t GetId() const noexcept { return Id; }
+
+    constexpr inline MmapFormat& GetMmapFormat() noexcept { return Format; }
+
+    constexpr inline dtQueryFilter& QueryFilter() noexcept { return Filter; }
 
     inline dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept { return NavMeshQuery[mapId]; }
-
     inline void SetNavmeshQuery(int mapId, dtNavMeshQuery* query) noexcept { NavMeshQuery[mapId] = query; }
+
+    constexpr inline int GetPolyPathBufferSize() const noexcept { return PolyPathBufferSize; }
+    constexpr inline dtPolyRef* GetPolyPathBuffer() noexcept { return PolyPathBuffer ? PolyPathBuffer : PolyPathBuffer = new dtPolyRef[PolyPathBufferSize]; }
 };

@@ -13,9 +13,13 @@ EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Server", "AmeisenNavigation.Server\AmeisenNavigation.Server.vcxproj", "{1D74586C-A7CD-4BC6-8C09-4506FAA3DDF3}"
 	ProjectSection(ProjectDependencies) = postProject
 		{DBB5FF6E-3829-4045-875F-F35A7CBC9ECA} = {DBB5FF6E-3829-4045-875F-F35A7CBC9ECA}
+		{E1E5031F-CCFD-45B9-9DB1-57050AABCCFA} = {E1E5031F-CCFD-45B9-9DB1-57050AABCCFA}
 	EndProjectSection
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AmeisenNavigation.Tester", "AmeisenNavigation.Tester\AmeisenNavigation.Tester.csproj", "{5A492273-7EE0-4DC9-9DFD-D6F1E9CEE33B}"
+	ProjectSection(ProjectDependencies) = postProject
+		{1D74586C-A7CD-4BC6-8C09-4506FAA3DDF3} = {1D74586C-A7CD-4BC6-8C09-4506FAA3DDF3}
+	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AmeisenNavigation.Exporter", "AmeisenNavigation.Exporter\AmeisenNavigation.Exporter.vcxproj", "{85CBBE30-3458-438A-BEE6-432685BF1FD8}"
 EndProject

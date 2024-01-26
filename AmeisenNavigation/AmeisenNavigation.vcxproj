@@ -106,12 +106,12 @@
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
       <BasicRuntimeChecks>StackFrameRuntimeCheck</BasicRuntimeChecks>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>
       </AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <CallingConvention>FastCall</CallingConvention>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
     <Link>
       <AdditionalDependencies>recastnavigation.lib</AdditionalDependencies>
@@ -129,7 +129,7 @@
       <AdditionalOptions>
       </AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
-      <CallingConvention>FastCall</CallingConvention>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
     <Link>
       <AdditionalDependencies>recastnavigation.lib</AdditionalDependencies>
@@ -144,7 +144,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <OmitFramePointers>true</OmitFramePointers>
@@ -153,7 +153,7 @@
       </AdditionalOptions>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <OpenMPSupport>true</OpenMPSupport>
-      <CallingConvention>FastCall</CallingConvention>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -179,7 +179,7 @@
       </AdditionalOptions>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <OpenMPSupport>true</OpenMPSupport>
-      <CallingConvention>FastCall</CallingConvention>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -201,6 +201,9 @@
     <ClInclude Include="src\Smoothing\BezierCurve.hpp" />
     <ClInclude Include="src\Smoothing\CatmullRomSpline.hpp" />
     <ClInclude Include="src\Smoothing\ChaikinCurve.hpp" />
+    <ClInclude Include="src\Utils\Path.hpp" />
+    <ClInclude Include="src\Utils\PolyPosition.hpp" />
+    <ClInclude Include="src\Utils\Vector3.hpp" />
     <ClInclude Include="src\Utils\VectorUtils.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

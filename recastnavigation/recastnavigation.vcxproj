@@ -132,11 +132,12 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <AdditionalOptions>
       </AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -151,6 +152,7 @@
       <AdditionalOptions>
       </AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -162,7 +164,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
-      <LanguageStandard>stdcpp17</LanguageStandard>
+      <LanguageStandard>stdcpplatest</LanguageStandard>
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OmitFramePointers>true</OmitFramePointers>
@@ -170,6 +172,7 @@
       <AdditionalOptions>
       </AdditionalOptions>
       <OpenMPSupport>true</OpenMPSupport>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
@@ -194,6 +197,7 @@
       <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Detour\Include;</AdditionalIncludeDirectories>
       <InlineFunctionExpansion>AnySuitable</InlineFunctionExpansion>
       <OpenMPSupport>true</OpenMPSupport>
+      <CallingConvention>Cdecl</CallingConvention>
     </ClCompile>
     <Link>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>

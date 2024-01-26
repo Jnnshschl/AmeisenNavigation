@@ -3,6 +3,7 @@
 #include "../../recastnavigation/Detour/Include/DetourCommon.h"
 
 #include "../Utils/VectorUtils.hpp"
+#include "../Utils/Vector3.hpp"
 
 namespace BezierCurve
 {
@@ -41,23 +42,23 @@ namespace BezierCurve
         dtVadd(p, p, pTemp);
     }
 
-    static void SmoothPath(const float* input, int inputSize, float* output, int* outputSize, int outputMaxSize, int points) noexcept
+    static void SmoothPath(const Vector3* input, int inputSize, Vector3* output, int* outputSize, int outputMaxSize, int points) noexcept
     {
-        float c[3]{};
+        Vector3 c;
 
-        for (int i = 0; i < inputSize - 9; i += 9)
+        for (int i = 0; i < inputSize - 3; i += 3)
         {
-            const auto* p0 = input + i;
-            const auto* p1 = input + i + 3;
-            const auto* p2 = input + i + 6;
-            const auto* p3 = input + i + 9;
+            const Vector3& p0 = input[i];
+            const Vector3& p1 = input[i + 1];
+            const Vector3& p2 = input[i + 2];
+            const Vector3& p3 = input[i + 3];
 
             for (int j = 0; j < points; ++j)
             {
                 Interpolate(p0, p1, p2, p3, c, static_cast<float>(j) / static_cast<float>(points - 1));
-                InsertVector3(output, *outputSize, c, 0);
+                InsertVector3(output, *outputSize, &c, 0);
 
-                if (*outputSize > outputMaxSize - 3) { return; }
+                if (*outputSize > outputMaxSize - 1) { return; }
             }
         }
     }

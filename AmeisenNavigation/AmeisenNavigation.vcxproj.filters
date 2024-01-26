@@ -12,6 +12,9 @@
     <ClInclude Include="src\Smoothing\ChaikinCurve.hpp" />
     <ClInclude Include="src\Smoothing\BezierCurve.hpp" />
     <ClInclude Include="src\Smoothing\CatmullRomSpline.hpp" />
+    <ClInclude Include="src\Utils\PolyPosition.hpp" />
+    <ClInclude Include="src\Utils\Vector3.hpp" />
+    <ClInclude Include="src\Utils\Path.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\AmeisenNavigation.cpp" />
