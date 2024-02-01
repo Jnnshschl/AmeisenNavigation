@@ -11,7 +11,7 @@
 #include <iostream>
 #include <mutex>
 
-constexpr auto AMEISENNAV_VERSION = "1.8.3.2";
+constexpr auto AMEISENNAV_VERSION = "1.8.4.0";
 
 enum class MessageType
 {
@@ -22,6 +22,7 @@ enum class MessageType
     CAST_RAY,               // Cast a movement ray to test for obstacles
     RANDOM_PATH,            // Generate a straight path where the nodes get offsetted by a random value
     EXPLORE_POLY,           // Generate a route to explore the polygon (W.I.P)
+    CONFIGURE_FILTER,       // Cpnfigure the clients dtQueryFilter area costs
 };
 
 enum class PathType
@@ -79,6 +80,19 @@ struct ExplorePolyData
     Vector3 firstPolyPoint;
 };
 
+struct FilterConfig
+{
+    char areaId;
+    float cost;
+};
+
+struct ConfigureFilterData
+{
+    ClientState state;
+    int filterConfigCount;
+    FilterConfig firstFilterConfig;
+};
+
 inline AnTcpServer* Server = nullptr;
 inline AmeisenNavigation* Nav = nullptr;
 inline AmeisenNavConfig* Config = nullptr;
@@ -100,6 +114,8 @@ void RandomPointCallback(ClientHandler* handler, char type, const void* data, in
 void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 
 void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
+
+void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 
 inline void HandlePathFlagsAndSendData(ClientHandler* handler, int mapId, int flags, Path& path, Path& smoothPath, char type, PathType pathType) noexcept
 {

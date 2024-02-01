@@ -15,6 +15,8 @@
     <ClInclude Include="src\Utils\PolyPosition.hpp" />
     <ClInclude Include="src\Utils\Vector3.hpp" />
     <ClInclude Include="src\Utils\Path.hpp" />
+    <ClInclude Include="src\Clients\ClientState.hpp" />
+    <ClInclude Include="src\Clients\QueryFilterProvider.hpp" />
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="src\AmeisenNavigation.cpp" />

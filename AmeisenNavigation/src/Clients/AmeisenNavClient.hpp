@@ -1,18 +1,23 @@
 #pragma once
 
-#include "../../recastnavigation/Detour/Include/DetourCommon.h"
-#include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
+#include "../../../recastnavigation/Detour/Include/DetourCommon.h"
+#include "../../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
-#include "Mmap/MmapFormat.hpp"
+#include "ClientState.hpp"
+#include "QueryFilterProvider.hpp"
 
-#include "335a/NavArea335a.hpp"
-#include "548/NavArea548.hpp"
+#include "../Mmap/MmapFormat.hpp"
 
 class AmeisenNavClient
 {
     size_t Id;
     MmapFormat Format;
-    dtQueryFilter Filter;
+    ClientState State;
+    QueryFilterProvider* FilterProvider;
+
+    // set per client area costs, to prioritize water movement for example
+    dtQueryFilter* CustomFilter;
+    std::unordered_map<char, float> FilterCustomizations;
 
     // Holds a dtNavMeshQuery for every map
     std::unordered_map<int, dtNavMeshQuery*> NavMeshQuery;
@@ -27,31 +32,20 @@ public:
     /// </summary>
     /// <param name="id">Id of the client.</param>
     /// <param name="mmapFormat">MMAP format to use.</param>
+    /// <param name="state">Current ClientState.</param>
+    /// <param name="filterProvider">QueryFilterProvider to use.</param>
     /// <param name="polyPathBufferSize">Size of the polypath buffer for recast and detour.</param>
-    AmeisenNavClient(size_t id, MmapFormat mmapFormat, int polyPathBufferSize = 512) noexcept
+    AmeisenNavClient(size_t id, MmapFormat mmapFormat, ClientState state, QueryFilterProvider* filterProvider, int polyPathBufferSize = 512) noexcept
         : Id(id),
         Format(mmapFormat),
+        State(state),
+        FilterProvider(filterProvider),
+        CustomFilter(nullptr),
+        FilterCustomizations(),
         NavMeshQuery(),
         PolyPathBufferSize(polyPathBufferSize),
-        PolyPathBuffer(nullptr),
-        Filter()
-    {
-        switch (mmapFormat)
-        {
-        case MmapFormat::TC335A:
-            Filter.setIncludeFlags(static_cast<char>(NavArea335a::GROUND) | static_cast<char>(NavArea335a::WATER));
-            Filter.setExcludeFlags(static_cast<char>(NavArea335a::EMPTY) | static_cast<char>(NavArea335a::GROUND_STEEP) | static_cast<char>(NavArea335a::MAGMA_SLIME));
-            break;
-
-        case MmapFormat::SF548:
-            Filter.setIncludeFlags(static_cast<char>(NavArea548::GROUND) | static_cast<char>(NavArea548::WATER));
-            Filter.setExcludeFlags(static_cast<char>(NavArea548::EMPTY) | static_cast<char>(NavArea548::MAGMA) | static_cast<char>(NavArea548::SLIME));
-            break;
-
-        default:
-            break;
-        }
-    }
+        PolyPathBuffer(nullptr)
+    {}
 
     ~AmeisenNavClient() noexcept
     {
@@ -61,20 +55,45 @@ public:
         }
 
         if (PolyPathBuffer) delete[] PolyPathBuffer;
+        if (CustomFilter) delete CustomFilter;
     }
 
     AmeisenNavClient(const AmeisenNavClient&) = delete;
     AmeisenNavClient& operator=(const AmeisenNavClient&) = delete;
 
     constexpr inline size_t GetId() const noexcept { return Id; }
-
     constexpr inline MmapFormat& GetMmapFormat() noexcept { return Format; }
+    constexpr inline ClientState& GetClientState() noexcept { return State; }
 
-    constexpr inline dtQueryFilter& QueryFilter() noexcept { return Filter; }
+    inline dtQueryFilter* QueryFilter() noexcept { return CustomFilter ? CustomFilter : FilterProvider->Get(Format, State); }
 
     inline dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept { return NavMeshQuery[mapId]; }
     inline void SetNavmeshQuery(int mapId, dtNavMeshQuery* query) noexcept { NavMeshQuery[mapId] = query; }
 
     constexpr inline int GetPolyPathBufferSize() const noexcept { return PolyPathBufferSize; }
     constexpr inline dtPolyRef* GetPolyPathBuffer() noexcept { return PolyPathBuffer ? PolyPathBuffer : PolyPathBuffer = new dtPolyRef[PolyPathBufferSize]; }
+
+    inline void ResetQueryFilter() noexcept { FilterCustomizations.clear(); }
+    inline void ConfigureQueryFilter(char areaId, float cost) noexcept { FilterCustomizations[areaId] = cost; }
+
+    inline void UpdateQueryFilter(ClientState state) noexcept
+    {
+        State = state;
+
+        if (!FilterCustomizations.empty())
+        {
+            const auto baseFilter = FilterProvider->Get(Format, State);
+            dtQueryFilter* newFilter = new dtQueryFilter(*baseFilter);
+
+            for (const auto& [areaId, cost] : FilterCustomizations)
+            {
+                newFilter->setAreaCost(areaId, cost);
+            }
+
+            dtQueryFilter* oldFilter = CustomFilter;
+            CustomFilter = newFilter;
+
+            if (oldFilter && CustomFilter != oldFilter) delete oldFilter;
+        }
+    }
 };

@@ -59,6 +59,7 @@ private:
 
     std::unordered_map<MmapFormat, std::unordered_map<size_t, std::pair<std::mutex, dtNavMesh*>>> NavMeshMap;
     std::unordered_map<size_t, AmeisenNavClient*> Clients;
+    QueryFilterProvider* FilterProvider;
 
     std::map<MmapFormat, std::pair<std::string_view, std::string_view>> MmapFormatPatterns
     {
@@ -77,11 +78,14 @@ public:
         MaxPolyPath(maxPolyPath),
         MaxSearchNodes(maxSearchNodes),
         NavMeshMap(),
-        Clients()
+        Clients(),
+        FilterProvider(new QueryFilterProvider())
     {}
 
     ~AmeisenNavigation()
     {
+        delete FilterProvider;
+
         for (const auto& client : Clients)
         {
             if (client.second)
@@ -111,14 +115,21 @@ public:
     /// Call this to register a new client.
     /// </summary>
     /// <param name="id">Unique id for the client.</param>
-    /// <param name="version">Version of the client.</param>
-    void NewClient(size_t clientId, MmapFormat version) noexcept;
+    /// <param name="format">MMAP format of the client.</param>
+    void NewClient(size_t clientId, MmapFormat format) noexcept;
 
     /// <summary>
     /// Call this to free a client.
     /// </summary>
-    /// <param name="id">Uinique id of the client.</param>
+    /// <param name="id">Unique id of the client.</param>
     void FreeClient(size_t clientId) noexcept;
+
+    /// <summary>
+    /// Get a client by its id, returns nullptr if client id is unknown.
+    /// </summary>
+    /// <param name="clientId">Unique id of the client.</param>
+    /// <returns>Client if found.</returns>
+    AmeisenNavClient* GetClient(size_t clientId) noexcept;
 
     /// <summary>
     /// Set a custom MMAP filename format. Patterns need to be in std::format style.
@@ -313,7 +324,7 @@ private:
     /// <summary>
     /// Used by the GetPath and GetRandomPath methods to generate a path.
     /// </summary>
-    bool CalculateNormalPath(dtNavMeshQuery* query, dtQueryFilter& filter, dtPolyRef* polyPathBuffer, int maxPolyPathCount, const Vector3& startPosition, const Vector3& endPosition, Path& path, dtPolyRef* visited = nullptr) noexcept;
+    bool CalculateNormalPath(dtNavMeshQuery* query, dtQueryFilter* filter, dtPolyRef* polyPathBuffer, int maxPolyPathCount, const Vector3& startPosition, const Vector3& endPosition, Path& path, dtPolyRef* visited = nullptr) noexcept;
 
     /// <summary>
     /// Used to detect the mmap file format.

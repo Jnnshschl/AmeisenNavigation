@@ -1,17 +1,20 @@
 #pragma once
 
-#include <algorithm>
 #include <filesystem>
+#include <format>
+#include <fstream>
 #include <iostream>
+#include <unordered_map>
 #include <vector>
 
-#define STORMLIB_NO_AUTO_LINK
-#include <stormlib.h>
+#include "Utils/Vector3.hpp"
+#include "Utils/Tri.hpp"
+#include "Dbc/DbcFile.hpp"
+#include "Mpq/MpqManager.hpp"
+#include "Wow/Adt.hpp"
+#include "Wow/LiquidType.hpp"
+#include "Wow/Wdt.hpp"
 
-#include <shlwapi.h>
-#pragma comment(lib, "Shlwapi.lib")
+constexpr auto GAME_DIR = "C:\\Spiele\\World of Warcraft 3.3.5a\\Data\\";
 
-inline auto NaturalCompare(const std::filesystem::path& path1, const std::filesystem::path& path2) 
-{
-    return StrCmpLogicalW(path1.wstring().c_str(), path2.wstring().c_str());
-}
+void ExportDebugObjFile(const std::vector<Vector3>& vertexes, const std::vector<Tri>& tris) noexcept;

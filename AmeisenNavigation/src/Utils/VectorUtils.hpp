@@ -7,9 +7,17 @@
 /// <summary>
 /// Helper function to insert a vector3 into a float buffer.
 /// </summary>
-inline void InsertVector3(Vector3* target, int& index, const Vector3* vec, int offset = 0) noexcept
+inline void InsertVector3At(Vector3* target, int index, const Vector3* vec, int offset = 0) noexcept
 {
     memcpy(target + index, vec + offset, sizeof(Vector3));
+}
+
+/// <summary>
+/// Helper function to insert a vector3 into a float buffer.
+/// </summary>
+inline void InsertVector3(Vector3* target, int& index, const Vector3* vec, int offset = 0) noexcept
+{
+    InsertVector3At(target, index, vec, offset);
     index++;
 }
 

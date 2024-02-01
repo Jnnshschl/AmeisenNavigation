@@ -100,6 +100,8 @@ int __cdecl main(int argc, const char* argv[])
 
     Server->AddCallback(static_cast<char>(MessageType::EXPLORE_POLY), ExplorePolyCallback);
 
+    Server->AddCallback(static_cast<char>(MessageType::CONFIGURE_FILTER), ConfigureFilterCallback);
+
     LogS("Starting server on: ", Config->ip, ":", std::to_string(Config->port));
     Server->Run();
 
@@ -276,4 +278,23 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
 
     path.pointCount = 0;
     pathMisc.pointCount = 0;
+}
+
+void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
+{
+    bool result = true;
+    const ConfigureFilterData request = *reinterpret_cast<const ConfigureFilterData*>(data);
+
+    AmeisenNavClient* client = Nav->GetClient(handler->GetId());
+    client->ResetQueryFilter();
+
+    const FilterConfig* filterConfigs = &request.firstFilterConfig;
+
+    for (size_t i = 0; i < request.filterConfigCount; ++i)
+    {
+        client->ConfigureQueryFilter(filterConfigs[i].areaId, filterConfigs[i].cost);
+    }
+
+    client->UpdateQueryFilter(request.state);
+    handler->SendData(type, &result, sizeof(bool));
 }

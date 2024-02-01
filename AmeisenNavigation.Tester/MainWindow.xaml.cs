@@ -1,11 +1,14 @@
 ﻿using AnTCP.Client;
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.InteropServices.JavaScript;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
@@ -14,12 +17,14 @@ namespace AmeisenNavigation.Tester
 {
     public enum MessageType
     {
-        PATH,
-        MOVE_ALONG_SURFACE,
-        RANDOM_POINT,
-        RANDOM_POINT_AROUND,
-        CAST_RAY,
-        RANDOM_PATH,
+        PATH,                   // Generate a simple straight path
+        MOVE_ALONG_SURFACE,     // Move an entity by small deltas using pathfinding (usefull to prevent falling off edges...)
+        RANDOM_POINT,           // Get a random point on the mesh
+        RANDOM_POINT_AROUND,    // Get a random point on the mesh in a circle
+        CAST_RAY,               // Cast a movement ray to test for obstacles
+        RANDOM_PATH,            // Generate a straight path where the nodes get offsetted by a random value
+        EXPLORE_POLY,           // Generate a route to explore the polygon (W.I.P)
+        CONFIGURE_FILTER,       // Cpnfigure the clients dtQueryFilter area costs
     };
 
     public enum PathType
@@ -210,19 +215,21 @@ namespace AmeisenNavigation.Tester
                 Vector3 start = new(sX, sY, sZ);
                 Vector3 end = new(eX, eY, eZ);
 
+                Stopwatch sw = Stopwatch.StartNew();
                 IEnumerable<Vector3> path = type switch
                 {
                     PathType.STRAIGHT => GetPath(MessageType.PATH, 0, start, end, flags),
                     PathType.RANDOM => GetPath(MessageType.RANDOM_PATH, 0, start, end, flags),
                     _ => throw new NotImplementedException(),
                 };
+                sw.Stop();
 
                 if (path == null || !path.Any())
                 {
                     return;
                 }
 
-                UpdateViews(path);
+                UpdateViews(path, sw.Elapsed);
 
                 float minX = float.MaxValue;
                 float maxX = float.MinValue;
@@ -266,10 +273,12 @@ namespace AmeisenNavigation.Tester
                 ImgCanvas.Visibility = Visibility.Visible;
             }
         }
-        private void UpdateViews(IEnumerable<Vector3> path)
+
+        private void UpdateViews(IEnumerable<Vector3> path, TimeSpan duration)
         {
             PointList.ItemsSource = path;
             lblPointCount.Content = $"Points: {path.Count()}";
+            lblTime.Content = duration;
 
             Vector3 last = default;
             float distance = 0.0f;
@@ -306,6 +315,79 @@ namespace AmeisenNavigation.Tester
         private void TypeFlags_Click(object sender, RoutedEventArgs e)
         {
             GetPathAndDraw();
+        }
+
+        private void SldCostWater_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            float v = MathF.Round((float)sldCostWater.Value, 1);
+            if (lblCostWater != null) lblCostWater.Content = $"Water: {v,1}";
+            UpdateFilterConfig();
+        }
+
+        private void SldCostGround_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            float v = MathF.Round((float)sldCostGround.Value, 1);
+            if (lblCostGround != null) lblCostGround.Content = $"Ground: {v,1}";
+            UpdateFilterConfig();
+        }
+
+        private void SldCostBadLiquid_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            float v = MathF.Round((float)sldCostBadLiquid.Value, 2);
+            if (lblCostBadLiquid != null) lblCostBadLiquid.Content = $"Magma/Slime: {v,1}";
+            UpdateFilterConfig();
+        }
+
+        struct FilterConfig
+        {
+            public char State;
+            public int Count = 3;
+            public char GroundArea = (char)1;
+            public float GroundCost;
+            public char WaterArea = (char)4;
+            public float WaterAreaCost;
+            public char BadLiquidArea = (char)8;
+            public float BadLiquidCost;
+
+            public FilterConfig() { }
+        }
+
+        private void RbClientState_Click(object sender, RoutedEventArgs e)
+        {
+            UpdateFilterConfig();
+        }
+
+        private void UpdateFilterConfig()
+        {
+            try
+            {
+                char state = (char)0;
+
+                if (rbClientStateNormalAlly.IsChecked == true)
+                {
+                    state = (char)1;
+                }
+                else if (rbClientStateNormalHorde.IsChecked == true)
+                {
+                    state = (char)2;
+                }
+                else if (rbClientStateDead.IsChecked == true)
+                {
+                    state = (char)3;
+                }
+
+                if (Client != null && Client.IsConnected)
+                {
+                    bool result = Client.Send((byte)MessageType.CONFIGURE_FILTER, new FilterConfig()
+                    {
+                        State = state,
+                        GroundCost = (float)sldCostGround.Value,
+                        WaterAreaCost = (float)sldCostWater.Value,
+                        BadLiquidCost = (float)sldCostBadLiquid.Value,
+                    }).As<bool>();
+                }
+            }
+            catch { }
         }
     }
 }
