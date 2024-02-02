@@ -1,7 +1,15 @@
 #pragma once
 
+enum TriType : unsigned char
+{
+    TERRAIN_GROUND,
+    LIQUID_WATER,
+    LIQUID_OCEAN,
+};
+
 struct Tri
 {
+    unsigned char type;
     union
     {
         struct
@@ -14,10 +22,12 @@ struct Tri
     };
 
     Tri() noexcept
-        : points{ 0, 0, 0 }
+        : type{ 0 },
+        points{ 0, 0, 0 }
     {}
 
-    Tri(int a, int b, int c) noexcept
-        : points{ a, b, c }
+    Tri(unsigned char t, int a, int b, int c) noexcept
+        : type{ t },
+        points{ a, b, c }
     {}
 };

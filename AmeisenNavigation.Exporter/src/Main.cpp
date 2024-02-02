@@ -73,6 +73,7 @@ int main() noexcept
 
                             adt.GetTerrainVertsAndTris(cx, cy, verts, tris);
                             adt.GetLiquidVertsAndTris(cx, cy, verts, tris);
+                            adt.GetWmoVertsAndTris(cx, cy, verts, tris);
                         }
                     }
                 }
