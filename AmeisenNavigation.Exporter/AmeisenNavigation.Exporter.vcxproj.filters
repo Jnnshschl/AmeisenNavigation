@@ -26,7 +26,7 @@
     <ClInclude Include="src\Mpq\MpqManager.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
-    <ClInclude Include="src\Dbc\DbcFile.hpp">
+    <ClInclude Include="src\Dbc\Dbc.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
     <ClInclude Include="src\Mpq\FileSort.hpp">
@@ -48,6 +48,24 @@
       <Filter>Headerdateien</Filter>
     </ClInclude>
     <ClInclude Include="src\Utils\Tri.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Mpq\CachedFileReader.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wow\Wmo.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wow\M2.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wow\WmoGroup.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\Misc.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\Matrix4x4.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
   </ItemGroup>

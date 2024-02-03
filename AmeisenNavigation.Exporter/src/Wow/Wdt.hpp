@@ -4,6 +4,7 @@
 
 constexpr auto WDT_MAP_SIZE = 64;
 
+#pragma pack(push, 1)
 struct MPHD
 {
     unsigned char magic[4];
@@ -22,22 +23,14 @@ struct MAIN
         unsigned int data;
     } adt[64][64];
 };
+#pragma pack(pop)
 
 class Wdt
 {
     unsigned char* Data;
+    unsigned int Size;
 
 public:
-
-    Wdt(unsigned char* data) noexcept
-        : Data(data)
-    {}
-
-    ~Wdt() noexcept
-    {
-        if (Data) free(Data);
-    }
-
     inline MVER* Mver() noexcept { return reinterpret_cast<MVER*>(Data); };
     inline MPHD* Mphd() noexcept { return reinterpret_cast<MPHD*>(Data + sizeof(MVER)); };
     inline MAIN* Main() noexcept { return reinterpret_cast<MAIN*>(Data + sizeof(MVER) + sizeof(MPHD)); };

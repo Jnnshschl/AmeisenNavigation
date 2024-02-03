@@ -9,7 +9,7 @@
 
 #include "Utils/Vector3.hpp"
 #include "Utils/Tri.hpp"
-#include "Dbc/DbcFile.hpp"
+#include "Dbc/Dbc.hpp"
 #include "Mpq/MpqManager.hpp"
 #include "Wow/Adt.hpp"
 #include "Wow/LiquidType.hpp"

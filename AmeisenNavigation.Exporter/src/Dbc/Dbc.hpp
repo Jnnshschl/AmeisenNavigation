@@ -1,5 +1,6 @@
 #pragma once
 
+#pragma pack(push, 1)
 struct DbcHeader
 {
     char magic[4];
@@ -8,21 +9,14 @@ struct DbcHeader
     unsigned int recordSize;
     unsigned int stringTableSize;
 };
+#pragma pack(pop)
 
-class DbcFile
+class Dbc
 {
     unsigned char* Data;
+    unsigned int Size;
 
 public:
-    DbcFile(unsigned char* data) noexcept
-        : Data(data)
-    {}
-
-    ~DbcFile() noexcept
-    {
-        if (Data) free(Data);
-    }
-
     inline DbcHeader* GetHeader() const noexcept { return reinterpret_cast<DbcHeader*>(Data); }
     constexpr inline unsigned char* GetData() const noexcept { return Data + sizeof(DbcHeader); }
 

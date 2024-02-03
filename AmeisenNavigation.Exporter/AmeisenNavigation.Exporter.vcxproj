@@ -176,16 +176,22 @@
     <ClCompile Include="src\Main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="src\Dbc\DbcFile.hpp" />
+    <ClInclude Include="src\Dbc\Dbc.hpp" />
     <ClInclude Include="src\Main.hpp" />
+    <ClInclude Include="src\Mpq\CachedFileReader.hpp" />
     <ClInclude Include="src\Mpq\FileSort.hpp" />
     <ClInclude Include="src\Mpq\MpqManager.hpp" />
+    <ClInclude Include="src\Utils\Matrix4x4.hpp" />
+    <ClInclude Include="src\Utils\Misc.hpp" />
     <ClInclude Include="src\Utils\Tri.hpp" />
     <ClInclude Include="src\Utils\Vector3.hpp" />
     <ClInclude Include="src\Wow\Adt.hpp" />
     <ClInclude Include="src\Wow\LiquidType.hpp" />
+    <ClInclude Include="src\Wow\M2.hpp" />
     <ClInclude Include="src\Wow\Mver.hpp" />
     <ClInclude Include="src\Wow\Wdt.hpp" />
+    <ClInclude Include="src\Wow\Wmo.hpp" />
+    <ClInclude Include="src\Wow\WmoGroup.hpp" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

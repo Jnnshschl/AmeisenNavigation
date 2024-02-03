@@ -5,6 +5,7 @@ enum TriType : unsigned char
     TERRAIN_GROUND,
     LIQUID_WATER,
     LIQUID_OCEAN,
+    WMO
 };
 
 struct Tri
@@ -14,11 +15,11 @@ struct Tri
     {
         struct
         {
-            int a;
-            int b;
-            int c;
+            size_t a;
+            size_t b;
+            size_t c;
         };
-        int points[3];
+        size_t points[3];
     };
 
     Tri() noexcept
@@ -26,7 +27,7 @@ struct Tri
         points{ 0, 0, 0 }
     {}
 
-    Tri(unsigned char t, int a, int b, int c) noexcept
+    Tri(unsigned char t, size_t a, size_t b, size_t c) noexcept
         : type{ t },
         points{ a, b, c }
     {}

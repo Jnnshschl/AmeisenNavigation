@@ -87,7 +87,7 @@ public:
         return result;
     }
 
-    inline bool GetFileContent(const char* name, unsigned char*& buffer, unsigned int& bufferSize) noexcept
+    inline unsigned char* GetFileContent(const char* name, unsigned int& bufferSize) noexcept
     {
         void* mpq{};
         SFILE_FIND_DATA findData{};
@@ -100,12 +100,12 @@ public:
 
                 if (bufferSize > 0)
                 {
-                    buffer = new unsigned char[bufferSize];
+                    unsigned char* buffer = new unsigned char[bufferSize];
 
                     if (SFileReadFile(hFile, buffer, bufferSize, 0, 0))
                     {
                         SFileCloseFile(hFile);
-                        return true;
+                        return buffer;
                     }
                 }
 
@@ -113,6 +113,6 @@ public:
             }
         }
 
-        return false;
+        return nullptr;
     }
 };
