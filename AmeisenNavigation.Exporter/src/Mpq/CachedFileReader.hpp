@@ -11,7 +11,7 @@ class CachedFileReader
     std::unordered_map<unsigned long long, std::pair<void*, unsigned int>> Cache;
 
 public:
-    CachedFileReader(MpqManager* mpqManager) noexcept
+    explicit CachedFileReader(MpqManager* mpqManager) noexcept
         : Mpq(mpqManager),
         Cache{}
     {}

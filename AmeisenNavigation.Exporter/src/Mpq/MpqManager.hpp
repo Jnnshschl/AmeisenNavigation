@@ -15,7 +15,7 @@ class MpqManager
     std::vector<void*> Mpqs;
 
 public:
-    MpqManager(const char* gameDir) noexcept
+    explicit MpqManager(const char* gameDir) noexcept
         : GameDir(gameDir),
         Mpqs()
     {

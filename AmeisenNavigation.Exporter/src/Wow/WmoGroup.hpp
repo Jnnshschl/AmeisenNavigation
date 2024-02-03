@@ -70,10 +70,10 @@ struct WmoGroup
     unsigned int Size;
 
 public:
-    inline MVER* Mver() noexcept { return reinterpret_cast<MVER*>(Data); };
-    inline MOGP* Mogp() noexcept { return reinterpret_cast<MOGP*>(Data + sizeof(MVER)); };
-    inline MOVT* Movt() noexcept { return GetSubChunk(Data, Size, MOVT); }
-    inline MOVI* Movi() noexcept { return GetSubChunk(Data, Size, MOVI); }
-    inline MONR* Monr() noexcept { return GetSubChunk(Data, Size, MONR); }
-    inline MOPY* Mopy() noexcept { return GetSubChunk(Data, Size, MOPY); }
+    inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
+    inline const MOGP* Mogp() const noexcept { return reinterpret_cast<MOGP*>(Data + sizeof(MVER)); };
+    inline const MOVT* Movt() const noexcept { return GetSubChunk(Data, Size, MOVT); }
+    inline const MOVI* Movi() const noexcept { return GetSubChunk(Data, Size, MOVI); }
+    inline const MONR* Monr() const noexcept { return GetSubChunk(Data, Size, MONR); }
+    inline const MOPY* Mopy() const noexcept { return GetSubChunk(Data, Size, MOPY); }
 };

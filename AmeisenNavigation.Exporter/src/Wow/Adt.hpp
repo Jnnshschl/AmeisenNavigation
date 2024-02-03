@@ -38,7 +38,7 @@ struct MDDF
     unsigned char magic[4];
     unsigned int size;
 
-    struct MDDFData
+    struct Entry
     {
         unsigned int id;
         unsigned int uniqueId;
@@ -72,7 +72,7 @@ struct MODF
     unsigned char magic[4];
     unsigned int size;
 
-    struct MODFData
+    struct Entry
     {
         unsigned int id;
         unsigned int uniqueId;
@@ -136,23 +136,23 @@ public:
         unsigned int offsetAttributes;
     } liquid[ADT_CELLS_PER_GRID][ADT_CELLS_PER_GRID];
 
-    inline AdtLiquid* GetInstance(unsigned int x, unsigned int y) noexcept
+    inline const AdtLiquid* GetInstance(unsigned int x, unsigned int y) const noexcept
     {
         if (liquid[x][y].used && liquid[x][y].offsetInstances)
         {
-            return reinterpret_cast<AdtLiquid*>(reinterpret_cast<unsigned char*>(this) + 8 + liquid[x][y].offsetInstances);
+            return reinterpret_cast<const AdtLiquid*>(reinterpret_cast<const unsigned char*>(this) + 8 + liquid[x][y].offsetInstances);
         }
 
         return nullptr;
     }
 
-    inline AdtLiquidAttributes* GetAttributes(unsigned int x, unsigned int y) noexcept
+    inline const AdtLiquidAttributes* GetAttributes(unsigned int x, unsigned int y) const noexcept
     {
         if (liquid[x][y].used)
         {
             if (liquid[x][y].offsetAttributes)
             {
-                return reinterpret_cast<AdtLiquidAttributes*>(reinterpret_cast<unsigned char*>(this) + 8 + liquid[x][y].offsetAttributes);
+                return reinterpret_cast<const AdtLiquidAttributes*>(reinterpret_cast<const unsigned char*>(this) + 8 + liquid[x][y].offsetAttributes);
             }
 
             static AdtLiquidAttributes all{ 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF };
@@ -162,13 +162,13 @@ public:
         return nullptr;
     }
 
-    inline unsigned long long* GetRenderMask(AdtLiquid* h) noexcept
+    inline const unsigned long long* GetRenderMask(const AdtLiquid* h) const noexcept
     {
-        return h->offsetRenderMask ? reinterpret_cast<unsigned long long*>(reinterpret_cast<unsigned char*>(this) + 8 + h->offsetRenderMask)
+        return h->offsetRenderMask ? reinterpret_cast<const unsigned long long*>(reinterpret_cast<const unsigned char*>(this) + 8 + h->offsetRenderMask)
             : nullptr;
     }
 
-    inline float* GetLiquidHeight(AdtLiquid* liquid) noexcept
+    inline const float* GetLiquidHeight(const AdtLiquid* liquid) const noexcept
     {
         if (!liquid->offsetVertexData)
         {
@@ -179,7 +179,7 @@ public:
         {
         case AdtLiquidVertexFormat::HeightDepth:
         case AdtLiquidVertexFormat::HeightTextureCoord:
-            return reinterpret_cast<float*>(reinterpret_cast<unsigned char*>(this) + 8 + liquid->offsetVertexData);
+            return reinterpret_cast<const float*>(reinterpret_cast<const unsigned char*>(this) + 8 + liquid->offsetVertexData);
 
         case AdtLiquidVertexFormat::Depth:
         default:
@@ -272,41 +272,41 @@ class Adt
     unsigned int Size;
 
 public:
-    inline MVER* Mver() noexcept { return reinterpret_cast<MVER*>(Data); };
-    inline MHDR* Mhdr() noexcept { return reinterpret_cast<MHDR*>(Data + sizeof(MVER)); };
+    inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
+    inline const MHDR* Mhdr() const noexcept { return reinterpret_cast<MHDR*>(Data + sizeof(MVER)); };
 
     template<typename T>
-    inline T* GetSub(unsigned int offset) noexcept
+    inline T* GetSub(unsigned int offset) const noexcept
     {
         return offset ? reinterpret_cast<T*>(Data + sizeof(MVER) + 8 + offset) : nullptr;
     };
 
-    inline auto Mcin() noexcept { return GetSub<MCIN>(Mhdr()->offsetMcin); };
-    inline auto Mh2o() noexcept { return GetSub<MH2O>(Mhdr()->offsetMh2o); };
+    inline const auto Mcin() const noexcept { return GetSub<MCIN>(Mhdr()->offsetMcin); };
+    inline const auto Mh2o() const noexcept { return GetSub<MH2O>(Mhdr()->offsetMh2o); };
 
-    inline auto Mmdx() noexcept { return GetSub<MMDX>(Mhdr()->offsetMmdx); };
-    inline auto Mmid() noexcept { return GetSub<MMID>(Mhdr()->offsetMmid); };
-    inline auto Mddf() noexcept { return GetSub<MDDF>(Mhdr()->offsetMddf); };
+    inline const auto Mmdx() const noexcept { return GetSub<MMDX>(Mhdr()->offsetMmdx); };
+    inline const auto Mmid() const noexcept { return GetSub<MMID>(Mhdr()->offsetMmid); };
+    inline const auto Mddf() const noexcept { return GetSub<MDDF>(Mhdr()->offsetMddf); };
 
-    inline auto Mwmo() noexcept { return GetSub<MWMO>(Mhdr()->offsetMwmo); };
-    inline auto Mwid() noexcept { return GetSub<MWID>(Mhdr()->offsetMwid); };
-    inline auto Modf() noexcept { return GetSub<MODF>(Mhdr()->offsetModf); };
+    inline const auto Mwmo() const noexcept { return GetSub<MWMO>(Mhdr()->offsetMwmo); };
+    inline const auto Mwid() const noexcept { return GetSub<MWID>(Mhdr()->offsetMwid); };
+    inline const auto Modf() const noexcept { return GetSub<MODF>(Mhdr()->offsetModf); };
 
-    inline MCNK* Mcnk(unsigned int x, unsigned int y) noexcept
+    inline const MCNK* Mcnk(unsigned int x, unsigned int y) noexcept
     {
         unsigned int offset = Mcin()->cells[x][y].offsetMcnk;
         return offset ? reinterpret_cast<MCNK*>(Data + offset) : nullptr;
     };
 
-    inline MCVT* Mcvt(MCNK* mcnk) noexcept
+    inline const MCVT* Mcvt(const MCNK* mcnk) noexcept
     {
         unsigned int offset = mcnk->offsMcvt;
-        return offset ? reinterpret_cast<MCVT*>(reinterpret_cast<unsigned char*>(mcnk) + offset) : nullptr;
+        return offset ? reinterpret_cast<const MCVT*>(reinterpret_cast<const unsigned char*>(mcnk) + offset) : nullptr;
     };
 
     inline void GetTerrainVertsAndTris(unsigned int x, unsigned int y, std::vector<Vector3>& verts, std::vector<Tri>& tris) noexcept
     {
-        if (MCNK* mcnk = Mcnk(x, y))
+        if (const MCNK* mcnk = Mcnk(x, y))
         {
             // heightMap index, 0 - 144
             int mcvtIndex = 0;
@@ -322,7 +322,7 @@ public:
                     Vector3 v3{ mcnk->x - (j * HALFUNITSIZE), mcnk->y - (i * UNITSIZE), mcnk->z };
 
                     // add the heightMap offset if there is one
-                    if (MCVT* mcvt = Mcvt(mcnk))
+                    if (const MCVT* mcvt = Mcvt(mcnk))
                     {
                         v3.z += mcvt->heightMap[mcvtIndex];
                     }
@@ -353,11 +353,11 @@ public:
 
     inline void GetLiquidVertsAndTris(unsigned int x, unsigned int y, std::vector<Vector3>& verts, std::vector<Tri>& tris) noexcept
     {
-        if (MCNK* mcnk = Mcnk(x, y))
+        if (const MCNK* mcnk = Mcnk(x, y))
         {
-            if (MH2O* mh2o = Mh2o())
+            if (const MH2O* mh2o = Mh2o())
             {
-                if (AdtLiquid* liquid = mh2o->GetInstance(x, y))
+                if (const AdtLiquid* liquid = mh2o->GetInstance(x, y))
                 {
                     const AdtLiquidAttributes* attributes = mh2o->GetAttributes(x, y);
 
@@ -395,20 +395,20 @@ public:
         }
     }
 
-    inline void GetWmoVertsAndTris(CachedFileReader& wmoReader, std::vector<Vector3>& verts, std::vector<Tri>& tris) noexcept
+    inline void GetWmoVertsAndTris(CachedFileReader& reader, std::vector<Vector3>& verts, std::vector<Tri>& tris) const noexcept
     {
-        if (MODF* modf = Modf())
+        if (const MODF* modf = Modf())
         {
             std::unordered_map<unsigned int, unsigned char*> wmoFiles;
 
-            for (int i = 0; i < modf->size / sizeof(MODF::MODFData); i++)
+            for (int i = 0; i < modf->size / sizeof(MODF::Entry); i++)
             {
                 const auto& entry = modf->entries[i];
                 const auto wmoRootFilename = Mwmo()->filenames + Mwid()->offsets[entry.id];
 
-                if (Wmo* wmo = wmoReader.GetFileContent<Wmo>(wmoRootFilename))
+                if (const Wmo* wmo = reader.GetFileContent<Wmo>(wmoRootFilename))
                 {
-                    if (MOHD* mohd = wmo->Mohd())
+                    if (const MOHD* mohd = wmo->Mohd())
                     {
                         Matrix4x4 tranform;
 
@@ -424,31 +424,31 @@ public:
                             std::string_view wmoRF(wmoRootFilename);
                             const auto wmoGroupName = std::format("{}_{:03}.wmo", wmoRF.substr(0, wmoRF.find_last_of('.')), w);
 
-                            if (WmoGroup* wmoGroup = wmoReader.GetFileContent<WmoGroup>(wmoGroupName.c_str()))
+                            if (const WmoGroup* wmoGroup = reader.GetFileContent<WmoGroup>(wmoGroupName.c_str()))
                             {
-                                if (MOVT* movt = wmoGroup->Movt())
+                                if (const MOVT* movt = wmoGroup->Movt())
                                 {
-                                    if (MOVI* movi = wmoGroup->Movi())
+                                    if (const MOVI* movi = wmoGroup->Movi())
                                     {
-                                        if (MONR* monr = wmoGroup->Monr())
+                                        if (const MONR* monr = wmoGroup->Monr())
                                         {
-                                            if (MOPY* mopy = wmoGroup->Mopy())
+                                            if (const MOPY* mopy = wmoGroup->Mopy())
                                             {
                                                 const size_t vertsBase = verts.size();
 
-                                                for (unsigned int i = 0; i < movt->Count(); ++i)
+                                                for (unsigned int d = 0; d < movt->Count(); ++d)
                                                 {
-                                                    verts.push_back(tranform.Transform(movt->verts[i]));
+                                                    verts.push_back(tranform.Transform(movt->verts[d]));
                                                 }
 
-                                                for (unsigned int i = 0; i < movi->Count(); i += 3)
+                                                for (unsigned int d = 0; d < movi->Count(); d += 3)
                                                 {
-                                                    if ((mopy->data[i / 3].flags & 0x04) != 0 && mopy->data[i / 3].materials != 0xFF)
+                                                    if ((mopy->data[d / 3].flags & 0x04) != 0 && mopy->data[d / 3].materials != 0xFF)
                                                     {
                                                         continue;
                                                     }
 
-                                                    tris.push_back({ WMO, vertsBase + movi->tris[i] , vertsBase + movi->tris[i + 1], vertsBase + movi->tris[i + 2] });
+                                                    tris.push_back({ WMO, vertsBase + movi->tris[d] , vertsBase + movi->tris[d + 1], vertsBase + movi->tris[d + 2] });
                                                 }
                                             }
                                         }
@@ -457,45 +457,42 @@ public:
                             }
                         }
 
-                        if (MODD* modd = wmo->Modd())
+                        if (const MODD* modd = wmo->Modd())
                         {
                             if (modd->size > 0)
                             {
-                                if (MODS* mods = wmo->Mods())
+                                if (const MODN* modn = wmo->Modn())
                                 {
-                                    if (MODN* modn = wmo->Modn())
+                                    for (unsigned int m = 0; m < modd->size / sizeof(MODD::Definition); m++)
                                     {
-                                        for (unsigned int m = 0; m < modd->size / sizeof(MODD::Definition); m++)
+                                        const auto& definition = modd->defs[m];
+                                        std::string_view doodadPath(modn->names + definition.nameIndex);
+                                        const auto m2Name = std::format("{}.m2", doodadPath.substr(0, doodadPath.find_last_of('.')));
+
+                                        if (const M2* m2 = reader.GetFileContent<M2>(m2Name.c_str()))
                                         {
-                                            const auto& definition = modd->defs[m];
-                                            std::string_view doodadPath(modn->names + definition.nameIndex);
-                                            const auto m2Name = std::format("{}.m2", doodadPath.substr(0, doodadPath.find_last_of('.')), i);
-
-                                            if (M2* m2 = wmoReader.GetFileContent<M2>(m2Name.c_str()))
+                                            if (const MD20* md20 = m2->Md20())
                                             {
-                                                if (MD20* md20 = m2->Md20())
+                                                if (m2->IsCollideable())
                                                 {
-                                                    if (m2->IsCollideable())
+                                                    Matrix4x4 doodadTranform;
+                                                    doodadTranform.SetTranslation(definition.position);
+                                                    doodadTranform.SetRotation({ 0.0f, 180.0f, 0.0f });
+                                                    doodadTranform.SetRotation(-definition.qy, definition.qz, -definition.qx, definition.qw);
+                                                    doodadTranform.Multiply(tranform);
+
+                                                    const size_t vertsBase = verts.size();
+
+                                                    for (unsigned int d = 0; d < md20->countBoundingVertices; ++d)
                                                     {
-                                                        Matrix4x4 doodadTranform;
-                                                        doodadTranform.SetTranslation(definition.position);
-                                                        doodadTranform.SetRotation({ 0.0f, 180.0f, 0.0f });
-                                                        doodadTranform.SetRotation(-definition.qy, definition.qz, -definition.qx, definition.qw);
-                                                        doodadTranform.Multiply(tranform);
+                                                        const Vector3 v3 = *m2->Vertex(d);
+                                                        verts.push_back(doodadTranform.Transform(v3));
+                                                    }
 
-                                                        const size_t vertsBase = verts.size();
-
-                                                        for (unsigned int i = 0; i < md20->countBoundingVertices; ++i)
-                                                        {
-                                                            const Vector3 v3 = *m2->Vertex(i);
-                                                            verts.push_back(doodadTranform.Transform(v3));
-                                                        }
-
-                                                        for (unsigned int i = 0; i < md20->countBoundingTriangles; i += 3)
-                                                        {
-                                                            const auto t = m2->Tri(i);
-                                                            tris.push_back({ WMO, vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
-                                                        }
+                                                    for (unsigned int d = 0; d < md20->countBoundingTriangles; d += 3)
+                                                    {
+                                                        const auto t = m2->Tri(d);
+                                                        tris.push_back({ WMO, vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
                                                     }
                                                 }
                                             }
@@ -510,20 +507,46 @@ public:
         }
     }
 
-    inline void GetDoodadVertsAndTris(unsigned int x, unsigned int y, CachedFileReader& m2Reader, std::vector<Vector3>& verts, std::vector<Tri>& tris) noexcept
+    inline void GetDoodadVertsAndTris(CachedFileReader& reader, std::vector<Vector3>& verts, std::vector<Tri>& tris) const noexcept
     {
-        if (MCNK* mcnk = Mcnk(x, y))
+        if (MDDF* mddf = Mddf())
         {
-            if (MDDF* mddf = Mddf())
+            for (int i = 0; i < mddf->size / sizeof(MDDF::Entry); i++)
             {
-                std::unordered_map<unsigned int, unsigned char*> mdxFiles;
+                const auto entry = mddf->entries[i];
 
-                for (int i = 0; i < mddf->size / sizeof(MDDF::MDDFData); i++)
+                Matrix4x4 tranform;
+
+                if (entry.x != 0.0f || entry.y != 0.0f || entry.z != 0.0f)
                 {
-                    const auto entry = mddf->entries[i];
+                    tranform.SetTranslation({ -(entry.z - WORLDSIZE), -(entry.x - WORLDSIZE), entry.y });
+                }
 
-                    if (M2* m2 = m2Reader.GetFileContent<M2>(Mmdx()->filenames + Mmid()->offsets[entry.id]))
+                tranform.SetRotation({ entry.rz, entry.rx, entry.ry + 180.0f });
+
+                std::string_view doodadPath(Mmdx()->filenames + Mmid()->offsets[entry.id]);
+                const auto m2Name = std::format("{}.m2", doodadPath.substr(0, doodadPath.find_last_of('.')));
+
+                if (const M2* m2 = reader.GetFileContent<M2>(m2Name.c_str()))
+                {
+                    if (const MD20* md20 = m2->Md20())
                     {
+                        if (m2->IsCollideable())
+                        {
+                            const size_t vertsBase = verts.size();
+
+                            for (unsigned int d = 0; d < md20->countBoundingVertices; ++d)
+                            {
+                                const Vector3 v3 = *m2->Vertex(d);
+                                verts.push_back(tranform.Transform(v3));
+                            }
+
+                            for (unsigned int d = 0; d < md20->countBoundingTriangles; d += 3)
+                            {
+                                const auto t = m2->Tri(d);
+                                tris.push_back({ WMO, vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
+                            }
+                        }
                     }
                 }
             }

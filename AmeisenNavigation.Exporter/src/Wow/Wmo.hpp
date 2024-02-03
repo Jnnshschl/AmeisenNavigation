@@ -71,9 +71,9 @@ struct Wmo
     unsigned int Size;
 
 public:
-    inline MVER* Mver() noexcept { return reinterpret_cast<MVER*>(Data); };
-    inline MOHD* Mohd() noexcept { return reinterpret_cast<MOHD*>(Data + sizeof(MVER)); };
-    inline MODS* Mods() noexcept { return GetSubChunk(Data, Size, MODS); }
-    inline MODN* Modn() noexcept { return GetSubChunk(Data, Size, MODN); }
-    inline MODD* Modd() noexcept { return GetSubChunk(Data, Size, MODD); }
+    inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
+    inline const MOHD* Mohd() const noexcept { return reinterpret_cast<MOHD*>(Data + sizeof(MVER)); };
+    inline const MODS* Mods() const noexcept { return GetSubChunk(Data, Size, MODS); }
+    inline const MODN* Modn() const noexcept { return GetSubChunk(Data, Size, MODN); }
+    inline const MODD* Modd() const noexcept { return GetSubChunk(Data, Size, MODD); }
 };

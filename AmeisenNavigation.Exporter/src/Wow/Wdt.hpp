@@ -31,7 +31,7 @@ class Wdt
     unsigned int Size;
 
 public:
-    inline MVER* Mver() noexcept { return reinterpret_cast<MVER*>(Data); };
-    inline MPHD* Mphd() noexcept { return reinterpret_cast<MPHD*>(Data + sizeof(MVER)); };
-    inline MAIN* Main() noexcept { return reinterpret_cast<MAIN*>(Data + sizeof(MVER) + sizeof(MPHD)); };
+    inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
+    inline const MPHD* Mphd() const noexcept { return reinterpret_cast<MPHD*>(Data + sizeof(MVER)); };
+    inline const MAIN* Main() const noexcept { return reinterpret_cast<MAIN*>(Data + sizeof(MVER) + sizeof(MPHD)); };
 };

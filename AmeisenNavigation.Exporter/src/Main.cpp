@@ -62,6 +62,7 @@ int main() noexcept
                         }
 
                         adt->GetWmoVertsAndTris(mpqReader, verts, tris);
+                        adt->GetDoodadVertsAndTris(mpqReader, verts, tris);
                     }
                 }
             }

@@ -64,12 +64,12 @@ struct M2
     unsigned int Size;
 
 public:
-    inline MD20* Md20() noexcept { return reinterpret_cast<MD20*>(Data); };
+    inline const MD20* Md20() const noexcept { return reinterpret_cast<MD20*>(Data); };
 
-    inline Vector3* Vertex(size_t i) noexcept { return reinterpret_cast<Vector3*>(Data + Md20()->offsetBoundingVertices + (sizeof(Vector3) * i)); }
-    inline unsigned short* Tri(size_t i) noexcept { return reinterpret_cast<unsigned short*>(Data + Md20()->offsetBoundingTriangles + (sizeof(unsigned short) * i)); }
+    inline const Vector3* Vertex(size_t i) const noexcept { return reinterpret_cast<Vector3*>(Data + Md20()->offsetBoundingVertices + (sizeof(Vector3) * i)); }
+    inline const unsigned short* Tri(size_t i) const noexcept { return reinterpret_cast<unsigned short*>(Data + Md20()->offsetBoundingTriangles + (sizeof(unsigned short) * i)); }
 
-    inline bool IsCollideable() noexcept
+    inline bool IsCollideable() const noexcept
     {
         return Md20()->offsetBoundingNormals > 0 && Md20()->offsetBoundingVertices > 0 &&
             Md20()->offsetBoundingTriangles > 0 && Md20()->boundingRadius > 0.0f;
