@@ -15,7 +15,9 @@ T* FindSubChunk(unsigned char* memory, unsigned int size, const char chunkName[5
         chunkName[0],
     };
 
-    while (memory < memory + (size - 4))
+    const auto end = memory + (size - 4);
+
+    while (memory < end)
     {
         if (!memcmp(memory, chunkNameRev, 4))
         {

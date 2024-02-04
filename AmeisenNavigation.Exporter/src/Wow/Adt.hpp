@@ -454,6 +454,34 @@ public:
                                         }
                                     }
                                 }
+
+
+                                if (const MLIQ* mliq = wmoGroup->Mliq())
+                                {
+                                    const auto vertCount = mliq->countYVertices * mliq->countXVertices;
+                                    const auto dataPtr = reinterpret_cast<const MLIQVert*>(mliq + 1);
+                                    const auto flags = reinterpret_cast<const unsigned char*>(dataPtr + vertCount);
+
+                                    for (unsigned int y = 0; y < mliq->height; ++y)
+                                    {
+                                        for (unsigned int x = 0; x < mliq->width; ++x)
+                                        {
+                                            const size_t vertsIndex = verts.size();
+
+                                            AddLiquidVert(mliq, dataPtr, y, x, verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y, x + 1, verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y + 1, x, verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y + 1, x + 1, verts, tranform);
+
+                                            // TODO: find right way to interpret flags
+                                            if (true || flags[(y * mliq->height) + x] != 0x0F)
+                                            {
+                                                tris.push_back({ LIQUID_WATER, vertsIndex + 2, vertsIndex, vertsIndex + 1 });
+                                                tris.push_back({ LIQUID_WATER, vertsIndex + 1, vertsIndex + 3, vertsIndex + 2 });
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
 
@@ -505,6 +533,20 @@ public:
                 }
             }
         }
+    }
+
+    inline void AddLiquidVert(const MLIQ* mliq, const MLIQVert* dataPtr, int y, int x, std::vector<Vector3>& verts, Matrix4x4& tranform) const noexcept
+    {
+        const auto liq = dataPtr[(y * mliq->width) + x];
+
+        Vector3 base
+        {
+            mliq->position.x + (x * UNITSIZE),
+            mliq->position.y + (y * UNITSIZE),
+            std::fabsf(liq.waterVert.height) > 0.5f ? liq.waterVert.height : mliq->position.z + liq.waterVert.height
+        };
+
+        verts.push_back(tranform.Transform(base));
     }
 
     inline void GetDoodadVertsAndTris(CachedFileReader& reader, std::vector<Vector3>& verts, std::vector<Tri>& tris) const noexcept

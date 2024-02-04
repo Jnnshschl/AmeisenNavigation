@@ -4,6 +4,39 @@
 #include "../Utils/Misc.hpp"
 
 #pragma pack(push, 1)
+struct MLIQVert
+{
+    union
+    {
+        struct
+        {
+            unsigned char flow1;
+            unsigned char flow2;
+            unsigned char flow1Pct;
+            unsigned char filler;
+            float height;
+        }  waterVert;
+        struct
+        {
+            unsigned short s;
+            unsigned short t;
+            float height;
+        } magmaVert;
+    };
+};
+
+struct MLIQ
+{
+    unsigned char magic[4];
+    unsigned int size;
+    unsigned int countXVertices;
+    unsigned int countYVertices;
+    unsigned int width;
+    unsigned int height;
+    Vector3 position;
+    unsigned short materialId;
+};
+
 struct MOPY
 {
     unsigned char magic[4];
@@ -76,4 +109,5 @@ public:
     inline const MOVI* Movi() const noexcept { return GetSubChunk(Data, Size, MOVI); }
     inline const MONR* Monr() const noexcept { return GetSubChunk(Data, Size, MONR); }
     inline const MOPY* Mopy() const noexcept { return GetSubChunk(Data, Size, MOPY); }
+    inline const MLIQ* Mliq() const noexcept { return GetSubChunk(Data, Size, MLIQ); }
 };
