@@ -29,4 +29,41 @@ struct Vector3
 
     constexpr inline operator float* () noexcept { return pos; }
     constexpr inline operator const float* () const noexcept { return pos; }
+
+    constexpr inline bool operator==(const Vector3& other) const noexcept
+    {
+        return x == other.x && y == other.y && z == other.z;
+    }
+
+    /// <summary>
+    /// Convert the recast and detour coordinates to wow coordinates.
+    /// </summary>
+    constexpr inline Vector3& ToWowCoords() noexcept
+    {
+        std::swap(pos[2], pos[1]);
+        std::swap(pos[1], pos[0]);
+        return *this;
+    }
+
+    /// <summary>
+    /// Convert the wow coordinates to recast and detour coordinates.
+    /// </summary>
+    constexpr inline Vector3& ToRDCoords() noexcept
+    {
+        std::swap(pos[0], pos[1]);
+        std::swap(pos[1], pos[2]);
+        return *this;
+    }
+
+    struct Hash 
+    {
+        size_t operator()(const Vector3& v) const noexcept
+        {
+            size_t hash = 17;
+            hash = hash * 31 + std::hash<float>()(v.x);
+            hash = hash * 31 + std::hash<float>()(v.y);
+            hash = hash * 31 + std::hash<float>()(v.z);
+            return hash;
+        }
+    };
 };

@@ -1,52 +1,34 @@
 #pragma once
 
+#include <chrono>
 #include <iostream>
+#include <mutex>
 #include <unordered_map>
+#include <utility>
+
+#include "../xxhash/xxhash.h"
 
 #include "MpqManager.hpp"
 
 class CachedFileReader
 {
     MpqManager* Mpq;
-    std::unordered_map<unsigned long long, std::pair<void*, unsigned int>> Cache;
+    std::mutex CacheMutex;
+    std::unordered_map<XXH64_hash_t, std::pair<void*, unsigned int>> Cache;
 
 public:
     explicit CachedFileReader(MpqManager* mpqManager) noexcept
         : Mpq(mpqManager),
-        Cache{}
+        CacheMutex(),
+        Cache()
     {}
-
-    ~CachedFileReader() noexcept
-    {
-        for (const auto& [id, ptr] : Cache)
-        {
-            if (ptr.first)
-            {
-                delete[] ptr.first;
-            }
-        }
-    }
-
-    unsigned long long Fnv1a64(const char* str) const noexcept
-    {
-        const unsigned long long FNV_prime = 1099511628211ULL;
-        const unsigned long long offset_basis = 14695981039346656037ULL;
-        unsigned long long hash = offset_basis;
-
-        while (*str != '\0')
-        {
-            hash ^= *str;
-            hash *= FNV_prime;
-            ++str;
-        }
-
-        return hash;
-    }
 
     template<typename T>
     inline T* GetFileContent(const char* filename) noexcept
     {
-        const auto hash = Fnv1a64(filename);
+        const auto hash = XXH3_64bits(filename, strlen(filename));
+
+        std::unique_lock<std::mutex> cacheLock(CacheMutex);
 
         if (!Cache.contains(hash))
         {
@@ -54,7 +36,6 @@ public:
 
             if (unsigned char* ptr = Mpq->GetFileContent(filename, size))
             {
-                std::cout << "[CachedFileReader] Loaded: " << filename << std::endl;
                 Cache[hash] = std::make_pair(ptr, size);
             }
             else

@@ -304,10 +304,12 @@ public:
         return offset ? reinterpret_cast<const MCVT*>(reinterpret_cast<const unsigned char*>(mcnk) + offset) : nullptr;
     };
 
-    inline void GetTerrainVertsAndTris(unsigned int x, unsigned int y, std::vector<Vector3>& verts, std::vector<Tri>& tris) noexcept
+    inline void GetTerrainVertsAndTris(unsigned int x, unsigned int y, Structure& structure) noexcept
     {
         if (const MCNK* mcnk = Mcnk(x, y))
         {
+            std::lock_guard lock(structure.mutex);
+
             // heightMap index, 0 - 144
             int mcvtIndex = 0;
 
@@ -329,8 +331,8 @@ public:
 
                     mcvtIndex++;
 
-                    const size_t vertexCount = verts.size();
-                    verts.emplace_back(v3);
+                    const size_t vertexCount = structure.verts.size();
+                    structure.verts.emplace_back(v3.ToRDCoords());
 
                     if (unitCount == 8)
                     {
@@ -340,10 +342,14 @@ public:
                         // check for holes in the inner grid, if there is no hole, generate tris
                         if (mcnk->IsHole(i, j))
                         {
-                            tris.emplace_back(Tri{ TERRAIN_GROUND, vertexCount - 9, vertexCount, vertexCount - 8 }); // Top
-                            tris.emplace_back(Tri{ TERRAIN_GROUND, vertexCount + 9, vertexCount, vertexCount + 8 }); // Bottom
-                            tris.emplace_back(Tri{ TERRAIN_GROUND, vertexCount - 8, vertexCount, vertexCount + 9 }); // Right
-                            tris.emplace_back(Tri{ TERRAIN_GROUND, vertexCount + 8, vertexCount, vertexCount - 9 }); // Left
+                            structure.tris.emplace_back(Tri{ vertexCount - 9, vertexCount, vertexCount - 8 }); // Top
+                            structure.tris.emplace_back(Tri{ vertexCount + 9, vertexCount, vertexCount + 8 }); // Bottom
+                            structure.tris.emplace_back(Tri{ vertexCount - 8, vertexCount, vertexCount + 9 }); // Right
+                            structure.tris.emplace_back(Tri{ vertexCount + 8, vertexCount, vertexCount - 9 }); // Left
+                            structure.triTypes.emplace_back(TERRAIN_GROUND);
+                            structure.triTypes.emplace_back(TERRAIN_GROUND);
+                            structure.triTypes.emplace_back(TERRAIN_GROUND);
+                            structure.triTypes.emplace_back(TERRAIN_GROUND);
                         }
                     }
                 }
@@ -351,7 +357,7 @@ public:
         }
     }
 
-    inline void GetLiquidVertsAndTris(unsigned int x, unsigned int y, std::vector<Vector3>& verts, std::vector<Tri>& tris) noexcept
+    inline void GetLiquidVertsAndTris(unsigned int x, unsigned int y, Structure& structure) noexcept
     {
         if (const MCNK* mcnk = Mcnk(x, y))
         {
@@ -379,14 +385,18 @@ public:
                                 const float cz = liquid->maxHeightLevel; // isOcean ?  : liquidHeights[liquidHeightIndex]
                                 // liquidHeightIndex++;
 
-                                const size_t vertsIndex = verts.size();
-                                verts.push_back({ cx, cy, cz });
-                                verts.push_back({ cx - UNITSIZE, cy, cz });
-                                verts.push_back({ cx, cy - UNITSIZE, cz });
-                                verts.push_back({ cx - UNITSIZE, cy - UNITSIZE, cz });
+                                std::lock_guard lock(structure.mutex);
+                                const size_t vertsIndex = structure.verts.size();
 
-                                tris.push_back({ isOcean ? LIQUID_OCEAN : LIQUID_WATER, vertsIndex + 2, vertsIndex, vertsIndex + 1 });
-                                tris.push_back({ isOcean ? LIQUID_OCEAN : LIQUID_WATER, vertsIndex + 1, vertsIndex + 3, vertsIndex + 2 });
+                                structure.verts.emplace_back(Vector3{ cx, cy, cz }.ToRDCoords());
+                                structure.verts.emplace_back(Vector3{ cx - UNITSIZE, cy, cz }.ToRDCoords());
+                                structure.verts.emplace_back(Vector3{ cx, cy - UNITSIZE, cz }.ToRDCoords());
+                                structure.verts.emplace_back(Vector3{ cx - UNITSIZE, cy - UNITSIZE, cz }.ToRDCoords());
+
+                                structure.tris.emplace_back(Tri{ vertsIndex + 2, vertsIndex, vertsIndex + 1 });
+                                structure.tris.emplace_back(Tri{ vertsIndex + 1, vertsIndex + 3, vertsIndex + 2 });
+                                structure.triTypes.emplace_back(isOcean ? LIQUID_OCEAN : LIQUID_WATER);
+                                structure.triTypes.emplace_back(isOcean ? LIQUID_OCEAN : LIQUID_WATER);
                             }
                         }
                     }
@@ -395,7 +405,7 @@ public:
         }
     }
 
-    inline void GetWmoVertsAndTris(CachedFileReader& reader, std::vector<Vector3>& verts, std::vector<Tri>& tris) const noexcept
+    inline void GetWmoVertsAndTris(CachedFileReader& reader, Structure& structure) const noexcept
     {
         if (const MODF* modf = Modf())
         {
@@ -430,26 +440,25 @@ public:
                                 {
                                     if (const MOVI* movi = wmoGroup->Movi())
                                     {
-                                        if (const MONR* monr = wmoGroup->Monr())
+                                        if (const MOPY* mopy = wmoGroup->Mopy())
                                         {
-                                            if (const MOPY* mopy = wmoGroup->Mopy())
+                                            std::lock_guard lock(structure.mutex);
+                                            const size_t vertsBase = structure.verts.size();
+
+                                            for (unsigned int d = 0; d < movt->Count(); ++d)
                                             {
-                                                const size_t vertsBase = verts.size();
+                                                structure.verts.emplace_back(tranform.Transform(movt->verts[d]).ToRDCoords());
+                                            }
 
-                                                for (unsigned int d = 0; d < movt->Count(); ++d)
+                                            for (unsigned int d = 0; d < movi->Count(); d += 3)
+                                            {
+                                                if ((mopy->data[d / 3].flags & 0x04) != 0 && mopy->data[d / 3].materials != 0xFF)
                                                 {
-                                                    verts.push_back(tranform.Transform(movt->verts[d]));
+                                                    continue;
                                                 }
 
-                                                for (unsigned int d = 0; d < movi->Count(); d += 3)
-                                                {
-                                                    if ((mopy->data[d / 3].flags & 0x04) != 0 && mopy->data[d / 3].materials != 0xFF)
-                                                    {
-                                                        continue;
-                                                    }
-
-                                                    tris.push_back({ WMO, vertsBase + movi->tris[d] , vertsBase + movi->tris[d + 1], vertsBase + movi->tris[d + 2] });
-                                                }
+                                                structure.tris.emplace_back(Tri{ vertsBase + movi->tris[d] , vertsBase + movi->tris[d + 1], vertsBase + movi->tris[d + 2] });
+                                                structure.triTypes.emplace_back(WMO);
                                             }
                                         }
                                     }
@@ -466,18 +475,43 @@ public:
                                     {
                                         for (unsigned int x = 0; x < mliq->width; ++x)
                                         {
-                                            const size_t vertsIndex = verts.size();
+                                            std::lock_guard lock(structure.mutex);
+                                            const size_t vertsIndex = structure.verts.size();
 
-                                            AddLiquidVert(mliq, dataPtr, y, x, verts, tranform);
-                                            AddLiquidVert(mliq, dataPtr, y, x + 1, verts, tranform);
-                                            AddLiquidVert(mliq, dataPtr, y + 1, x, verts, tranform);
-                                            AddLiquidVert(mliq, dataPtr, y + 1, x + 1, verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y, x, structure.verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y, x + 1, structure.verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y + 1, x, structure.verts, tranform);
+                                            AddLiquidVert(mliq, dataPtr, y + 1, x + 1, structure.verts, tranform);
+
+                                            unsigned char f = 0; // flags[(y * mliq->height) + x];
 
                                             // TODO: find right way to interpret flags
-                                            if (true || flags[(y * mliq->height) + x] != 0x0F)
+                                            if (true || f != 0x0F)
                                             {
-                                                tris.push_back({ LIQUID_WATER, vertsIndex + 2, vertsIndex, vertsIndex + 1 });
-                                                tris.push_back({ LIQUID_WATER, vertsIndex + 1, vertsIndex + 3, vertsIndex + 2 });
+                                                structure.tris.emplace_back(Tri{ vertsIndex + 2, vertsIndex, vertsIndex + 1 });
+                                                structure.tris.emplace_back(Tri{ vertsIndex + 1, vertsIndex + 3, vertsIndex + 2 });
+
+                                                TriAreaId t = LIQUID_WATER;
+
+                                                if (f & 1)
+                                                {
+                                                    t = LIQUID_WATER;
+                                                }
+                                                else if (f & 2)
+                                                {
+                                                    t = LIQUID_OCEAN;
+                                                }
+                                                else if (f & 4)
+                                                {
+                                                    t = LIQUID_LAVA;
+                                                }
+                                                else if (f & 8)
+                                                {
+                                                    t = LIQUID_SLIME;
+                                                }
+
+                                                structure.triTypes.emplace_back(t);
+                                                structure.triTypes.emplace_back(t);
                                             }
                                         }
                                     }
@@ -509,18 +543,20 @@ public:
                                                     doodadTranform.SetRotation(-definition.qy, definition.qz, -definition.qx, definition.qw);
                                                     doodadTranform.Multiply(tranform);
 
-                                                    const size_t vertsBase = verts.size();
+                                                    std::lock_guard lock(structure.mutex);
+                                                    const size_t vertsBase = structure.verts.size();
 
                                                     for (unsigned int d = 0; d < md20->countBoundingVertices; ++d)
                                                     {
                                                         const Vector3 v3 = *m2->Vertex(d);
-                                                        verts.push_back(doodadTranform.Transform(v3));
+                                                        structure.verts.emplace_back(doodadTranform.Transform(v3).ToRDCoords());
                                                     }
 
                                                     for (unsigned int d = 0; d < md20->countBoundingTriangles; d += 3)
                                                     {
                                                         const auto t = m2->Tri(d);
-                                                        tris.push_back({ WMO, vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
+                                                        structure.tris.emplace_back(Tri{ vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
+                                                        structure.triTypes.emplace_back(WMO);
                                                     }
                                                 }
                                             }
@@ -546,10 +582,10 @@ public:
             std::fabsf(liq.waterVert.height) > 0.5f ? liq.waterVert.height : mliq->position.z + liq.waterVert.height
         };
 
-        verts.push_back(tranform.Transform(base));
+        verts.emplace_back(tranform.Transform(base).ToRDCoords());
     }
 
-    inline void GetDoodadVertsAndTris(CachedFileReader& reader, std::vector<Vector3>& verts, std::vector<Tri>& tris) const noexcept
+    inline void GetDoodadVertsAndTris(CachedFileReader& reader, Structure& structure) const noexcept
     {
         if (MDDF* mddf = Mddf())
         {
@@ -575,18 +611,20 @@ public:
                     {
                         if (m2->IsCollideable())
                         {
-                            const size_t vertsBase = verts.size();
+                            std::lock_guard lock(structure.mutex);
+                            const size_t vertsBase = structure.verts.size();
 
                             for (unsigned int d = 0; d < md20->countBoundingVertices; ++d)
                             {
                                 const Vector3 v3 = *m2->Vertex(d);
-                                verts.push_back(tranform.Transform(v3));
+                                structure.verts.emplace_back(tranform.Transform(v3).ToRDCoords());
                             }
 
                             for (unsigned int d = 0; d < md20->countBoundingTriangles; d += 3)
                             {
                                 const auto t = m2->Tri(d);
-                                tris.push_back({ WMO, vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
+                                structure.tris.emplace_back(Tri{ vertsBase + *t , vertsBase + *(t + 1), vertsBase + *(t + 2) });
+                                structure.triTypes.emplace_back(DOODAD);
                             }
                         }
                     }

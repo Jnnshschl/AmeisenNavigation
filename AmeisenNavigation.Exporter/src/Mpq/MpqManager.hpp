@@ -13,6 +13,7 @@ class MpqManager
 {
     const char* GameDir;
     std::vector<void*> Mpqs;
+    std::vector<unsigned char*> Allocations;
 
 public:
     explicit MpqManager(const char* gameDir) noexcept
@@ -46,18 +47,23 @@ public:
 
             if (void* mpq; SFileOpenArchive(path.c_str(), 0, MPQ_OPEN_READ_ONLY, &mpq))
             {
-#pragma omp critical
-                {
-                    std::cout << "[MPQManager] (" << i << ") Loaded: 0x" << std::hex << mpq << std::dec << " " << path.filename() << std::endl;
-                }
-
                 Mpqs[i] = mpq;
             }
         }
+
+        std::cout << "[MPQManager] Loaded: " << Mpqs.size() << " MPQ files" << std::endl;
     }
 
     ~MpqManager() noexcept
     {
+        for (void* alloc : Allocations)
+        {
+            if (alloc)
+            {
+                delete[] alloc;
+            }
+        }
+
         for (void* mpq : Mpqs)
         {
             SFileCloseArchive(mpq);
@@ -102,11 +108,14 @@ public:
                 {
                     unsigned char* buffer = new unsigned char[bufferSize];
 
-                    if (SFileReadFile(hFile, buffer, bufferSize, 0, 0))
+                    if (SFileReadFile(hFile, buffer, bufferSize, 0, 0)
+                        && SFileCloseFile(hFile))
                     {
-                        SFileCloseFile(hFile);
+                        Allocations.push_back(buffer);
                         return buffer;
                     }
+
+                    delete[] buffer;
                 }
 
                 SFileCloseFile(hFile);

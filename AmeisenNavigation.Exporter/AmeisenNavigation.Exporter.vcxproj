@@ -73,26 +73,30 @@
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <IncludePath>$(SolutionDir)dep\StormLib\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)dep\StormLib\lib\Win32;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
+    <LibraryPath>$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
+    <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <IncludePath>$(SolutionDir)dep\StormLib\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)dep\StormLib\lib\Win32;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
+    <LibraryPath>$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
+    <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <IncludePath>$(SolutionDir)dep\StormLib\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)dep\StormLib\lib\x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
+    <LibraryPath>$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
     <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <IncludePath>$(SolutionDir)dep\StormLib\include;$(IncludePath)</IncludePath>
-    <LibraryPath>$(SolutionDir)dep\StormLib\lib\x64;$(LibraryPath)</LibraryPath>
+    <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
+    <LibraryPath>$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -104,11 +108,12 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>StormLibDUS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>StormLibDUS.lib;recastnavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -124,13 +129,14 @@
       <OpenMPSupport>true</OpenMPSupport>
       <Optimization>MaxSpeed</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>StormLibRUS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>StormLibRUS.lib;recastnavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -143,11 +149,12 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>StormLibDUS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>StormLibDUS.lib;recastnavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -163,17 +170,19 @@
       <OpenMPSupport>true</OpenMPSupport>
       <Optimization>MaxSpeed</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
+      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>StormLibRUS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>StormLibRUS.lib;recastnavigation.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="src\Main.cpp" />
+    <ClCompile Include="src\xxhash\xxhash.c" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Dbc\Dbc.hpp" />
@@ -183,6 +192,7 @@
     <ClInclude Include="src\Mpq\MpqManager.hpp" />
     <ClInclude Include="src\Utils\Matrix4x4.hpp" />
     <ClInclude Include="src\Utils\Misc.hpp" />
+    <ClInclude Include="src\Utils\Structure.hpp" />
     <ClInclude Include="src\Utils\Tri.hpp" />
     <ClInclude Include="src\Utils\Vector3.hpp" />
     <ClInclude Include="src\Wow\Adt.hpp" />
@@ -192,6 +202,10 @@
     <ClInclude Include="src\Wow\Wdt.hpp" />
     <ClInclude Include="src\Wow\Wmo.hpp" />
     <ClInclude Include="src\Wow\WmoGroup.hpp" />
+    <ClInclude Include="src\xxhash\xxhash.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="src\xxhash\LICENSE" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
