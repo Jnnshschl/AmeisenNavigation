@@ -29,17 +29,15 @@ struct Structure
     inline void Clean() noexcept
     {
         std::vector<bool> isVertexUsed(verts.size(), false);
-        std::unordered_map<Vector3, int, Vector3::Hash> uniqueVerticesMap;
-        std::unordered_set<Tri, Tri::Hash> uniqueTrianglesSet;
 
         for (const auto& tri : tris)
         {
             isVertexUsed[tri.a] = true;
             isVertexUsed[tri.b] = true;
             isVertexUsed[tri.c] = true;
-            uniqueTrianglesSet.insert(tri);
         }
 
+        std::unordered_map<Vector3, int, Vector3::Hash> uniqueVerticesMap;
         std::vector<Vector3> filteredVertices;
         std::vector<int> vertexIndexMap(verts.size(), -1);
 
@@ -47,11 +45,11 @@ struct Structure
         {
             if (isVertexUsed[i])
             {
-                auto insertionResult = uniqueVerticesMap.insert({ verts[i], newIndex });
+                const auto& insertionResult = uniqueVerticesMap.insert({ verts[i], newIndex });
 
                 if (insertionResult.second)
                 {
-                    filteredVertices.push_back(verts[i]);
+                    filteredVertices.emplace_back(verts[i]);
                     vertexIndexMap[i] = newIndex++;
                 }
                 else
@@ -68,8 +66,6 @@ struct Structure
             tri.c = vertexIndexMap[tri.c];
         }
 
-        verts = std::move(filteredVertices);
-
         std::unordered_set<Tri, Tri::Hash> uniqueSet;
         std::vector<TriAreaId> uniqueTriangleAreaIds;
 
@@ -84,13 +80,64 @@ struct Structure
             }
         }
 
-        tris.clear();
+        verts = std::move(filteredVertices);
+        tris = std::vector<Tri>(std::make_move_iterator(uniqueSet.begin()), std::make_move_iterator(uniqueSet.end()));
+        triTypes = std::move(uniqueTriangleAreaIds);
+    }
 
-        for (const auto& tri : uniqueSet)
+    inline void CleanOutOfBounds(float* bmin, float* bmax) noexcept
+    {
+        std::vector<Vector3> filteredVertices;
+        std::vector<int> vertexIndexMapping(verts.size(), -1);
+
+        for (size_t i = 0; i < verts.size(); ++i)
         {
-            tris.emplace_back(tri);
+            const Vector3& vertex = verts[i];
+
+            if (vertex.x >= bmin[0] && vertex.x <= bmax[0]
+                && vertex.y >= bmin[1] && vertex.y <= bmax[1]
+                && vertex.z >= bmin[2] && vertex.z <= bmax[2])
+            {
+                filteredVertices.push_back(vertex);
+                vertexIndexMapping[i] = filteredVertices.size() - 1;
+            }
         }
 
-        triTypes = uniqueTriangleAreaIds;
+        std::vector<Tri> filteredTriangles;
+
+        for (const Tri& triangle : tris)
+        {
+            auto v1 = vertexIndexMapping[triangle.a];
+            auto v2 = vertexIndexMapping[triangle.b];
+            auto v3 = vertexIndexMapping[triangle.c];
+
+            if (v1 != -1 && v2 != -1 && v3 != -1)
+            {
+                filteredTriangles.emplace_back(Tri{ v1, v2, v3 });
+            }
+        }
+
+        verts = std::move(filteredVertices);
+        tris = std::move(filteredTriangles);
+    }
+
+    inline void ExportDebugObjFile(const char* filePath) noexcept
+    {
+        std::fstream objFstream;
+        objFstream << std::fixed << std::showpoint;
+        objFstream << std::setprecision(8);
+        objFstream.open(filePath, std::fstream::out);
+
+        for (const auto& v3 : verts)
+        {
+            objFstream << "v " << v3.x << " " << v3.y << " " << v3.z << "\n";
+        }
+
+        for (const auto& tri : tris)
+        {
+            objFstream << "f " << tri.a + 1 << " " << tri.b + 1 << " " << tri.c + 1 << "\n";
+        }
+
+        objFstream.close();
     }
 };

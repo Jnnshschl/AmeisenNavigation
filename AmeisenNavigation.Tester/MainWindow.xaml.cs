@@ -342,11 +342,11 @@ namespace AmeisenNavigation.Tester
         {
             public char State;
             public int Count = 3;
-            public char GroundArea = (char)1;
+            public char GroundArea = (char)13;
             public float GroundCost;
-            public char WaterArea = (char)4;
+            public char WaterArea = (char)10;
             public float WaterAreaCost;
-            public char BadLiquidArea = (char)8;
+            public char BadLiquidArea = (char)1;
             public float BadLiquidCost;
 
             public FilterConfig() { }

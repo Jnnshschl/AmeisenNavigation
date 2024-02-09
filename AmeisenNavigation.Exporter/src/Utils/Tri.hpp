@@ -69,6 +69,10 @@ struct Tri
         : points{ 0, 0, 0 }
     {}
 
+    Tri(int a, int b, int c) noexcept
+        : points{ a, b, c }
+    {}
+
     Tri(size_t a, size_t b, size_t c) noexcept
         : points{ static_cast<int>(a), static_cast<int>(b), static_cast<int>(c) }
     {}

@@ -38,6 +38,7 @@ public:
         }
 
         std::ranges::sort(mpqFiles, NaturalCompare);
+        std::ranges::reverse(mpqFiles);
         Mpqs.resize(mpqFiles.size());
 
 #pragma omp parallel for schedule(dynamic)
@@ -79,14 +80,10 @@ public:
         {
             if (void* fileFind = SFileFindFirstFile(mpq, name, &findData, nullptr))
             {
-                do
-                {
-                    resultFindData = findData;
-                    mpqHanle = mpq;
-                    result = true;
-                } while (SFileFindNextFile(fileFind, &findData));
-
+                resultFindData = findData;
+                mpqHanle = mpq;
                 SFileFindClose(fileFind);
+                return true;
             }
         }
 

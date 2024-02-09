@@ -5,7 +5,7 @@ void AmeisenNavigation::NewClient(size_t clientId, MmapFormat format) noexcept
     if (IsValidClient(clientId)) { return; }
 
     ANAV_DEBUG_ONLY(std::cout << ">> New Client: " << clientId << std::endl);
-    Clients[clientId] = new AmeisenNavClient(clientId, format, ClientState::NORMAL, FilterProvider, MaxPolyPath);
+    Clients[clientId] = new AmeisenNavClient(clientId, ClientState::NORMAL, FilterProvider, MaxPolyPath);
 }
 
 void AmeisenNavigation::FreeClient(size_t clientId) noexcept
@@ -355,126 +355,19 @@ void AmeisenNavigation::SmoothPathBezier(const Path& input, Path& output, int po
     BezierCurve::SmoothPath(input.points, input.pointCount, output.points, &output.pointCount, output.GetSpace(), points);
 }
 
-bool AmeisenNavigation::LoadMmaps(MmapFormat& mmapFormat, int mapId) noexcept
-{
-    if (mmapFormat == MmapFormat::UNKNOWN)
-    {
-        mmapFormat = TryDetectMmapFormat();
-
-        if (mmapFormat == MmapFormat::UNKNOWN)
-        {
-            return false;
-        }
-    }
-
-    const std::lock_guard<std::mutex> lock(NavMeshMap[mmapFormat][mapId].first);
-
-    if (IsMmapLoaded(mmapFormat, mapId)) { return true; }
-
-    const auto& filenameFormat = MmapFormatPatterns.at(mmapFormat);
-
-    std::filesystem::path mmapFile(MmapFolder);
-    std::string filename = std::vformat(filenameFormat.first, std::make_format_args(mapId));
-    mmapFile.append(filename);
-
-    if (!std::filesystem::exists(mmapFile))
-    {
-        ANAV_ERROR_MSG(std::cout << ">> MMAP file not found for map '" << mapId << "': " << mmapFile << std::endl);
-        return false;
-    }
-
-    std::ifstream mmapStream;
-    mmapStream.open(mmapFile, std::ifstream::binary);
-
-    dtNavMeshParams params{};
-    mmapStream.read(reinterpret_cast<char*>(&params), sizeof(dtNavMeshParams));
-    mmapStream.close();
-
-    NavMeshMap[mmapFormat][mapId].second = dtAllocNavMesh();
-
-    if (!NavMeshMap[mmapFormat][mapId].second)
-    {
-        ANAV_ERROR_MSG(std::cout << ">> Failed to allocate NavMesh for map '" << mapId << "'" << std::endl);
-        return false;
-    }
-
-    dtStatus initStatus = NavMeshMap[mmapFormat][mapId].second->init(&params);
-
-    if (dtStatusFailed(initStatus))
-    {
-        dtFreeNavMesh(NavMeshMap[mmapFormat][mapId].second);
-        ANAV_ERROR_MSG(std::cout << ">> Failed to init NavMesh for map '" << mapId << "': " << initStatus << std::endl);
-        return false;
-    }
-
-#pragma omp parallel for schedule(dynamic)
-    for (int i = 0; i < 64 * 64; ++i)
-    {
-        const auto x = i / 64;
-        const auto y = i % 64;
-
-        std::filesystem::path mmapTileFile(MmapFolder);
-        mmapTileFile.append(std::vformat(filenameFormat.second, std::make_format_args(mapId, x, y)));
-
-        if (!std::filesystem::exists(mmapTileFile))
-        {
-            continue;
-        }
-
-        ANAV_DEBUG_ONLY(std::cout << ">> Reading dtTile for map '" << mapId << "': " << mmapTileFile << std::endl);
-
-        std::ifstream mmapTileStream;
-        mmapTileStream.open(mmapTileFile, std::ifstream::binary);
-
-        MmapTileHeader mmapTileHeader{};
-        mmapTileStream.read(reinterpret_cast<char*>(&mmapTileHeader), sizeof(MmapTileHeader));
-
-        if (mmapTileHeader.mmapMagic != MMAP_MAGIC)
-        {
-            ANAV_ERROR_MSG(std::cout << ">> Wrong MMAP header for map '" << mapId << "': " << mmapTileFile << std::endl);
-            continue;
-        }
-
-        if (mmapTileHeader.mmapVersion < MMAP_VERSION)
-        {
-            ANAV_ERROR_MSG(std::cout << ">> Wrong MMAP version for map '" << mapId << "': " << mmapTileHeader.mmapVersion << " < " << MMAP_VERSION << std::endl);
-        }
-
-        void* mmapTileData = malloc(mmapTileHeader.size);
-        mmapTileStream.read(static_cast<char*>(mmapTileData), mmapTileHeader.size);
-        mmapTileStream.close();
-
-        dtStatus addTileStatus = NavMeshMap[mmapFormat][mapId].second->addTile
-        (
-            static_cast<unsigned char*>(mmapTileData),
-            mmapTileHeader.size,
-            DT_TILE_FREE_DATA,
-            0,
-            nullptr
-        );
-
-        if (dtStatusFailed(addTileStatus))
-        {
-            free(mmapTileData);
-            ANAV_ERROR_MSG(std::cout << ">> Adding Tile to NavMesh for map '" << mapId << "' failed: " << addTileStatus << std::endl);
-        }
-    }
-
-    return true;
-}
-
 bool AmeisenNavigation::TryGetClientAndQuery(size_t clientId, int mapId, AmeisenNavClient*& client, dtNavMeshQuery*& query) noexcept
 {
     if (!IsValidClient(clientId)) { return false; }
 
     client = Clients.at(clientId);
-    auto& format = client->GetMmapFormat();
 
     // we already have a query
     if (query = client->GetNavmeshQuery(mapId)) { return true; }
 
+    const auto navMesh = NavSource->Get(mapId);
+
     // we need to allocate a new query, but first check wheter we need to load a map or not
-    if (!LoadMmaps(format, mapId))
+    if (!navMesh)
     {
         ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed load MMAPs for map '" << mapId << "'" << std::endl);
         return false;
@@ -486,15 +379,6 @@ bool AmeisenNavigation::TryGetClientAndQuery(size_t clientId, int mapId, Ameisen
     if (!query)
     {
         ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed allocate NavMeshQuery for map '" << mapId << "'" << std::endl);
-        return false;
-    }
-
-    const auto& navMesh = NavMeshMap[format][mapId].second;
-
-    if (!navMesh)
-    {
-        dtFreeNavMeshQuery(query);
-        ANAV_ERROR_MSG(std::cout << ">> [" << clientId << "] Failed to init NavMeshQuery for map '" << mapId << "': navMesh is null" << std::endl);
         return false;
     }
 

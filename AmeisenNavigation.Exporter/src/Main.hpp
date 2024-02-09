@@ -1,5 +1,6 @@
 #pragma once
 
+#include <set>
 #include <chrono>
 #include <filesystem>
 #include <format>
@@ -14,11 +15,13 @@
 #include "../../recastnavigation/Detour/Include/DetourNavMeshBuilder.h"
 #include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
-#include "Utils/Vector3.hpp"
-#include "Utils/Tri.hpp"
-#include "Utils/Structure.hpp"
+#include "../../AmeisenNavigation.Pack/src/Anp.hpp"
+
 #include "Dbc/Dbc.hpp"
 #include "Mpq/MpqManager.hpp"
+#include "Utils/Structure.hpp"
+#include "Utils/Tri.hpp"
+#include "Utils/Vector3.hpp"
 #include "Wow/Adt.hpp"
 #include "Wow/LiquidType.hpp"
 #include "Wow/Wdt.hpp"
@@ -39,8 +42,6 @@ static float frand() noexcept
 
 constexpr auto GAME_DIR = "C:\\Spiele\\World of Warcraft 3.3.5a\\Data\\";
 constexpr auto OUTPUT_DIR = "C:\\Temp\\Meshes\\";
-constexpr auto MESH_WORLDUNIT = TILESIZE / 250;
-
-void ExportDebugObjFile(const std::vector<Vector3>& vertexes, const std::vector<Tri>& tris) noexcept;
+constexpr auto MESH_WORLDUNIT = TILESIZE / 500;
 
 static bool GenerateNavmeshTile(rcContext& rcCtx, rcConfig& cfg, int x, int y, Structure& terrain, rcPolyMesh*& pmesh, rcPolyMeshDetail*& dmesh) noexcept;

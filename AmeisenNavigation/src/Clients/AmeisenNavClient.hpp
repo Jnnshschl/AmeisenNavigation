@@ -4,16 +4,13 @@
 #include "../../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
 
 #include "ClientState.hpp"
-#include "QueryFilterProvider.hpp"
-
-#include "../Mmap/MmapFormat.hpp"
+#include "../NavSources/IQueryFilterProvider.hpp"
 
 class AmeisenNavClient
 {
     size_t Id;
-    MmapFormat Format;
     ClientState State;
-    QueryFilterProvider* FilterProvider;
+    IQueryFilterProvider* FilterProvider;
 
     // set per client area costs, to prioritize water movement for example
     dtQueryFilter* CustomFilter;
@@ -33,11 +30,10 @@ public:
     /// <param name="id">Id of the client.</param>
     /// <param name="mmapFormat">MMAP format to use.</param>
     /// <param name="state">Current ClientState.</param>
-    /// <param name="filterProvider">QueryFilterProvider to use.</param>
+    /// <param name="filterProvider">IQueryFilterProvider to use.</param>
     /// <param name="polyPathBufferSize">Size of the polypath buffer for recast and detour.</param>
-    AmeisenNavClient(size_t id, MmapFormat mmapFormat, ClientState state, QueryFilterProvider* filterProvider, int polyPathBufferSize = 512) noexcept
+    AmeisenNavClient(size_t id, ClientState state, IQueryFilterProvider* filterProvider, int polyPathBufferSize = 512) noexcept
         : Id(id),
-        Format(mmapFormat),
         State(state),
         FilterProvider(filterProvider),
         CustomFilter(nullptr),
@@ -62,10 +58,9 @@ public:
     AmeisenNavClient& operator=(const AmeisenNavClient&) = delete;
 
     constexpr inline size_t GetId() const noexcept { return Id; }
-    constexpr inline MmapFormat& GetMmapFormat() noexcept { return Format; }
     constexpr inline ClientState& GetClientState() noexcept { return State; }
 
-    inline dtQueryFilter* QueryFilter() noexcept { return CustomFilter ? CustomFilter : FilterProvider->Get(Format, State); }
+    inline dtQueryFilter* QueryFilter() noexcept { return CustomFilter ? CustomFilter : FilterProvider->Get(State); }
 
     inline dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept { return NavMeshQuery[mapId]; }
     inline void SetNavmeshQuery(int mapId, dtNavMeshQuery* query) noexcept { NavMeshQuery[mapId] = query; }
@@ -82,7 +77,7 @@ public:
 
         if (!FilterCustomizations.empty())
         {
-            const auto baseFilter = FilterProvider->Get(Format, State);
+            const auto baseFilter = FilterProvider->Get(State);
             dtQueryFilter* newFilter = new dtQueryFilter(*baseFilter);
 
             for (const auto& [areaId, cost] : FilterCustomizations)

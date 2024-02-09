@@ -192,14 +192,19 @@
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\AmeisenNavigation.hpp" />
-    <ClInclude Include="src\Clients\335a\NavArea335a.hpp" />
-    <ClInclude Include="src\Clients\548\NavArea548.hpp" />
+    <ClInclude Include="src\NavSources\Anp\AnpQueryFilterProvider.hpp" />
+    <ClInclude Include="src\NavSources\Mmap\335a\NavArea335a.hpp" />
+    <ClInclude Include="src\NavSources\Mmap\548\NavArea548.hpp" />
     <ClInclude Include="src\Clients\AmeisenNavClient.hpp" />
     <ClInclude Include="src\Clients\ClientState.hpp" />
-    <ClInclude Include="src\Clients\QueryFilterProvider.hpp" />
+    <ClInclude Include="src\NavSources\IQueryFilterProvider.hpp" />
+    <ClInclude Include="src\NavSources\Mmap\MmapQueryFilterProvider.hpp" />
     <ClInclude Include="src\Helpers\Polygon.hpp" />
-    <ClInclude Include="src\Mmap\MmapFormat.hpp" />
-    <ClInclude Include="src\Mmap\MmapTileHeader.hpp" />
+    <ClInclude Include="src\NavSources\Anp\AnpNavSource.hpp" />
+    <ClInclude Include="src\NavSources\INavSource.hpp" />
+    <ClInclude Include="src\NavSources\Mmap\MmapFormat.hpp" />
+    <ClInclude Include="src\NavSources\Mmap\MmapNavSource.hpp" />
+    <ClInclude Include="src\NavSources\Mmap\MmapTileHeader.hpp" />
     <ClInclude Include="src\Smoothing\BezierCurve.hpp" />
     <ClInclude Include="src\Smoothing\CatmullRomSpline.hpp" />
     <ClInclude Include="src\Smoothing\ChaikinCurve.hpp" />

@@ -18,6 +18,7 @@ struct AmeisenNavConfig
 private:
     std::map<std::string, void*> Map
     {
+        { "bUseAnpFileFormat", &useAnpFileFormat },
         { "fCatmullRomSplineAlpha", &catmullRomSplineAlpha },
         { "fRandomPathMaxDistance", &randomPathMaxDistance },
         { "iBezierCurvePoints", &bezierCurvePoints },
@@ -28,12 +29,11 @@ private:
         { "iMmapFormat", &mmapFormat },
         { "iPort", &port },
         { "sIp", &ip },
-        { "sMmapsFilenameFormat", &mmapsFilenameFormat },
         { "sMmapsPath", &mmapsPath },
-        { "sMmtileFilenameFormat", &mmtileFilenameFormat },
     };
 
 public:
+    bool useAnpFileFormat = false; // this will become the default when its stable and field tested
     float catmullRomSplineAlpha = 0.5f;
     float randomPathMaxDistance = 1.5f;
     int bezierCurvePoints = 8;
@@ -44,9 +44,7 @@ public:
     int mmapFormat = static_cast<int>(MmapFormat::UNKNOWN);
     int port = 47110;
     std::string ip = "127.0.0.1";
-    std::string mmapsFilenameFormat = "{:03}.mmap";
-    std::string mmapsPath = "C:\\shady stuff\\mmaps\\";
-    std::string mmtileFilenameFormat = "{:03}{:02}{:02}.mmtile";
+    std::string mmapsPath = "C:\\meshes\\";
 
     void Save(const std::filesystem::path& path)
     {

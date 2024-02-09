@@ -2,6 +2,28 @@
 
 int main() noexcept
 {
+    // Anp anp(std::format("{}{}", OUTPUT_DIR, "000.anp").c_str());
+    // 
+    // dtNavMeshQuery query;
+    // query.init(anp.GetNavmesh(), 2048);
+    // float start[3] = { -371.839752f, 71.638428f, -8826.562500f };
+    // float end[3] = { -130.297256f, 80.906364f, -8918.406250f };
+    // 
+    // dtPolyRef startRef = 0;
+    // dtPolyRef endRef = 0;
+    // dtQueryFilter filter;
+    // const float extents[3] = { 6.0f, 6.0f, 6.0f };
+    // dtStatus dtResultA = query.findNearestPoly(start, extents, &filter, &startRef, start);
+    // dtStatus dtResultB = query.findNearestPoly(end, extents, &filter, &endRef, end);
+    // 
+    // dtPolyRef path[60]{ 0 };
+    // int pathCount = 0;
+    // 
+    // query.findPath(startRef, endRef, start, end, &filter, path, &pathCount, sizeof(path) / sizeof(path[0]));
+    // std::cout << "[FindPath] found path with " << pathCount << " polys";
+    // 
+    // return 0;
+
     rcContext rcCtx(false);
     rcConfig cfg{ 0 };
     cfg.maxVertsPerPoly = DT_VERTS_PER_POLYGON;
@@ -44,30 +66,45 @@ int main() noexcept
         }
     }
 
-    for (int mapIndex = 0; mapIndex < maps.size(); ++mapIndex) // maps.size()
+    const std::set<int> unusedMapIds
     {
+        13,  169, 25,  29,
+        42,  451, 573, 582,
+        584, 586, 587, 588,
+        589, 590, 591, 592,
+        593, 594, 596, 597,
+        605, 606, 610, 612,
+        613, 614, 620, 621,
+        622, 623, 641, 642,
+        647, 672, 673, 712,
+        713, 718,
+    };
+
+    dtNavMeshParams params{ 0 };
+    params.tileWidth = TILESIZE;
+    params.tileHeight = TILESIZE;
+    params.maxPolys = 1 << DT_POLY_BITS;
+    params.maxTiles = WDT_MAP_SIZE * WDT_MAP_SIZE;
+    params.orig[0] = -WORLDSIZE;
+    params.orig[1] = std::numeric_limits<float>::min();
+    params.orig[2] = -WORLDSIZE;
+
+    // #pragma omp parallel for schedule(dynamic)
+    for (int mapIndex = 0; mapIndex < 1; ++mapIndex) // maps.size()
+    {
+        // skip building trash maps
+        if (unusedMapIds.contains(mapIndex)) continue;
+
         START_TIMER(startTimeTile);
 
-        const auto& [id, name] = maps[mapIndex];
-        const auto mapsPath = std::format("World\\Maps\\{}\\{}", name, name);
+        const auto& [mapId, mapName] = maps[mapIndex];
+        const auto mapsPath = std::format("World\\Maps\\{}\\{}", mapName, mapName);
         const auto wdtPath = std::format("{}.wdt", mapsPath);
 
         if (Wdt* wdt = mpqReader.GetFileContent<Wdt>(wdtPath.c_str()))
         {
-            dtNavMesh* navmesh = dtAllocNavMesh();
+            Anp anp(mapIndex, params);
 
-            dtNavMeshParams navmeshParams{ 0 };
-            navmeshParams.tileWidth = TILESIZE;
-            navmeshParams.tileHeight = TILESIZE;
-            navmeshParams.maxPolys = 1 << DT_POLY_BITS;
-            navmeshParams.maxTiles = WDT_MAP_SIZE * WDT_MAP_SIZE;
-
-            navmesh->init(&navmeshParams);
-
-            std::vector<Vector3> debugVerts;
-            std::vector<Tri> debugTris;
-
-#pragma omp parallel for schedule(dynamic)
             for (int i = 0; i < WDT_MAP_SIZE * WDT_MAP_SIZE; ++i) // WDT_MAP_SIZE * WDT_MAP_SIZE
             {
                 auto x = i % WDT_MAP_SIZE;
@@ -75,13 +112,13 @@ int main() noexcept
 
                 const auto amtPath = std::format("{}{}_{}_{}.amt", OUTPUT_DIR, mapIndex, y, x);
 
-                if (wdt && wdt->Main() && wdt->Main()->adt[x][y].exists && !std::filesystem::exists(amtPath))
+                if (wdt->Main()->adt[x][y].exists && !std::filesystem::exists(amtPath))
                 {
                     const auto adtPath = std::format("{}_{}_{}.adt", mapsPath, y, x);
                     unsigned char* adtData = nullptr;
                     unsigned int adtSize = 0;
 
-                    std::cout << "[Maps] " << name << ": ADT(" << x << ", " << y << ") " << adtPath << std::endl;
+                    std::cout << "[" << mapName << "]: ADT(" << x << ", " << y << ") " << adtPath << std::endl;
 
                     if (Adt* adt = mpqReader.GetFileContent<Adt>(adtPath.c_str()))
                     {
@@ -90,7 +127,7 @@ int main() noexcept
                         // terrain and liquids
                         START_TIMER(startTimeTerrainAndLiquids);
 
-                        for (int a = 0; a < ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID; ++a)
+                        for (int a = 0; a < ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID; ++a) // ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID
                         {
                             const int cx = a / ADT_CELLS_PER_GRID;
                             const int cy = a % ADT_CELLS_PER_GRID;
@@ -99,36 +136,33 @@ int main() noexcept
                             adt->GetLiquidVertsAndTris(cx, cy, terrain);
                         }
 
-                        STOP_TIMER(startTimeTerrainAndLiquids, "[Maps] >> Extracting Terrain and Liquids took ");
+                        STOP_TIMER(startTimeTerrainAndLiquids, "[" << mapName << "] >> Extracting Terrain and Liquids took ");
 
                         // wmo 
                         START_TIMER(startTimeWmo);
                         adt->GetWmoVertsAndTris(mpqReader, terrain);
-                        STOP_TIMER(startTimeWmo, "[Maps] >> Extracting WMO's took ");
+                        STOP_TIMER(startTimeWmo, "[" << mapName << "] >> Extracting WMO's took ");
 
                         // doodad
                         START_TIMER(startTimeDoodads);
                         adt->GetDoodadVertsAndTris(mpqReader, terrain);
-                        STOP_TIMER(startTimeDoodads, "[Maps] >> Extracting Doodads took ");
+                        STOP_TIMER(startTimeDoodads, "[" << mapName << "] >> Extracting Doodads took ");
 
+                        // clean out unused/duplicate verts and tris
                         START_TIMER(startTimeClean);
                         const auto vertCountBefore = terrain.verts.size();
                         const auto triCountBefore = terrain.tris.size();
                         terrain.Clean();
-                        STOP_TIMER(startTimeClean, "[Maps] >> Removing duplicate " << vertCountBefore - terrain.verts.size() << "verts, " << triCountBefore - terrain.tris.size() << "tris took ");
-
-                        // debug export
-                        // debugVerts.append_range(terrain.verts);
-                        // debugTris.append_range(terrain.tris);
+                        STOP_TIMER(startTimeClean, "[" << mapName << "] >> Removing duplicate " << vertCountBefore - terrain.verts.size() << " verts, " << triCountBefore - terrain.tris.size() << " tris took ");
 
                         // navmeh export
                         rcPolyMesh* pmesh = nullptr;
                         rcPolyMeshDetail* dmesh = nullptr;
 
+                        START_TIMER(startTimeNavmesh);
+
                         if (terrain.tris.size() > 0 && GenerateNavmeshTile(rcCtx, cfg, x, y, terrain, pmesh, dmesh))
                         {
-                            START_TIMER(startTimeNavmesh);
-
                             for (int i = 0; i < pmesh->npolys; ++i)
                             {
                                 if (TriAreaId area = static_cast<TriAreaId>(pmesh->areas[i] & 63))
@@ -209,8 +243,9 @@ int main() noexcept
 
                             rcVcopy(params.bmin, cfg.bmin);
                             rcVcopy(params.bmax, cfg.bmax);
-                            params.tileX = x;
-                            params.tileY = y;
+                            params.tileX = static_cast<int>((((cfg.bmin[0] + cfg.bmax[0]) / 2.0f) - anp.GetNavmeshParams().orig[0]) / TILESIZE);
+                            params.tileY = static_cast<int>((((cfg.bmin[2] + cfg.bmax[2]) / 2.0f) - anp.GetNavmeshParams().orig[2]) / TILESIZE);
+
                             params.cs = cfg.cs;
                             params.ch = cfg.ch;
                             params.tileLayer = 0;
@@ -221,20 +256,12 @@ int main() noexcept
 
                             if (dtCreateNavMeshData(&params, &navData, &navDataSize))
                             {
-                                dtTileRef tileRef = 0;
-                                dtStatus dtResult = navmesh->addTile(navData, navDataSize, DT_TILE_FREE_DATA, 0, &tileRef);
+                                dtTileRef tile;
 
-                                if (tileRef && dtStatusSucceed(dtResult))
+                                if (dtStatusSucceed(anp.AddTile(x, y, navData, navDataSize, &tile)))
                                 {
-                                    STOP_TIMER(startTimeNavmesh, "[Maps] >> Building navmesh took ");
-
-                                    std::ofstream file(amtPath, std::ios::binary);
-
-                                    if (file.is_open()) 
-                                    {
-                                        file.write(reinterpret_cast<const char*>(navData), navDataSize);
-                                        file.close();
-                                    }
+                                    STOP_TIMER(startTimeNavmesh, "[" << mapName << "] >> Building navmesh took ");
+                                    anp.FreeTile(&navData, &navDataSize, &tile);
                                 }
                             }
 
@@ -243,49 +270,24 @@ int main() noexcept
                         }
                         else
                         {
-                            std::cout << "[Maps] >> Building navmesh failed" << std::endl;
+                            std::cout << "[" << mapName << "] >> Building navmesh failed" << std::endl;
+                        }
+
+                        // *.obj file export for debug stuff
+                        if (false)
+                        {
+                            START_TIMER(startTimeExport);
+                            const auto objName = std::format("C:\\Users\\Jannis\\source\\repos\\recastnavigation\\RecastDemo\\Bin\\Meshes\\{:02}_{:02}.obj", x, y);
+                            terrain.ExportDebugObjFile(objName.c_str());
+                            STOP_TIMER(startTimeTile, "[" << mapName << "] OBJ Export took ");
                         }
                     }
                 }
             }
 
-            STOP_TIMER(startTimeTile, "[Maps] >> Building map WDT(" << wdtPath << ") took ");
+            anp.Save(OUTPUT_DIR);
 
-            dtNavMeshQuery query;
-            query.init(navmesh, 2048);
-            float start[3] = { -371.839752f, 71.638428f, -8826.562500f };
-            float end[3] = { -130.297256f, 80.906364f, -8918.406250f };
-
-            dtPolyRef startRefX;
-            dtPolyRef endRefX;
-            dtQueryFilter filter;
-            query.findRandomPoint(&filter, frand, &startRefX, start);
-            query.findRandomPoint(&filter, frand, &endRefX, end);
-
-            const float extents[3] = { 12.0f, 12.0f, 12.0f };
-
-            float nstart[3] = { 0.0f, 0.0f, 0.0f };
-            float nend[3] = { 0.0f, 0.0f, 0.0f };
-
-            dtPolyRef startRef;
-            dtPolyRef endRef;
-            dtStatus dtResultA = query.findNearestPoly(start, extents, &filter, &startRef, nstart);
-            dtStatus dtResultB = query.findNearestPoly(end, extents, &filter, &endRef, nend);
-
-            dtPolyRef path[60]{ 0 };
-            int pathCount = 0;
-
-            query.findPath(startRefX, endRefX, start, end, &filter, path, &pathCount, sizeof(path) / sizeof(path[0]));
-
-            // *.obj file export for debug stuff
-            if (debugTris.size() > 0)
-            {
-                START_TIMER(startTimeExport);
-                ExportDebugObjFile(debugVerts, debugTris);
-                STOP_TIMER(startTimeTile, "[OBJ] Export took ");
-            }
-
-            dtFreeNavMesh(navmesh);
+            STOP_TIMER(startTimeTile, "[" << mapName << "] >> Building map WDT(" << wdtPath << ") took ");
         }
     }
 
@@ -295,12 +297,22 @@ int main() noexcept
 static bool GenerateNavmeshTile(rcContext& rcCtx, rcConfig& cfg, int x, int y, Structure& terrain, rcPolyMesh*& pmesh, rcPolyMeshDetail*& dmesh) noexcept
 {
     rcCalcBounds(reinterpret_cast<float*>(terrain.verts.begin()._Ptr), terrain.verts.size(), cfg.bmin, cfg.bmax);
+    // rcCalcBounds doesnt work as some wmo's reach out of the tiles boundingbox, maybe clean them out?
+
+    cfg.bmax[0] = (32 - y) * TILESIZE;
+    cfg.bmax[2] = (32 - x) * TILESIZE;
+    cfg.bmin[0] = cfg.bmax[0] - TILESIZE;
+    cfg.bmin[2] = cfg.bmax[2] - TILESIZE;
+
+    terrain.CleanOutOfBounds(cfg.bmin, cfg.bmax);
+
     rcCalcGridSize(cfg.bmin, cfg.bmax, cfg.cs, &cfg.width, &cfg.height);
 
-    cfg.bmin[0] -= cfg.borderSize * cfg.cs;
-    cfg.bmin[2] -= cfg.borderSize * cfg.cs;
+    // add border to boundingbox
     cfg.bmax[0] += cfg.borderSize * cfg.cs;
     cfg.bmax[2] += cfg.borderSize * cfg.cs;
+    cfg.bmin[0] -= cfg.borderSize * cfg.cs;
+    cfg.bmin[2] -= cfg.borderSize * cfg.cs;
 
     if (rcHeightfield* heightField = rcAllocHeightfield())
     {
@@ -368,24 +380,4 @@ static bool GenerateNavmeshTile(rcContext& rcCtx, rcConfig& cfg, int x, int y, S
     }
 
     return false;
-}
-
-void ExportDebugObjFile(const std::vector<Vector3>& vertexes, const std::vector<Tri>& tris) noexcept
-{
-    std::fstream objFstream;
-    objFstream << std::fixed << std::showpoint;
-    objFstream << std::setprecision(8);
-    objFstream.open("C:\\Users\\Jannis\\source\\repos\\recastnavigation\\RecastDemo\\Bin\\Meshes\\debug.obj", std::fstream::out);
-
-    for (const auto& v3 : vertexes)
-    {
-        objFstream << "v " << v3.x << " " << v3.y << " " << v3.z << "\n";
-    }
-
-    for (const auto& tri : tris)
-    {
-        objFstream << "f " << tri.a + 1 << " " << tri.b + 1 << " " << tri.c + 1 << "\n";
-    }
-
-    objFstream.close();
 }

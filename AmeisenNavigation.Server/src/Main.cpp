@@ -84,7 +84,7 @@ int __cdecl main(int argc, const char* argv[])
         return 1;
     }
 
-    Nav = new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxSearchNodes);
+    Nav = new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxSearchNodes, Config->useAnpFileFormat);
     Server = new AnTcpServer(Config->ip, Config->port);
 
     Server->SetOnClientConnected(OnClientConnect);
@@ -154,12 +154,12 @@ void OnClientDisconnect(ClientHandler* handler) noexcept
 {
     Nav->FreeClient(handler->GetId());
 
-    delete[] ClientPathBuffers[handler->GetId()].first->points;
-    delete ClientPathBuffers[handler->GetId()].first;
+    if (ClientPathBuffers[handler->GetId()].first->points) delete[] ClientPathBuffers[handler->GetId()].first->points;
+    if (ClientPathBuffers[handler->GetId()].first) delete ClientPathBuffers[handler->GetId()].first;
     ClientPathBuffers[handler->GetId()].first = nullptr;
 
-    delete[] ClientPathBuffers[handler->GetId()].second->points;
-    delete ClientPathBuffers[handler->GetId()].second;
+    if (ClientPathBuffers[handler->GetId()].second->points) delete[] ClientPathBuffers[handler->GetId()].second->points;
+    if (ClientPathBuffers[handler->GetId()].second) delete ClientPathBuffers[handler->GetId()].second;
     ClientPathBuffers[handler->GetId()].second = nullptr;
 
     LogI("Client Disconnected: ", handler->GetIpAddress(), ":", handler->GetPort());

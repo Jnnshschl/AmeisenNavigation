@@ -6,7 +6,9 @@
 #include <unordered_map>
 #include <utility>
 
-#include "../xxhash/xxhash.h"
+#define XXH_STATIC_LINKING_ONLY
+#define XXH_IMPLEMENTATION
+#include "../Utils/xxhash/xxhash.h"
 
 #include "MpqManager.hpp"
 
@@ -45,6 +47,6 @@ public:
             }
         }
 
-        return reinterpret_cast<T*>(&Cache[hash]);
+        return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(&Cache[hash]) : nullptr;
     }
 };
