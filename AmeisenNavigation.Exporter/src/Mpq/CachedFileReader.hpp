@@ -49,4 +49,12 @@ public:
 
         return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(&Cache[hash]) : nullptr;
     }
+
+    inline void Clear() noexcept
+    {
+        for (const auto& [hash, pair] : Cache)
+        {
+            if (pair.first) delete[] pair.first;
+        }
+    }
 };

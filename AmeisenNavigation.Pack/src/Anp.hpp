@@ -8,6 +8,23 @@
 #include "../../../recastnavigation/Detour/Include/DetourNavMesh.h"
 #include "miniz/miniz.h"
 
+static const int NAVMESHSET_MAGIC = 'M' << 24 | 'S' << 16 | 'E' << 8 | 'T'; //'MSET';
+static const int NAVMESHSET_VERSION = 1;
+
+struct NavMeshSetHeader
+{
+    int magic;
+    int version;
+    int numTiles;
+    dtNavMeshParams params;
+};
+
+struct NavMeshTileHeader
+{
+    dtTileRef tileRef;
+    int dataSize;
+};
+
 class Anp
 {
     int MapId;
@@ -78,7 +95,7 @@ public:
     }
 
     constexpr inline dtNavMesh* GetNavmesh() const noexcept { return Navmesh; }
-    constexpr inline const dtNavMeshParams& GetNavmeshParams() const noexcept { return NavmeshParams; }
+    constexpr inline dtNavMeshParams& GetNavmeshParams() noexcept { return NavmeshParams; }
 
     inline dtStatus AddTile(int x, int y, unsigned char* navData, int navDataSize, dtTileRef* tile) noexcept
     {
@@ -106,6 +123,46 @@ public:
         zip_file.write(static_cast<const char*>(zipData), zip_size);
 
         mz_free(zipData);
+    }
+
+    inline void SaveRecastDemoMesh(const char* path) noexcept
+    {
+        if (!Navmesh) return;
+
+        FILE* fp;
+        fopen_s(&fp, path, "wb");
+        if (!fp)
+            return;
+
+        // Store header.
+        NavMeshSetHeader header;
+        header.magic = NAVMESHSET_MAGIC;
+        header.version = NAVMESHSET_VERSION;
+        header.numTiles = 0;
+        for (int i = 0; i < Navmesh->getMaxTiles(); ++i)
+        {
+            const dtMeshTile* tile = Navmesh->getTile(i);
+            if (!tile || !tile->header || !tile->dataSize) continue;
+            header.numTiles++;
+        }
+        memcpy(&header.params, Navmesh->getParams(), sizeof(dtNavMeshParams));
+        fwrite(&header, sizeof(NavMeshSetHeader), 1, fp);
+
+        // Store tiles.
+        for (int i = 0; i < Navmesh->getMaxTiles(); ++i)
+        {
+            const dtMeshTile* tile = Navmesh->getTile(i);
+            if (!tile || !tile->header || !tile->dataSize) continue;
+
+            NavMeshTileHeader tileHeader;
+            tileHeader.tileRef = Navmesh->getTileRef(tile);
+            tileHeader.dataSize = tile->dataSize;
+            fwrite(&tileHeader, sizeof(tileHeader), 1, fp);
+
+            fwrite(tile->data, tile->dataSize, 1, fp);
+        }
+
+        fclose(fp);
     }
 
 private:

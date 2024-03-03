@@ -189,6 +189,7 @@
     <ClInclude Include="src\Mpq\CachedFileReader.hpp" />
     <ClInclude Include="src\Mpq\FileSort.hpp" />
     <ClInclude Include="src\Mpq\MpqManager.hpp" />
+    <ClInclude Include="src\Processors\AdtTileProcessor.hpp" />
     <ClInclude Include="src\Utils\Matrix4x4.hpp" />
     <ClInclude Include="src\Utils\Misc.hpp" />
     <ClInclude Include="src\Utils\Structure.hpp" />

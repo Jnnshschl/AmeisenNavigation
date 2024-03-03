@@ -19,6 +19,7 @@
 
 #include "Dbc/Dbc.hpp"
 #include "Mpq/MpqManager.hpp"
+#include "Processors/AdtTileProcessor.hpp"
 #include "Utils/Structure.hpp"
 #include "Utils/Tri.hpp"
 #include "Utils/Vector3.hpp"
@@ -42,6 +43,3 @@ static float frand() noexcept
 
 constexpr auto GAME_DIR = "C:\\Spiele\\World of Warcraft 3.3.5a\\Data\\";
 constexpr auto OUTPUT_DIR = "C:\\Temp\\Meshes\\";
-constexpr auto MESH_WORLDUNIT = TILESIZE / 500;
-
-static bool GenerateNavmeshTile(rcContext& rcCtx, rcConfig& cfg, int x, int y, Structure& terrain, rcPolyMesh*& pmesh, rcPolyMeshDetail*& dmesh) noexcept;

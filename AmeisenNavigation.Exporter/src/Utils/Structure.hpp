@@ -15,6 +15,8 @@ struct Structure
     std::vector<Vector3> verts;
     std::vector<Tri> tris;
     std::vector<TriAreaId> triTypes;
+    float bbMin[3]{ 0.0f };
+    float bbMax[3]{ 0.0f };
 
     inline auto Verts() noexcept { return reinterpret_cast<float*>(&verts[0]); }
     inline auto Tris() noexcept { return reinterpret_cast<int*>(&tris[0]); }
@@ -22,6 +24,19 @@ struct Structure
 
     inline void AddVert(const Vector3& vert) noexcept { verts.emplace_back(vert); }
     inline void AddTri(const Tri& tri, const TriAreaId& t) noexcept { tris.emplace_back(tri); triTypes.emplace_back(t); }
+
+    inline void Append(const Structure& other) noexcept
+    {
+        int triOffset = verts.size();
+        verts.append_range(other.verts);
+
+        for (size_t i = 0; i < other.tris.size(); ++i)
+        {
+            const auto& t = other.tris[i];
+            tris.push_back(Tri{ t.a + triOffset, t.b + triOffset, t.c + triOffset });
+            triTypes.push_back(other.triTypes[i]);
+        }
+    }
 
     /// <summary>
     /// This method removes, unused and duplicate verts and tris from the structure.

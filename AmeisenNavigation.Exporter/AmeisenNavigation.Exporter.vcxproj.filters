@@ -74,6 +74,9 @@
     <ClInclude Include="src\Utils\Structure.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
+    <ClInclude Include="src\Processors\AdtTileProcessor.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\Utils\xxhash\LICENSE" />

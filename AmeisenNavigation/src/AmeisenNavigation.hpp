@@ -42,10 +42,10 @@
 // macro to print all values of a vector3
 #define PRINT_VEC3(vec) "[" << vec.x << ", " << vec.y << ", " << vec.z << "]"
 
-
 static float GetRandomFloat() noexcept
 {
-    static std::mt19937 rng{ std::random_device{}() };
+    static std::random_device rd;
+    static std::mt19937 rng(rd());
     static std::uniform_real_distribution<float> dis{ 0.0f, 1.0f };
     return dis(rng);
 }
