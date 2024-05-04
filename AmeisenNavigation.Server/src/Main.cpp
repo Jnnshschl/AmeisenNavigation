@@ -152,6 +152,8 @@ void OnClientConnect(ClientHandler* handler) noexcept
 
 void OnClientDisconnect(ClientHandler* handler) noexcept
 {
+    if (ClientPathBuffers.find(handler->GetId()) == ClientPathBuffers.end()) return;
+
     Nav->FreeClient(handler->GetId());
 
     if (ClientPathBuffers[handler->GetId()].first->points) delete[] ClientPathBuffers[handler->GetId()].first->points;
@@ -161,6 +163,8 @@ void OnClientDisconnect(ClientHandler* handler) noexcept
     if (ClientPathBuffers[handler->GetId()].second->points) delete[] ClientPathBuffers[handler->GetId()].second->points;
     if (ClientPathBuffers[handler->GetId()].second) delete ClientPathBuffers[handler->GetId()].second;
     ClientPathBuffers[handler->GetId()].second = nullptr;
+
+    ClientPathBuffers.erase(handler->GetId());
 
     LogI("Client Disconnected: ", handler->GetIpAddress(), ":", handler->GetPort());
 }
