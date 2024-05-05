@@ -1,6 +1,5 @@
 ﻿using AnTCP.Client;
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
@@ -8,7 +7,6 @@ using System.Drawing.Imaging;
 using System.IO;
 using System.Linq;
 using System.Numerics;
-using System.Runtime.InteropServices.JavaScript;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media.Imaging;
@@ -35,6 +33,14 @@ namespace AmeisenNavigation.Tester
 
     public partial class MainWindow : Window
     {
+        private int MapId
+        {
+            get
+            {
+                return ComboBoxMap.SelectedItem is KeyValuePair<int, string> kvp ? kvp.Key : 0;
+            }
+        }
+
         public MainWindow()
         {
             InitializeComponent();
@@ -113,7 +119,7 @@ namespace AmeisenNavigation.Tester
                 }
             }
 
-            Vector3 pos = GetPoint(0);
+            Vector3 pos = GetPoint(MapId);
             TextBoxEndX.Text = pos.X.ToString();
             TextBoxEndY.Text = pos.Y.ToString();
             TextBoxEndZ.Text = pos.Z.ToString();
@@ -136,7 +142,7 @@ namespace AmeisenNavigation.Tester
                 }
             }
 
-            Vector3 pos = GetPoint(0);
+            Vector3 pos = GetPoint(MapId);
             TextBoxStartX.Text = pos.X.ToString();
             TextBoxStartY.Text = pos.Y.ToString();
             TextBoxStartZ.Text = pos.Z.ToString();
@@ -215,21 +221,21 @@ namespace AmeisenNavigation.Tester
                 Vector3 start = new(sX, sY, sZ);
                 Vector3 end = new(eX, eY, eZ);
 
-                Stopwatch sw = Stopwatch.StartNew();
+                long startTime = Stopwatch.GetTimestamp();
                 IEnumerable<Vector3> path = type switch
                 {
-                    PathType.STRAIGHT => GetPath(MessageType.PATH, 0, start, end, flags),
-                    PathType.RANDOM => GetPath(MessageType.RANDOM_PATH, 0, start, end, flags),
+                    PathType.STRAIGHT => GetPath(MessageType.PATH, MapId, start, end, flags),
+                    PathType.RANDOM => GetPath(MessageType.RANDOM_PATH, MapId, start, end, flags),
                     _ => throw new NotImplementedException(),
                 };
-                sw.Stop();
+                TimeSpan elapsedTime = Stopwatch.GetElapsedTime(startTime);
 
                 if (path == null || !path.Any())
                 {
                     return;
                 }
 
-                UpdateViews(path, sw.Elapsed);
+                UpdateViews(path, elapsedTime);
 
                 float minX = float.MaxValue;
                 float maxX = float.MinValue;

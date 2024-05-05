@@ -6,8 +6,14 @@
         xmlns:local="clr-namespace:AmeisenNavigation.Tester"
         mc:Ignorable="d"
         Title="AmeisenNavigation Tester" Height="450" Width="900" MinHeight="450" MinWidth="900" Loaded="Window_Loaded">
+    <Window.Resources>
+        <ObjectDataProvider x:Key="ContentDict"
+                            ObjectType="{x:Type local:ContientSource}"
+                            MethodName="GetChoises"/>
+    </Window.Resources>
     <Grid>
-        <Button x:Name="ButtonRun" Content="GetPath" Margin="385,10,0,0" VerticalAlignment="Top" Click="ButtonRun_Click" Height="41" HorizontalAlignment="Left" Width="120" />
+        <ComboBox x:Name="ComboBoxMap" Margin="385,10,0,0"  ItemsSource="{Binding Source={StaticResource ContentDict}}" SelectedValue="Key" DisplayMemberPath="Value" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Height="18"/>
+        <Button x:Name="ButtonRun" Content="GetPath" Margin="385,33,0,0" VerticalAlignment="Top" Click="ButtonRun_Click" Height="18" HorizontalAlignment="Left" Width="120" />
         <Rectangle x:Name="ImgRect" Margin="10,60,280,10" Fill="Gainsboro" />
         <Image x:Name="ImgCanvas" Margin="10,60,280,10" />
         <ListBox x:Name="PointList" Margin="0,300,10,10" HorizontalAlignment="Right" Width="265" />
