@@ -71,31 +71,31 @@
   </ImportGroup>
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
-    <LibraryPath>$(SolutionDir)AmeisenNavigation.Pack\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
+    <LibraryPath>$(SolutionDir)build\AmeisenNavigation.Pack\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
     <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
-    <LibraryPath>$(SolutionDir)AmeisenNavigation.Pack\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
+    <LibraryPath>$(SolutionDir)build\AmeisenNavigation.Pack\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
     <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
-    <LibraryPath>$(SolutionDir)AmeisenNavigation.Pack\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <LibraryPath>$(SolutionDir)build\AmeisenNavigation.Pack\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <IncludePath>$(SolutionDir)dep\StormLib\include</IncludePath>
-    <LibraryPath>$(SolutionDir)AmeisenNavigation.Pack\build\$(Platform)\$(Configuration)\;$(SolutionDir)recastnavigation\build\$(Platform)\$(Configuration)\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
+    <LibraryPath>$(SolutionDir)build\AmeisenNavigation.Pack\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)dep\StormLib\lib\$(Platform);$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
     <SourcePath>$(SourcePath)</SourcePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
@@ -108,7 +108,7 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -129,7 +129,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <Optimization>MaxSpeed</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -149,7 +149,7 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -170,7 +170,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <Optimization>MaxSpeed</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -190,6 +190,7 @@
     <ClInclude Include="src\Mpq\FileSort.hpp" />
     <ClInclude Include="src\Mpq\MpqManager.hpp" />
     <ClInclude Include="src\Processors\AdtTileProcessor.hpp" />
+    <ClInclude Include="src\Utils\Logger.hpp" />
     <ClInclude Include="src\Utils\Matrix4x4.hpp" />
     <ClInclude Include="src\Utils\Misc.hpp" />
     <ClInclude Include="src\Utils\Structure.hpp" />

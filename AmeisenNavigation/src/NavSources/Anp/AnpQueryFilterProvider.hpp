@@ -6,8 +6,8 @@
 
 #include "../../AmeisenNavigation.Exporter/src/Utils/Tri.hpp"
 
-#include "../IQueryFilterProvider.hpp"
 #include "../../Clients/ClientState.hpp"
+#include "../IQueryFilterProvider.hpp"
 
 /// <summary>
 /// Helper to provide default dtQueryFilter's. Clients may use their own filters to optimize movement,
@@ -18,7 +18,7 @@ class AnpQueryFilterProvider : public IQueryFilterProvider
     std::unordered_map<ClientState, dtQueryFilter*> Filters;
 
 public:
-    AnpQueryFilterProvider(float waterCost = 1.3f, float badLiquidCost = 4.0f) noexcept
+    AnpQueryFilterProvider(float waterCost = 1.6f, float badLiquidCost = 4.0f, float roadCost = 0.75f) noexcept
         : Filters{}
     {
         Filters[ClientState::NORMAL] = new dtQueryFilter();
@@ -26,12 +26,9 @@ public:
         Filters[ClientState::NORMAL_HORDE] = new dtQueryFilter();
         Filters[ClientState::DEAD] = new dtQueryFilter();
 
-        char includeFlags = static_cast<char>(TriFlag::NAV_LAVA_SLIME)
-            | static_cast<char>(TriFlag::NAV_WATER)
-            | static_cast<char>(TriFlag::NAV_GROUND)
-            | static_cast<char>(TriFlag::NAV_ROAD)
-            | static_cast<char>(TriFlag::NAV_ALLIANCE)
-            | static_cast<char>(TriFlag::NAV_HORDE);
+        char includeFlags = static_cast<char>(TriFlag::NAV_LAVA_SLIME) | static_cast<char>(TriFlag::NAV_WATER) |
+                            static_cast<char>(TriFlag::NAV_GROUND) | static_cast<char>(TriFlag::NAV_ROAD) |
+                            static_cast<char>(TriFlag::NAV_ALLIANCE) | static_cast<char>(TriFlag::NAV_HORDE);
 
         char excludeFlags = static_cast<char>(TriFlag::NAV_EMPTY);
 
@@ -41,6 +38,7 @@ public:
         Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_OCEAN), waterCost);
         Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_LAVA), badLiquidCost);
         Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_SLIME), badLiquidCost);
+        Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(TriAreaId::TERRAIN_ROAD), roadCost);
 
         Filters[ClientState::NORMAL_ALLIANCE]->setIncludeFlags(includeFlags);
         Filters[ClientState::NORMAL_ALLIANCE]->setExcludeFlags(excludeFlags);
@@ -48,6 +46,7 @@ public:
         Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_OCEAN), waterCost);
         Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_LAVA), badLiquidCost);
         Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_SLIME), badLiquidCost);
+        Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(TriAreaId::TERRAIN_ROAD), roadCost);
 
         Filters[ClientState::NORMAL_HORDE]->setIncludeFlags(includeFlags);
         Filters[ClientState::NORMAL_HORDE]->setExcludeFlags(excludeFlags);
@@ -55,6 +54,7 @@ public:
         Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_OCEAN), waterCost);
         Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_LAVA), badLiquidCost);
         Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(TriAreaId::LIQUID_SLIME), badLiquidCost);
+        Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(TriAreaId::TERRAIN_ROAD), roadCost);
 
         Filters[ClientState::DEAD]->setIncludeFlags(includeFlags);
         Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
@@ -68,8 +68,5 @@ public:
         }
     }
 
-    virtual dtQueryFilter* Get(ClientState state) const noexcept override
-    {
-        return Filters.at(state);
-    }
+    virtual dtQueryFilter* Get(ClientState state) const noexcept override { return Filters.at(state); }
 };

@@ -16,26 +16,25 @@ constexpr auto CONFIG_CHAR_DELIMITER = '=';
 struct AmeisenNavConfig
 {
 private:
-    std::map<std::string, void*> Map
-    {
-        { "bUseAnpFileFormat", &useAnpFileFormat },
-        { "fCatmullRomSplineAlpha", &catmullRomSplineAlpha },
-        { "fRandomPathMaxDistance", &randomPathMaxDistance },
-        { "iBezierCurvePoints", &bezierCurvePoints },
-        { "iCatmullRomSplinePoints", &catmullRomSplinePoints },
-        { "iMaxPointPath", &maxPointPath },
-        { "iMaxPolyPath", &maxPolyPath },
-        { "iMaxSearchNodes", &maxSearchNodes },
-        { "iMmapFormat", &mmapFormat },
-        { "iPort", &port },
-        { "sIp", &ip },
-        { "sMmapsPath", &mmapsPath },
+    std::map<std::string, void*> Map{
+        {"bUseAnpFileFormat", &useAnpFileFormat},
+        {"fCatmullRomSplineAlpha", &catmullRomSplineAlpha},
+        {"fRandomPathMaxDistance", &randomPathMaxDistance},
+        {"iBezierCurvePoints", &bezierCurvePoints},
+        {"iCatmullRomSplinePoints", &catmullRomSplinePoints},
+        {"iMaxPointPath", &maxPointPath},
+        {"iMaxPolyPath", &maxPolyPath},
+        {"iMaxSearchNodes", &maxSearchNodes},
+        {"iMmapFormat", &mmapFormat},
+        {"iPort", &port},
+        {"sIp", &ip},
+        {"sMmapsPath", &mmapsPath},
     };
 
 public:
     bool useAnpFileFormat = false; // this will become the default when its stable and field tested
     float catmullRomSplineAlpha = 0.5f;
-    float randomPathMaxDistance = 1.5f;
+    float randomPathMaxDistance = 1.0f;
     int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;
     int maxPointPath = 512;
@@ -54,12 +53,26 @@ public:
         {
             switch (x.first[0])
             {
-            case CONFIG_CHAR_BOOL: outputFile << x.first << CONFIG_CHAR_DELIMITER << static_cast<unsigned int>(*static_cast<bool*>(x.second)) << std::endl; break;
-            case CONFIG_CHAR_CHAR: outputFile << x.first << CONFIG_CHAR_DELIMITER << static_cast<unsigned int>(*static_cast<char*>(x.second)) << std::endl; break;
-            case CONFIG_CHAR_FLOAT: outputFile << x.first << CONFIG_CHAR_DELIMITER << std::to_string(*static_cast<float*>(x.second)) << std::endl; break;
-            case CONFIG_CHAR_INT: outputFile << x.first << CONFIG_CHAR_DELIMITER << *static_cast<int*>(x.second) << std::endl; break;
-            case CONFIG_CHAR_STRING: outputFile << x.first << CONFIG_CHAR_DELIMITER << *static_cast<std::string*>(x.second) << std::endl; break;
-            default: break;
+                case CONFIG_CHAR_BOOL:
+                    outputFile << x.first << CONFIG_CHAR_DELIMITER
+                               << static_cast<unsigned int>(*static_cast<bool*>(x.second)) << std::endl;
+                    break;
+                case CONFIG_CHAR_CHAR:
+                    outputFile << x.first << CONFIG_CHAR_DELIMITER
+                               << static_cast<unsigned int>(*static_cast<char*>(x.second)) << std::endl;
+                    break;
+                case CONFIG_CHAR_FLOAT:
+                    outputFile << x.first << CONFIG_CHAR_DELIMITER << std::to_string(*static_cast<float*>(x.second))
+                               << std::endl;
+                    break;
+                case CONFIG_CHAR_INT:
+                    outputFile << x.first << CONFIG_CHAR_DELIMITER << *static_cast<int*>(x.second) << std::endl;
+                    break;
+                case CONFIG_CHAR_STRING:
+                    outputFile << x.first << CONFIG_CHAR_DELIMITER << *static_cast<std::string*>(x.second) << std::endl;
+                    break;
+                default:
+                    break;
             }
         }
 
@@ -85,12 +98,23 @@ public:
             {
                 switch (result[0][0])
                 {
-                case CONFIG_CHAR_BOOL: *static_cast<bool*>(Map.at(result[0])) = std::stoi(result[1]) > 0; break;
-                case CONFIG_CHAR_CHAR: *static_cast<char*>(Map.at(result[0])) = static_cast<char>(std::stoi(result[1])); break;
-                case CONFIG_CHAR_FLOAT: *static_cast<float*>(Map.at(result[0])) = std::stof(result[1]); break;
-                case CONFIG_CHAR_INT: *static_cast<int*>(Map.at(result[0])) = std::stoi(result[1]); break;
-                case CONFIG_CHAR_STRING: *static_cast<std::string*>(Map.at(result[0])) = result[1]; break;
-                default: break;
+                    case CONFIG_CHAR_BOOL:
+                        *static_cast<bool*>(Map.at(result[0])) = std::stoi(result[1]) > 0;
+                        break;
+                    case CONFIG_CHAR_CHAR:
+                        *static_cast<char*>(Map.at(result[0])) = static_cast<char>(std::stoi(result[1]));
+                        break;
+                    case CONFIG_CHAR_FLOAT:
+                        *static_cast<float*>(Map.at(result[0])) = std::stof(result[1]);
+                        break;
+                    case CONFIG_CHAR_INT:
+                        *static_cast<int*>(Map.at(result[0])) = std::stoi(result[1]);
+                        break;
+                    case CONFIG_CHAR_STRING:
+                        *static_cast<std::string*>(Map.at(result[0])) = result[1];
+                        break;
+                    default:
+                        break;
                 }
             }
         }

@@ -1,9 +1,10 @@
 #pragma once
 
 #include <filesystem>
-#include <fstream>
 #include <format>
+#include <fstream>
 #include <mutex>
+
 
 #include "../../../recastnavigation/Detour/Include/DetourNavMesh.h"
 #include "miniz/miniz.h"
@@ -40,11 +41,7 @@ public:
     /// <param name="mapId">MapId of the pack.</param>
     /// <param name="params">dtNavMeshParams used for this pack.</param>
     Anp(int mapId, const dtNavMeshParams& params) noexcept
-        : MapId(mapId),
-        Navmesh(dtAllocNavMesh()),
-        NavmeshParams(params),
-        Zip{ 0 },
-        Mutex()
+        : MapId(mapId), Navmesh(dtAllocNavMesh()), NavmeshParams(params), Zip{0}, Mutex()
     {
         Navmesh->init(&params);
         mz_zip_writer_init_heap(&Zip, 0, 0);
@@ -57,15 +54,13 @@ public:
     /// </summary>
     /// <param name="anpFilePath">Path to the *.anp file.</param>
     explicit Anp(const char* anpFilePath) noexcept
-        : MapId(-1), 
-        Navmesh{ dtAllocNavMesh() },
-        NavmeshParams{ 0 },
-        Zip{ 0 },
-        Mutex()
+        : MapId(-1), Navmesh{dtAllocNavMesh()}, NavmeshParams{0}, Zip{0}, Mutex()
     {
         if (mz_zip_reader_init_file(&Zip, anpFilePath, 0) &&
-            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "mapId", 0, 0), &MapId, sizeof(int), 0) &&
-            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "params", 0, 0), &NavmeshParams, sizeof(dtNavMeshParams), 0))
+            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "mapId", 0, 0), &MapId, sizeof(int),
+                                         0) &&
+            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "params", 0, 0), &NavmeshParams,
+                                         sizeof(dtNavMeshParams), 0))
         {
             Navmesh->init(&NavmeshParams);
 
@@ -90,17 +85,20 @@ public:
 
     ~Anp() noexcept
     {
-        if (Navmesh) dtFreeNavMesh(Navmesh);
+        if (Navmesh)
+            dtFreeNavMesh(Navmesh);
         mz_zip_writer_end(&Zip);
     }
 
     constexpr inline dtNavMesh* GetNavmesh() const noexcept { return Navmesh; }
     constexpr inline dtNavMeshParams& GetNavmeshParams() noexcept { return NavmeshParams; }
+    constexpr inline int GetMapId() const noexcept { return MapId; }
 
     inline dtStatus AddTile(int x, int y, unsigned char* navData, int navDataSize, dtTileRef* tile) noexcept
     {
         const std::lock_guard lock(Mutex);
-        mz_zip_writer_add_mem(&Zip, std::format("{:02}_{:02}", x, y).c_str(), navData, navDataSize, MZ_BEST_COMPRESSION);
+        mz_zip_writer_add_mem(&Zip, std::format("{:02}_{:02}", x, y).c_str(), navData, navDataSize,
+                              MZ_BEST_COMPRESSION);
         return Navmesh->addTile(navData, navDataSize, DT_TILE_FREE_DATA, 0, tile);
     }
 
@@ -127,7 +125,8 @@ public:
 
     inline void SaveRecastDemoMesh(const char* path) noexcept
     {
-        if (!Navmesh) return;
+        if (!Navmesh)
+            return;
 
         FILE* fp;
         fopen_s(&fp, path, "wb");
@@ -142,7 +141,8 @@ public:
         for (int i = 0; i < Navmesh->getMaxTiles(); ++i)
         {
             const dtMeshTile* tile = Navmesh->getTile(i);
-            if (!tile || !tile->header || !tile->dataSize) continue;
+            if (!tile || !tile->header || !tile->dataSize)
+                continue;
             header.numTiles++;
         }
         memcpy(&header.params, Navmesh->getParams(), sizeof(dtNavMeshParams));
@@ -152,7 +152,8 @@ public:
         for (int i = 0; i < Navmesh->getMaxTiles(); ++i)
         {
             const dtMeshTile* tile = Navmesh->getTile(i);
-            if (!tile || !tile->header || !tile->dataSize) continue;
+            if (!tile || !tile->header || !tile->dataSize)
+                continue;
 
             NavMeshTileHeader tileHeader;
             tileHeader.tileRef = Navmesh->getTileRef(tile);
@@ -166,5 +167,4 @@ public:
     }
 
 private:
-
 };

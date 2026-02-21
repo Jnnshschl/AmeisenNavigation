@@ -7,9 +7,7 @@
         mc:Ignorable="d"
         Title="AmeisenNavigation Tester" Height="450" Width="900" MinHeight="450" MinWidth="900" Loaded="Window_Loaded">
     <Window.Resources>
-        <ObjectDataProvider x:Key="ContentDict"
-                            ObjectType="{x:Type local:ContientSource}"
-                            MethodName="GetChoises"/>
+        <ObjectDataProvider x:Key="ContentDict" MethodName="GetChoises"/>
     </Window.Resources>
     <Grid>
         <ComboBox x:Name="ComboBoxMap" Margin="385,10,0,0"  ItemsSource="{Binding Source={StaticResource ContentDict}}" SelectedValue="Key" DisplayMemberPath="Value" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Height="18"/>

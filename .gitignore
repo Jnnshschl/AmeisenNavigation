@@ -11,6 +11,9 @@
 *.userprefs
 
 # Build results
+.int/
+*_wpftmp
+build/
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/

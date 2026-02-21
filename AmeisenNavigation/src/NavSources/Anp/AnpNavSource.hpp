@@ -11,23 +11,24 @@ class AnpNavSource : public INavSource
 {
     const std::filesystem::path MmapFolder;
     std::unordered_map<size_t, std::pair<std::mutex, Anp*>> NavMeshMap;
+    std::mutex MapMutex;
 
 public:
-    AnpNavSource(const char* mmapFolder)
-        : MmapFolder(mmapFolder),
-        NavMeshMap{}
-    {}
+    AnpNavSource(const char* mmapFolder) : MmapFolder(mmapFolder), NavMeshMap{} {}
 
     ~AnpNavSource() noexcept
     {
         for (const auto& [mapId, p] : NavMeshMap)
         {
-            if (p.second) delete p.second;
+            if (p.second)
+                delete p.second;
         }
     }
 
     virtual dtNavMesh* Get(size_t mapId) noexcept override
     {
+        std::lock_guard<std::mutex> lock(MapMutex);
+
         if (!NavMeshMap.contains(mapId))
         {
             std::filesystem::path anpPath = MmapFolder;

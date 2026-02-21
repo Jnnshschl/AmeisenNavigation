@@ -1,7 +1,7 @@
 /*****************************************************************************/
-/* StormLib.h                        Copyright (c) Ladislav Zezula 1999-2017 */
+/* StormLib.h                        Copyright (c) Ladislav Zezula 1999-2025 */
 /*---------------------------------------------------------------------------*/
-/* StormLib library v 9.22                                                   */
+/* StormLib library v 9.31                                                   */
 /*                                                                           */
 /* Author : Ladislav Zezula                                                  */
 /* E-mail : ladik@zezula.net                                                 */
@@ -74,6 +74,7 @@
 /* 12.12.16  9.21  Lad  Release 9.21                                         */
 /* 10.11.17  9.22  Lad  Release 9.22                                         */
 /* 28.09.22  9.24  Lad  lcLocale -> lcFileLocale, also contains platform     */
+/* 01.11.24  9.30  Lad  Added conversion from UTF-8 to file name and back    */
 /*****************************************************************************/
 
 #ifndef __STORMLIB_H__
@@ -101,22 +102,22 @@ extern "C" {
 //  Z - S for static-linked CRT library, D for multithreaded DLL CRT library
 //
 
-#if defined(__STORMLIB_SELF__) && !defined(STORMLIB_NO_AUTO_LINK)
-#define STORMLIB_NO_AUTO_LINK // Define this if you don't want to link using pragmas when using msvc
+#if defined(__STORMLIB_SELF__) && !defined(__STORMLIB_NO_STATIC_LINK__)
+#define __STORMLIB_NO_STATIC_LINK__ // Define this if you don't want to link using pragmas when using msvc
 #endif
 
-#if defined(_MSC_VER) && !defined(STORMLIB_NO_AUTO_LINK)
+#if defined(_MSC_VER) && !defined(__STORMLIB_NO_STATIC_LINK__)
   #ifndef WDK_BUILD
     #ifdef _DEBUG                                 // DEBUG VERSIONS
       #ifndef _UNICODE
         #ifdef _DLL
-          #pragma comment(lib, "StormLibDAD.lib") // Debug Ansi CRT-DLL version
+          #pragma comment(lib, "StormLibDAS.lib") // Debug Ansi CRT-DLL version
         #else
           #pragma comment(lib, "StormLibDAS.lib") // Debug Ansi CRT-LIB version
         #endif
       #else
         #ifdef _DLL
-          #pragma comment(lib, "StormLibDUD.lib") // Debug Unicode CRT-DLL version
+          #pragma comment(lib, "StormLibDUS.lib") // Debug Unicode CRT-DLL version
         #else
           #pragma comment(lib, "StormLibDUS.lib") // Debug Unicode CRT-LIB version
         #endif
@@ -124,13 +125,13 @@ extern "C" {
     #else                                         // RELEASE VERSIONS
       #ifndef _UNICODE
         #ifdef _DLL
-          #pragma comment(lib, "StormLibRAD.lib") // Release Ansi CRT-DLL version
+          #pragma comment(lib, "StormLibRAS.lib") // Release Ansi CRT-DLL version
         #else
           #pragma comment(lib, "StormLibRAS.lib") // Release Ansi CRT-LIB version
         #endif
       #else
         #ifdef _DLL
-          #pragma comment(lib, "StormLibRUD.lib") // Release Unicode CRT-DLL version
+          #pragma comment(lib, "StormLibRUS.lib") // Release Unicode CRT-DLL version
         #else
           #pragma comment(lib, "StormLibRUS.lib") // Release Unicode CRT-LIB version
         #endif
@@ -143,8 +144,8 @@ extern "C" {
 //-----------------------------------------------------------------------------
 // Defines
 
-#define STORMLIB_VERSION                0x0919  // Current version of StormLib
-#define STORMLIB_VERSION_STRING         "9.25"  // Current version of StormLib as string
+#define STORMLIB_VERSION                0x091F  // Current version of StormLib
+#define STORMLIB_VERSION_STRING         "9.31"  // Current version of StormLib as string
 
 #define ID_MPQ                      0x1A51504D  // MPQ archive header ID ('MPQ\x1A')
 #define ID_MPQ_USERDATA             0x1B51504D  // MPQ userdata entry ('MPQ\x1B')
@@ -162,6 +163,7 @@ extern "C" {
 #define ERROR_UNKNOWN_FILE_NAMES         10007  // A name of at least one file is unknown
 #define ERROR_CANT_FIND_PATCH_PREFIX     10008  // StormLib was unable to find patch prefix for the patches
 #define ERROR_FAKE_MPQ_HEADER            10009  // The header at this position is fake header
+#define ERROR_FILE_DELETED               10010  // The file is present but contains delete marker
 
 // Values for SFileCreateArchive
 #define HASH_TABLE_SIZE_MIN         0x00000004  // Verified: If there is 1 file, hash table size is 4
@@ -215,11 +217,11 @@ extern "C" {
 #define SFILE_INVALID_POS           0xFFFFFFFF
 #define SFILE_INVALID_ATTRIBUTES    0xFFFFFFFF
 
-// Flags for SFileAddFile
+// Flags for TMPQBlock::dwFlags
 #define MPQ_FILE_IMPLODE            0x00000100  // Implode method (By PKWARE Data Compression Library)
 #define MPQ_FILE_COMPRESS           0x00000200  // Compress methods (By multiple methods)
-#define MPQ_FILE_ENCRYPTED          0x00010000  // Indicates whether file is encrypted
-#define MPQ_FILE_FIX_KEY            0x00020000  // File decryption key has to be fixed
+#define MPQ_FILE_ENCRYPTED          0x00010000  // Indicates an encrypted file
+#define MPQ_FILE_KEY_V2             0x00020000  // Indicates an encrypted file with key v2
 #define MPQ_FILE_PATCH_FILE         0x00100000  // The file is a patch file. Raw file data begin with TPatchInfo structure
 #define MPQ_FILE_SINGLE_UNIT        0x01000000  // File is stored as a single unit, rather than split into sectors (Thx, Quantam)
 #define MPQ_FILE_DELETE_MARKER      0x02000000  // File is a deletion marker. Used in MPQ patches, indicating that the file no longer exists.
@@ -233,10 +235,12 @@ extern "C" {
 
 #define MPQ_FILE_DEFAULT_INTERNAL   0xFFFFFFFF  // Use default flags for internal files
 
+#define MPQ_FILE_FIX_KEY            0x00020000  // Obsolete, do not use
+
 #define MPQ_FILE_VALID_FLAGS     (MPQ_FILE_IMPLODE       |  \
                                   MPQ_FILE_COMPRESS      |  \
                                   MPQ_FILE_ENCRYPTED     |  \
-                                  MPQ_FILE_FIX_KEY       |  \
+                                  MPQ_FILE_KEY_V2        |  \
                                   MPQ_FILE_PATCH_FILE    |  \
                                   MPQ_FILE_SINGLE_UNIT   |  \
                                   MPQ_FILE_DELETE_MARKER |  \
@@ -247,7 +251,7 @@ extern "C" {
 #define MPQ_FILE_VALID_FLAGS_W3X (MPQ_FILE_IMPLODE       |  \
                                   MPQ_FILE_COMPRESS      |  \
                                   MPQ_FILE_ENCRYPTED     |  \
-                                  MPQ_FILE_FIX_KEY       |  \
+                                  MPQ_FILE_KEY_V2        |  \
                                   MPQ_FILE_DELETE_MARKER |  \
                                   MPQ_FILE_SECTOR_CRC    |  \
                                   MPQ_FILE_SIGNATURE     |  \
@@ -256,8 +260,11 @@ extern "C" {
 #define MPQ_FILE_VALID_FLAGS_SCX (MPQ_FILE_IMPLODE       |  \
                                   MPQ_FILE_COMPRESS      |  \
                                   MPQ_FILE_ENCRYPTED     |  \
-                                  MPQ_FILE_FIX_KEY       |  \
+                                  MPQ_FILE_KEY_V2        |  \
                                   MPQ_FILE_EXISTS)
+
+// Flags for TPatchInfo::dwFlags
+#define MPQ_PATCH_INFO_VALID        0x80000000  // Set if the patch info is valid
 
 // We need to mask out the upper 4 bits of the block table index.
 // This is because it gets shifted out when calculating block table offset
@@ -271,7 +278,7 @@ extern "C" {
 #define MPQ_COMPRESSION_ZLIB              0x02  // ZLIB compression
 #define MPQ_COMPRESSION_PKWARE            0x08  // PKWARE DCL compression
 #define MPQ_COMPRESSION_BZIP2             0x10  // BZIP2 compression (added in Warcraft III)
-#define MPQ_COMPRESSION_SPARSE            0x20  // Sparse compression (added in Starcraft 2)
+#define MPQ_COMPRESSION_SPARSE            0x20  // Run-length (sparse) compression (added in Starcraft 2)
 #define MPQ_COMPRESSION_ADPCM_MONO        0x40  // IMA ADPCM compression (mono)
 #define MPQ_COMPRESSION_ADPCM_STEREO      0x80  // IMA ADPCM compression (stereo)
 #define MPQ_COMPRESSION_LZMA              0x12  // LZMA compression. Added in Starcraft 2. This value is NOT a combination of flags.
@@ -285,6 +292,7 @@ extern "C" {
 // Signatures for HET and BET table
 #define HET_TABLE_SIGNATURE         0x1A544548  // 'HET\x1a'
 #define BET_TABLE_SIGNATURE         0x1A544542  // 'BET\x1a'
+#define BET_TABLE_MAX_SIZE          0x00100000  // Maximum acceptable size of HET&BET tables
 
 // Decryption keys for MPQ tables
 #define MPQ_KEY_HASH_TABLE          0xC3AF3770  // Obtained by HashString("(hash table)", MPQ_HASH_FILE_KEY)
@@ -472,6 +480,8 @@ typedef enum _SFileInfoClass
     SFileInfoEncryptionKey,                 // File encryption key
     SFileInfoEncryptionKeyRaw,              // Unfixed value of the file key
     SFileInfoCRC32,                         // CRC32 of the file
+
+    SFileInfoInvalid = 0xFFF,               // Invalid file info class
 } SFileInfoClass;
 
 //-----------------------------------------------------------------------------
@@ -622,10 +632,10 @@ typedef struct _TMPQHeader
 typedef struct _TMPQHash
 {
     // The hash of the file path, using method A.
-    DWORD dwName1;
+    DWORD dwHashCheck1;
 
     // The hash of the file path, using method B.
-    DWORD dwName2;
+    DWORD dwHashCheck2;
 
 #ifdef STORMLIB_LITTLE_ENDIAN
 
@@ -636,11 +646,11 @@ typedef struct _TMPQHash
     // The platform the file is used for. 0 indicates the default platform.
     // No other values have been observed.
     BYTE   Platform;
-    BYTE   Reserved;
+    BYTE   Flags;
 
 #else
 
-    BYTE   Reserved;
+    BYTE   Flags;
     BYTE   Platform;
     USHORT Locale;
 
@@ -676,7 +686,7 @@ typedef struct _TMPQBlock
 typedef struct _TPatchInfo
 {
     DWORD dwLength;                             // Length of patch info header, in bytes
-    DWORD dwFlags;                              // Flags. 0x80000000 = MD5 (?)
+    DWORD dwFlags;                              // Flags. 0x80000000 = valid (?)
     DWORD dwDataSize;                           // Uncompressed size of the patch file
     BYTE  md5[0x10];                            // MD5 of the entire patch file after decompression
 
@@ -823,6 +833,7 @@ typedef struct _TMPQArchive
     ULONGLONG      UserDataPos;                 // Position of user data (relative to the begin of the file)
     ULONGLONG      MpqPos;                      // MPQ header offset (relative to the begin of the file)
     ULONGLONG      FileSize;                    // Size of the file at the moment of file open
+    ULONGLONG      FileOffsetMask;              // 0xFFFFFFFF for MPQ v 1, otherwise 0xFFFFFFFFFFFFFFFFull
 
     struct _TMPQArchive * haPatch;              // Pointer to patch archive, if any
     struct _TMPQArchive * haBase;               // Pointer to base ("previous version") archive, if any
@@ -1124,14 +1135,34 @@ int    WINAPI SCompDecompress (void * pvOutBuffer, int * pcbOutBuffer, void * pv
 int    WINAPI SCompDecompress2(void * pvOutBuffer, int * pcbOutBuffer, void * pvInBuffer, int cbInBuffer);
 
 //-----------------------------------------------------------------------------
-// Non-Windows support for SetLastError/GetLastError
+// Conversion of UTF-8 (MPQ listfiles) into file name safe strings
 
-#ifndef STORMLIB_WINDOWS
+#define SFILE_UTF8_ALLOW_INVALID_CHARS  0x01        // If set, then the function will treat invalid chars like like MultiByteToWideChar
+#define SFILE_UTF8_INVALID_CHARACTER    0xFFFD      // Marker of an invalid character
+#define SFILE_UNICODE_MAX               0x10FFFF    // The highest valid UNICODE char
 
-void  SetLastError(DWORD dwErrCode);
-DWORD GetLastError();
+// Conversion of MPQ file name to file-name-safe string
+DWORD  WINAPI SMemUTF8ToFileName(
+    TCHAR * szBuffer,               // Pointer to the output buffer. If NULL, the function will calulate the needed length
+    size_t ccBuffer,                // Length of the output buffer (must include EOS)
+    const void * lpString,          // Pointer to the begin of the string
+    const void * lpStringEnd,       // Pointer to the end of string. If NULL, it's assumed to be zero-terminated
+    DWORD dwFlags,                  // Additional flags
+    size_t * pOutLength);           // Pointer to a variable that receives the needed length (optional)
 
-#endif
+DWORD  WINAPI SMemFileNameToUTF8(
+    void * lpBuffer,                // Pointer to the output buffer. If NULL, the function will calulate the needed length
+    size_t ccBuffer,                // Length of the output buffer (must include EOS)
+    const TCHAR * szString,         // Pointer to the begin of the string
+    const TCHAR * szStringEnd,      // Pointer to the end of string. If NULL, it's assumed to be zero-terminated
+    DWORD dwFlags,                  // Reserved
+    size_t * pOutLength);           // Pointer to a variable that receives the needed length in bytes (optional)
+
+//-----------------------------------------------------------------------------
+// Stormlib-specific support for SetLastError/GetLastError
+
+void  SErrSetLastError(DWORD dwErrCode);
+DWORD SErrGetLastError();
 
 //-----------------------------------------------------------------------------
 // Functions from Storm.dll. They use slightly different names for keeping

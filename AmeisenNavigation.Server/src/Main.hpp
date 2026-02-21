@@ -5,7 +5,7 @@
 #include "AmeisenNavigation.hpp"
 
 #include "Config/Config.hpp"
-#include "Logging/AmeisenLogger.hpp"
+#include <Utils/Logger.hpp>
 
 #include <filesystem>
 #include <iostream>
@@ -15,30 +15,30 @@ constexpr auto AMEISENNAV_VERSION = "1.8.4.0";
 
 enum class MessageType
 {
-    PATH,                   // Generate a simple straight path
-    MOVE_ALONG_SURFACE,     // Move an entity by small deltas using pathfinding (usefull to prevent falling off edges...)
-    RANDOM_POINT,           // Get a random point on the mesh
-    RANDOM_POINT_AROUND,    // Get a random point on the mesh in a circle
-    CAST_RAY,               // Cast a movement ray to test for obstacles
-    RANDOM_PATH,            // Generate a straight path where the nodes get offsetted by a random value
-    EXPLORE_POLY,           // Generate a route to explore the polygon (W.I.P)
-    CONFIGURE_FILTER,       // Cpnfigure the clients dtQueryFilter area costs
+    PATH,                // Generate a simple straight path
+    MOVE_ALONG_SURFACE,  // Move an entity by small deltas using pathfinding (usefull to prevent falling off edges...)
+    RANDOM_POINT,        // Get a random point on the mesh
+    RANDOM_POINT_AROUND, // Get a random point on the mesh in a circle
+    CAST_RAY,            // Cast a movement ray to test for obstacles
+    RANDOM_PATH,         // Generate a straight path where the nodes get offsetted by a random value
+    EXPLORE_POLY,        // Generate a route to explore the polygon (W.I.P)
+    CONFIGURE_FILTER,    // Cpnfigure the clients dtQueryFilter area costs
 };
 
 enum class PathType
 {
-    STRAIGHT,   // Request a simple straight path
-    RANDOM,     // Request a path where every position will be move by a small random delta
+    STRAIGHT, // Request a simple straight path
+    RANDOM,   // Request a path where every position will be move by a small random delta
 };
 
 enum class PathRequestFlags : int
 {
     NONE = 0,
-    SMOOTH_CHAIKIN = 1 << 0,        // Smooth path using Chaikin Curve
-    SMOOTH_CATMULLROM = 1 << 1,     // Smooth path using Catmull-Rom Spline
-    SMOOTH_BEZIERCURVE = 1 << 2,    // Smooth path using Bezier Curve
-    VALIDATE_CPOP = 1 << 3,         // Validate smoothed path using closestPointOnPoly
-    VALIDATE_MAS = 1 << 4,          // Validate smoothed path using moveAlongSurface
+    SMOOTH_CHAIKIN = 1 << 0,     // Smooth path using Chaikin Curve
+    SMOOTH_CATMULLROM = 1 << 1,  // Smooth path using Catmull-Rom Spline
+    SMOOTH_BEZIERCURVE = 1 << 2, // Smooth path using Bezier Curve
+    VALIDATE_CPOP = 1 << 3,      // Validate smoothed path using closestPointOnPoly
+    VALIDATE_MAS = 1 << 4,       // Validate smoothed path using moveAlongSurface
 };
 
 struct PathRequestData
@@ -117,7 +117,8 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
 
 void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
 
-inline void HandlePathFlagsAndSendData(ClientHandler* handler, int mapId, int flags, Path& path, Path& smoothPath, char type, PathType pathType) noexcept
+inline void HandlePathFlagsAndSendData(ClientHandler* handler, int mapId, int flags, Path& path, Path& smoothPath,
+                                       char type, PathType pathType) noexcept
 {
     Path* pathToSend = &path;
     Path* altPath = &smoothPath;

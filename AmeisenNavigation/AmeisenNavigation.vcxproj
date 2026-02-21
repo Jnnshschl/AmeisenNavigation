@@ -72,30 +72,30 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <IncludePath>$(SolutionDir)AmeisenNavigation.Exporter\src\;$(SolutionDir)recastnavigation\src\Detour\Include\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
-    <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);$(SolutionDir)build\$(Configuration)\</LibraryPath>
+    <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);$(SolutionDir)build\$(ProjectName)\</LibraryPath>
     <TargetExt>.lib</TargetExt>
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <TargetExt>.lib</TargetExt>
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);$(SolutionDir)build\$(Configuration)\</LibraryPath>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
+    <LibraryPath>$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86);$(SolutionDir)build\$(ProjectName)\</LibraryPath>
     <IncludePath>$(SolutionDir)AmeisenNavigation.Exporter\src\;$(SolutionDir)recastnavigation\src\Detour\Include\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <TargetExt>.lib</TargetExt>
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(SolutionDir)build\$(Configuration)\</LibraryPath>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
+    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(SolutionDir)build\$(ProjectName)\</LibraryPath>
     <IncludePath>$(SolutionDir)AmeisenNavigation.Exporter\src\;$(SolutionDir)recastnavigation\src\Detour\Include\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetExt>.lib</TargetExt>
-    <OutDir>build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>build\$(Platform)\int\$(Configuration)\</IntDir>
-    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(SolutionDir)build\$(Configuration)\</LibraryPath>
+    <OutDir>$(SolutionDir)build\$(ProjectName)\</OutDir>
+    <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
+    <LibraryPath>$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64);$(SolutionDir)build\$(ProjectName)\</LibraryPath>
     <IncludePath>$(SolutionDir)AmeisenNavigation.Exporter\src\;$(SolutionDir)recastnavigation\src\Detour\Include\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(VC_IncludePath);$(WindowsSDK_IncludePath)</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">

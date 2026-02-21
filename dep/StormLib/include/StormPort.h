@@ -20,7 +20,7 @@
 /* 12.11.03  1.02  Dan  Macintosh compatibility                              */
 /* 24.07.04  1.03  Sam  Mac OS X compatibility                               */
 /* 22.11.06  1.04  Sam  Mac OS X compatibility (for StormLib 6.0)            */
-/* 31.12.06  1.05  XPinguin  Full GNU/Linux compatibility		             */
+/* 31.12.06  1.05  XPinguin  Full GNU/Linux compatibility                    */
 /* 17.10.12  1.05  Lad  Moved error codes so they don't overlap with errno.h */
 /*****************************************************************************/
 
@@ -44,23 +44,23 @@
   #define _CRT_NON_CONFORMING_SWPRINTFS
   #endif
 
+  #if defined(UNICODE) || defined(_UNICODE)
+  #define STORMLIB_WIDE_CHAR
+  #endif
+
   #include <tchar.h>
   #include <assert.h>
   #include <ctype.h>
   #include <stdio.h>
 
   // Suppress definitions of `min` and `max` macros by <windows.h>:
+  #ifndef NOMINMAX
   #define NOMINMAX 1
-  #include <windows.h>
-
-  #include <wininet.h>
-  #define STORMLIB_LITTLE_ENDIAN
-
-  #ifdef _WIN64
-    #define STORMLIB_64BIT
-  #else
-    #define STORMLIB_32BIT
   #endif
+  #include <windows.h>
+  #include <wininet.h>
+
+  #define STORMLIB_LITTLE_ENDIAN
 
   #define STORMLIB_CDECL __cdecl
 
@@ -74,7 +74,6 @@
 
 #if !defined(STORMLIB_PLATFORM_DEFINED) && defined(__APPLE__)  // Mac BSD API
 
-  // Macintosh
   #include <sys/types.h>
   #include <sys/stat.h>
   #include <sys/mman.h>
@@ -320,13 +319,8 @@
 // Definition of Windows-specific types for non-Windows platforms
 
 #ifndef STORMLIB_WINDOWS
-  #if __LP64__
-    #define STORMLIB_64BIT
-  #else
-    #define STORMLIB_32BIT
-  #endif
 
-  // __cdecl meand nothing on non-Windows
+  // __cdecl means nothing on non-Windows
   #define STORMLIB_CDECL /* */
 
   // Typedefs for ANSI C
@@ -340,7 +334,7 @@
   typedef long long      LONGLONG;
   typedef unsigned long long ULONGLONG;
   typedef void         * HANDLE;
-  typedef void         * LPOVERLAPPED; // Unsupported on Linux and Mac
+  typedef void         * LPOVERLAPPED;
   typedef char           TCHAR;
   typedef unsigned int   LCID;
   typedef LONG         * PLONG;
@@ -351,7 +345,7 @@
   typedef char         * LPTSTR;
   typedef char         * LPSTR;
 
-  #ifdef STORMLIB_32BIT
+  #ifndef __LP64__
     #define _LZMA_UINT32_IS_ULONG
   #endif
 
@@ -409,11 +403,14 @@
   #define ERROR_DISK_FULL                ENOSPC
   #define ERROR_ALREADY_EXISTS           EEXIST
   #define ERROR_INSUFFICIENT_BUFFER      ENOBUFS
-  #define ERROR_BAD_FORMAT               1000        // No such error code under Linux
-  #define ERROR_NO_MORE_FILES            1001        // No such error code under Linux
-  #define ERROR_HANDLE_EOF               1002        // No such error code under Linux
-  #define ERROR_CAN_NOT_COMPLETE         1003        // No such error code under Linux
-  #define ERROR_FILE_CORRUPT             1004        // No such error code under Linux
+  #define ERROR_BAD_FORMAT               1000        // No such error codes under Linux
+  #define ERROR_NO_MORE_FILES            1001
+  #define ERROR_HANDLE_EOF               1002
+  #define ERROR_CAN_NOT_COMPLETE         1003
+  #define ERROR_FILE_CORRUPT             1004
+  #define ERROR_BUFFER_OVERFLOW          1005
+  #define ERROR_INVALID_DATA             1006
+  #define ERROR_NO_UNICODE_TRANSLATION   1007
 #endif
 
 // Macros that can sometimes be missing

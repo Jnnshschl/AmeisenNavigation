@@ -2,17 +2,16 @@
 
 int __cdecl main(int argc, const char* argv[])
 {
-#if defined(WIN32) || defined(WIN64)
-    SetConsoleTitle(L"AmeisenNavigation Server");
-    SetConsoleTextAttribute(GetStdHandle(STD_OUTPUT_HANDLE), 15);
-#endif
+    Logger::Initialize();
 
-    std::cout << "      ___                   _                 _   __           " << std::endl
-        << "     /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __" << std::endl
-        << "    / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /" << std::endl
-        << "   / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / " << std::endl
-        << "  /_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/  " << std::endl
-        << "                                          Server " << AMEISENNAV_VERSION << std::endl << std::endl;
+    std::cout << "\033[96m"
+              << "      ___                   _                 _   __           " << std::endl
+              << "     /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __" << std::endl
+              << "    / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /" << std::endl
+              << "   / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / " << std::endl
+              << "  /_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/  " << std::endl
+              << "                                          Server " << AMEISENNAV_VERSION << "\033[0m" << std::endl
+              << std::endl;
 
     std::filesystem::path configPath(std::filesystem::path(argv[0]).parent_path().string() + "\\config.cfg");
     Config = new AmeisenNavConfig();
@@ -84,7 +83,8 @@ int __cdecl main(int argc, const char* argv[])
         return 1;
     }
 
-    Nav = new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxSearchNodes, Config->useAnpFileFormat);
+    Nav =
+        new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxSearchNodes, Config->useAnpFileFormat);
     Server = new AnTcpServer(Config->ip, Config->port);
 
     Server->SetOnClientConnected(OnClientConnect);
@@ -141,27 +141,29 @@ void OnClientConnect(ClientHandler* handler) noexcept
 {
     LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
 
-    ClientPathBuffers[handler->GetId()] = std::make_pair
-    (
-        new Path(Config->maxPointPath),
-        new Path(Config->maxPointPath)
-    );
+    ClientPathBuffers[handler->GetId()] =
+        std::make_pair(new Path(Config->maxPointPath), new Path(Config->maxPointPath));
 
     Nav->NewClient(handler->GetId(), static_cast<MmapFormat>(Config->mmapFormat));
 }
 
 void OnClientDisconnect(ClientHandler* handler) noexcept
 {
-    if (ClientPathBuffers.find(handler->GetId()) == ClientPathBuffers.end()) return;
+    if (ClientPathBuffers.find(handler->GetId()) == ClientPathBuffers.end())
+        return;
 
     Nav->FreeClient(handler->GetId());
 
-    if (ClientPathBuffers[handler->GetId()].first->points) delete[] ClientPathBuffers[handler->GetId()].first->points;
-    if (ClientPathBuffers[handler->GetId()].first) delete ClientPathBuffers[handler->GetId()].first;
+    if (ClientPathBuffers[handler->GetId()].first->points)
+        delete[] ClientPathBuffers[handler->GetId()].first->points;
+    if (ClientPathBuffers[handler->GetId()].first)
+        delete ClientPathBuffers[handler->GetId()].first;
     ClientPathBuffers[handler->GetId()].first = nullptr;
 
-    if (ClientPathBuffers[handler->GetId()].second->points) delete[] ClientPathBuffers[handler->GetId()].second->points;
-    if (ClientPathBuffers[handler->GetId()].second) delete ClientPathBuffers[handler->GetId()].second;
+    if (ClientPathBuffers[handler->GetId()].second->points)
+        delete[] ClientPathBuffers[handler->GetId()].second->points;
+    if (ClientPathBuffers[handler->GetId()].second)
+        delete ClientPathBuffers[handler->GetId()].second;
     ClientPathBuffers[handler->GetId()].second = nullptr;
 
     ClientPathBuffers.erase(handler->GetId());
@@ -213,12 +215,13 @@ void GenericPathCallback(ClientHandler* handler, char type, const void* data, in
 
     switch (pathType)
     {
-    case PathType::STRAIGHT:
-        pathGenerated = Nav->GetPath(handler->GetId(), request.mapId, request.start, request.end, path);
-        break;
-    case PathType::RANDOM:
-        pathGenerated = Nav->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path, Config->randomPathMaxDistance);
-        break;
+        case PathType::STRAIGHT:
+            pathGenerated = Nav->GetPath(handler->GetId(), request.mapId, request.start, request.end, path);
+            break;
+        case PathType::RANDOM:
+            pathGenerated = Nav->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path,
+                                               Config->randomPathMaxDistance);
+            break;
     }
 
     if (pathGenerated)
@@ -258,17 +261,9 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
     Path& path = *ClientPathBuffers[handler->GetId()].first;
     Path& pathMisc = *ClientPathBuffers[handler->GetId()].second;
 
-    bool pathGenerated = Nav->GetPolyExplorationPath
-    (
-        handler->GetId(),
-        request.mapId,
-        &request.firstPolyPoint,
-        request.polyPointCount,
-        path,
-        pathMisc,
-        request.start,
-        request.viewDistance
-    );
+    bool pathGenerated =
+        Nav->GetPolyExplorationPath(handler->GetId(), request.mapId, &request.firstPolyPoint, request.polyPointCount,
+                                    path, pathMisc, request.start, request.viewDistance);
 
     if (pathGenerated)
     {

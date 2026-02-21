@@ -1,6 +1,8 @@
 #pragma once
 
+#include <iostream>
 #include <type_traits>
+
 
 struct Vector3
 {
@@ -15,20 +17,14 @@ struct Vector3
         float pos[3];
     };
 
-    Vector3() noexcept
-        : pos{ 0.0f, 0.0f, 0.0f }
-    {}
+    Vector3() noexcept : pos{0.0f, 0.0f, 0.0f} {}
 
-    Vector3(float* position) noexcept
-        : pos{ position[0], position[1], position[2] }
-    {}
+    Vector3(float* position) noexcept : pos{position[0], position[1], position[2]} {}
 
-    Vector3(float x, float y, float z) noexcept
-        : pos{ x, y, z }
-    {}
+    Vector3(float x, float y, float z) noexcept : pos{x, y, z} {}
 
-    constexpr inline operator float* () noexcept { return pos; }
-    constexpr inline operator const float* () const noexcept { return pos; }
+    constexpr inline operator float*() noexcept { return pos; }
+    constexpr inline operator const float*() const noexcept { return pos; }
 
     /// <summary>
     /// Convert the recast and detour coordinates to wow coordinates.
@@ -66,5 +62,10 @@ struct Vector3
         out[0] = y;
         out[1] = z;
         out[2] = x;
+    }
+
+    friend std::ostream& operator<<(std::ostream& os, const Vector3& vec)
+    {
+        return os << "[" << vec.x << ", " << vec.y << ", " << vec.z << "]";
     }
 };
