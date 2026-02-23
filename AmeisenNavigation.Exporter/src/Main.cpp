@@ -174,7 +174,7 @@ int main(int argc, char** argv) noexcept
                             const int cy = a / ADT_CELLS_PER_GRID;
 
                             ExtractTerrain(adt, cx, cy, &terrain);
-                            ExtractLiquid(adt, cx, cy, &waterMap, liquidTypes);
+                            ExtractLiquid(adt, cx, cy, &waterMap, &terrain, liquidTypes);
                             ExtractRoadCoverage(adt, cx, cy, &roadMap, roadTextureIds);
                         }
 
@@ -218,6 +218,7 @@ int main(int argc, char** argv) noexcept
                 }
 
                 START_TIMER(startTimeNavmesh);
+                waterMap.BuildSpatialIndex();
                 rcCalcBounds(mapGeometry.Verts(), mapGeometry.verts.size(), mapGeometry.bbMin, mapGeometry.bbMax);
 
                 if (isDebug)

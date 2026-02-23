@@ -71,7 +71,8 @@ inline void ExtractTerrain(Adt* adt, unsigned int x, unsigned int y, Structure* 
 }
 
 /// Extract liquid (water) data from one MCNK cell (x, y) into a WaterMap.
-inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* waterMap,
+/// If structure is non-null, also generates water surface triangles for navmesh rasterization.
+inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* waterMap, Structure* structure,
                           const std::unordered_map<unsigned int, LiquidType>& liquidTypes) noexcept
 {
     if (const MCNK* mcnk = adt->Mcnk(x, y))
@@ -107,11 +108,13 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
                     const unsigned char* vertexData =
                         reinterpret_cast<const unsigned char*>(mh2o->GetLiquidHeight(liquid));
 
+                    // Vertex data stride per format (from wowdev.wiki / TrinityCore):
+                    //   HeightDepth:     { float height; float depth; }     = 8 bytes
+                    //   HeightTexCoord:  { float height; int16 x; int16 y; } = 8 bytes
+                    //   Depth:           { float depth; }                    = 4 bytes (unused for height reads)
                     int stride = 8;
-                    if (liquid->vertexFormat == AdtLiquidVertexFormat::HeightTextureCoord)
-                        stride = 12;
-                    else if (liquid->vertexFormat == AdtLiquidVertexFormat::Depth)
-                        stride = 1;
+                    if (liquid->vertexFormat == AdtLiquidVertexFormat::Depth)
+                        stride = 4;
 
                     for (unsigned char i = 0; i < liquid->height; i++)
                     {
@@ -148,6 +151,30 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
                                 Vector3 nw{wowX, wowY, 0.0f};
                                 Vector3 se{wowX - UNITSIZE, wowY - UNITSIZE, 0.0f};
                                 waterMap->AddRect(nw, se, hNW, hNE, hSW, hSE, liquidAreaId);
+
+                                // Generate water surface triangles so the navmesh has
+                                // geometry at the actual water level (not just terrain below).
+                                if (structure)
+                                {
+                                    // 4 corners in RD coords (ToRDCoords: wowX,wowY,wowZ → wowY,wowZ,wowX)
+                                    Vector3 vNW = Vector3{wowX, wowY, hNW}.ToRDCoords();
+                                    Vector3 vNE = Vector3{wowX, wowY - UNITSIZE, hNE}.ToRDCoords();
+                                    Vector3 vSW = Vector3{wowX - UNITSIZE, wowY, hSW}.ToRDCoords();
+                                    Vector3 vSE = Vector3{wowX - UNITSIZE, wowY - UNITSIZE, hSE}.ToRDCoords();
+
+                                    std::lock_guard<std::mutex> lock(structure->mutex);
+                                    const size_t base = structure->verts.size();
+                                    structure->verts.push_back(vNW);
+                                    structure->verts.push_back(vNE);
+                                    structure->verts.push_back(vSW);
+                                    structure->verts.push_back(vSE);
+
+                                    // CCW winding for up-facing normals in RD coordinate space
+                                    structure->tris.emplace_back(Tri{base + 2, base + 1, base});
+                                    structure->tris.emplace_back(Tri{base + 2, base + 3, base + 1});
+                                    structure->triTypes.push_back(liquidAreaId);
+                                    structure->triTypes.push_back(liquidAreaId);
+                                }
                             }
                         }
                     }

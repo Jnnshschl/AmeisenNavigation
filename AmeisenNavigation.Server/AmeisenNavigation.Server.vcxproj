@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>16.0</VCProjectVersion>
+    <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{1d74586c-a7cd-4bc6-8c09-4506faa3ddf3}</ProjectGuid>
     <RootNamespace>AmeisenNavigationServer</RootNamespace>
@@ -80,7 +80,7 @@
     <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
     <LibraryPath>$(SolutionDir)build\AnTCP.Server\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)build\AmeisenNavigation.Pack\;$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
-    <IncludePath>$(SolutionDir)Ameisennavigation\src\;$(SolutionDir)AnTCP.Server\src\</IncludePath>
+    <IncludePath>$(SolutionDir)AmeisenNavigation\src\;$(SolutionDir)AnTCP.Server\src\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(SolutionDir)recastnavigation\Detour\Include\;$(SolutionDir)recastnavigation\Recast\Include\</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
@@ -88,7 +88,7 @@
     <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
     <LibraryPath>$(SolutionDir)build\AnTCP.Server\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)build\AmeisenNavigation.Pack\;$(VC_LibraryPath_x86);$(WindowsSDK_LibraryPath_x86)</LibraryPath>
-    <IncludePath>$(SolutionDir)Ameisennavigation\src\;$(SolutionDir)AnTCP.Server\src\</IncludePath>
+    <IncludePath>$(SolutionDir)AmeisenNavigation\src\;$(SolutionDir)AnTCP.Server\src\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(SolutionDir)recastnavigation\Detour\Include\;$(SolutionDir)recastnavigation\Recast\Include\</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
@@ -96,7 +96,7 @@
     <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
     <LibraryPath>$(SolutionDir)build\AnTCP.Server\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)build\AmeisenNavigation.Pack\;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
-    <IncludePath>$(SolutionDir)Ameisennavigation\src\;$(SolutionDir)AnTCP.Server\src\</IncludePath>
+    <IncludePath>$(SolutionDir)AmeisenNavigation\src\;$(SolutionDir)AnTCP.Server\src\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(SolutionDir)recastnavigation\Detour\Include\;$(SolutionDir)recastnavigation\Recast\Include\</IncludePath>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
@@ -104,7 +104,7 @@
     <IntDir>$(SolutionDir).int\$(ProjectName)\</IntDir>
     <TargetName>AmeisenNavigationServer</TargetName>
     <LibraryPath>$(SolutionDir)build\AnTCP.Server\;$(SolutionDir)build\AmeisenNavigation\;$(SolutionDir)build\recastnavigation\;$(SolutionDir)build\AmeisenNavigation.Pack\;$(VC_LibraryPath_x64);$(WindowsSDK_LibraryPath_x64)</LibraryPath>
-    <IncludePath>$(SolutionDir)Ameisennavigation\src\;$(SolutionDir)AnTCP.Server\src\</IncludePath>
+    <IncludePath>$(SolutionDir)AmeisenNavigation\src\;$(SolutionDir)AnTCP.Server\src\;$(SolutionDir)AmeisenNavigation.Pack\src\;$(SolutionDir)recastnavigation\Detour\Include\;$(SolutionDir)recastnavigation\Recast\Include\</IncludePath>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>

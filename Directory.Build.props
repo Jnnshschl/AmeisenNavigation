@@ -1,0 +1,9 @@
+<Project>
+  <!-- Shared build output settings for all .NET (C#) projects -->
+  <PropertyGroup>
+    <OutputPath>$(MSBuildThisFileDirectory)build\$(MSBuildProjectName)\</OutputPath>
+    <BaseIntermediateOutputPath>$(MSBuildThisFileDirectory).int\$(MSBuildProjectName)\</BaseIntermediateOutputPath>
+    <IntermediateOutputPath>$(BaseIntermediateOutputPath)$(Configuration)\</IntermediateOutputPath>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+</Project>

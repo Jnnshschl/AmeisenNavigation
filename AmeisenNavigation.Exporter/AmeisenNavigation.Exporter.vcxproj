@@ -108,7 +108,7 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)recastnavigation\Recast\Include;$(SolutionDir)recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -129,7 +129,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <Optimization>MaxSpeed</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)recastnavigation\Recast\Include;$(SolutionDir)recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -149,7 +149,7 @@
       <LanguageStandard_C>Default</LanguageStandard_C>
       <OpenMPSupport>true</OpenMPSupport>
       <RuntimeLibrary>MultiThreadedDebugDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)recastnavigation\Recast\Include;$(SolutionDir)recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
@@ -170,7 +170,7 @@
       <OpenMPSupport>true</OpenMPSupport>
       <Optimization>MaxSpeed</Optimization>
       <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
-      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)\recastnavigation\Recast\Include;$(SolutionDir)\recastnavigation\Detour\Include</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)AmeisenNavigation\src;$(SolutionDir)recastnavigation\Recast\Include;$(SolutionDir)recastnavigation\Detour\Include</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
