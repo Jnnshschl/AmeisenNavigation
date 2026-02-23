@@ -108,9 +108,9 @@ public:
     constexpr auto GetId() const noexcept { return Id; }
 
     /// <summary>
-    /// Used to delete old disconnected clients.
+    /// Returns true when the client has disconnected and can be cleaned up.
     /// </summary>
-    constexpr bool IsConnected() const noexcept { return !IsActive; }
+    constexpr bool IsDisconnected() const noexcept { return !IsActive; }
 
     /// <summary>
     /// Send data to the client. Size will be sizeof(T).
@@ -163,6 +163,11 @@ public:
     /// </summary>
     inline void Disconnect() noexcept
     {
+        if (!IsActive)
+            return;
+
+        IsActive = false;
+
         if (OnClientDisconnected)
         {
             (*OnClientDisconnected)(this);
@@ -170,7 +175,6 @@ public:
 
         closesocket(Socket);
         Socket = INVALID_SOCKET;
-        IsActive = false;
     }
 
     /// <summary>
@@ -346,8 +350,6 @@ public:
     {
         ShouldExit = true;
         SocketCleanup();
-        Clients.clear();
-        WSACleanup();
     }
 
     /// <summary>
@@ -369,21 +371,19 @@ private:
     /// <summary>
     /// Delete old clients that are not running.
     /// </summary>
-    constexpr void ClientCleanup() noexcept
+    void ClientCleanup() noexcept
     {
-        for (size_t i = 0; i < Clients.size(); ++i)
+        for (size_t i = 0; i < Clients.size();)
         {
-            if (Clients[i] && Clients[i]->IsConnected())
+            if (Clients[i] && Clients[i]->IsDisconnected())
             {
-                if (OnClientDisconnected)
-                {
-                    OnClientDisconnected(Clients[i]);
-                }
-
                 delete Clients[i];
+                Clients.erase(Clients.begin() + i);
             }
-
-            Clients.erase(Clients.begin() + i);
+            else
+            {
+                ++i;
+            }
         }
     }
 };

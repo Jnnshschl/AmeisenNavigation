@@ -184,8 +184,9 @@ int main(int argc, char** argv) noexcept
 
                         terrain.Clean();
 
-                        rcCalcBounds(reinterpret_cast<float*>(terrain.verts.begin()._Ptr), terrain.verts.size(),
-                                     terrain.bbMin, terrain.bbMax);
+                        if (!terrain.verts.empty())
+                            rcCalcBounds(reinterpret_cast<const float*>(terrain.verts.data()), terrain.verts.size(),
+                                         terrain.bbMin, terrain.bbMax);
 
                         terrain.bbMax[0] = (32 - x) * TILESIZE;
                         terrain.bbMax[2] = (32 - y) * TILESIZE;

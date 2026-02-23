@@ -47,14 +47,13 @@ public:
             }
         }
 
-        return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(&Cache[hash]) : nullptr;
+        return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(Cache[hash].first) : nullptr;
     }
 
     inline void Clear() noexcept
     {
-        for (const auto& [hash, pair] : Cache)
-        {
-            if (pair.first) delete[] pair.first;
-        }
+        // Don't delete the buffers here — MpqManager owns the memory
+        // (it tracks all allocations and frees them in its destructor).
+        Cache.clear();
     }
 };

@@ -52,20 +52,25 @@ public:
 	virtual dtNavMesh* Get(size_t mapId) noexcept override
 	{
 		LoadMmaps(mapId);
-		return NavMeshMap.at(mapId).second;
+		auto it = NavMeshMap.find(mapId);
+		return it != NavMeshMap.end() ? it->second.second : nullptr;
 	}
 
 private:
-	bool LoadMmaps(int mapId) noexcept
+	bool LoadMmaps(size_t mapId) noexcept
 	{
 		const std::lock_guard<std::mutex> lock(NavMeshMap[mapId].first);
 
 		if (NavMeshMap[mapId].second) { return true; }
 
+		if (!MmapFormatPatterns.contains(Format))
+			return false;
+
 		const auto& filenameFormat = MmapFormatPatterns.at(Format);
 
 		std::filesystem::path mmapFile(MmapFolder);
-		std::string filename = std::vformat(filenameFormat.first, std::make_format_args(mapId));
+		const int mid = static_cast<int>(mapId);
+		std::string filename = std::vformat(filenameFormat.first, std::make_format_args(mid));
 		mmapFile.append(filename);
 
 		if (!std::filesystem::exists(mmapFile))
@@ -102,7 +107,7 @@ private:
 			const auto y = i % 64;
 
 			std::filesystem::path mmapTileFile(MmapFolder);
-			mmapTileFile.append(std::vformat(filenameFormat.second, std::make_format_args(mapId, x, y)));
+			mmapTileFile.append(std::vformat(filenameFormat.second, std::make_format_args(mid, x, y)));
 
 			if (!std::filesystem::exists(mmapTileFile))
 			{
@@ -123,9 +128,14 @@ private:
 
 			if (mmapTileHeader.mmapVersion < MMAP_VERSION)
 			{
+				continue;
 			}
 
 			void* mmapTileData = malloc(mmapTileHeader.size);
+			if (!mmapTileData)
+			{
+				continue;
+			}
 			mmapTileStream.read(static_cast<char*>(mmapTileData), mmapTileHeader.size);
 			mmapTileStream.close();
 

@@ -115,8 +115,10 @@ struct WaterMap
         for (uint32_t i = 0; i < static_cast<uint32_t>(rects.size()); ++i)
         {
             const auto& r = rects[i];
-            int x0 = GridCellX(r.minX), x1 = GridCellX(r.maxX);
-            int z0 = GridCellZ(r.minZ), z1 = GridCellZ(r.maxZ);
+            int x0 = std::clamp(GridCellX(r.minX), 0, gridW - 1);
+            int x1 = std::clamp(GridCellX(r.maxX), 0, gridW - 1);
+            int z0 = std::clamp(GridCellZ(r.minZ), 0, gridH - 1);
+            int z1 = std::clamp(GridCellZ(r.maxZ), 0, gridH - 1);
 
             for (int cx = x0; cx <= x1; ++cx)
                 for (int cz = z0; cz <= z1; ++cz)
@@ -182,12 +184,12 @@ struct WaterMap
 private:
     inline int GridCellX(float x) const noexcept
     {
-        return std::clamp(static_cast<int>((x - gridMinX) / GRID_CELL_SIZE), 0, gridW - 1);
+        return static_cast<int>((x - gridMinX) / GRID_CELL_SIZE);
     }
 
     inline int GridCellZ(float z) const noexcept
     {
-        return std::clamp(static_cast<int>((z - gridMinZ) / GRID_CELL_SIZE), 0, gridH - 1);
+        return static_cast<int>((z - gridMinZ) / GRID_CELL_SIZE);
     }
 
     static inline float InterpolateHeight(const Rect& r, float rdX, float rdZ) noexcept

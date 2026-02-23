@@ -62,7 +62,7 @@ public:
 
     inline dtQueryFilter* QueryFilter() noexcept { return CustomFilter ? CustomFilter : FilterProvider->Get(State); }
 
-    inline dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept { return NavMeshQuery[mapId]; }
+    inline dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept { auto it = NavMeshQuery.find(mapId); return it != NavMeshQuery.end() ? it->second : nullptr; }
     inline void SetNavmeshQuery(int mapId, dtNavMeshQuery* query) noexcept { NavMeshQuery[mapId] = query; }
 
     constexpr inline int GetPolyPathBufferSize() const noexcept { return PolyPathBufferSize; }

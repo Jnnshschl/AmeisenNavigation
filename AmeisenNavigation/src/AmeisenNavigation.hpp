@@ -288,7 +288,7 @@ private:
     /// <summary>
     /// Returns true when the given client id is valid.
     /// </summary>
-    inline bool IsValidClient(size_t clientId) noexcept { return Clients[clientId] != nullptr; }
+    inline bool IsValidClient(size_t clientId) noexcept { auto it = Clients.find(clientId); return it != Clients.end() && it->second != nullptr; }
 
     /// <summary>
     /// Initializes a NavMeshQuery for the given client.

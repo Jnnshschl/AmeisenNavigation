@@ -5,7 +5,6 @@
 #include <format>
 #include <fstream>
 #include <iostream>
-#include <random>
 #include <set>
 #include <unordered_map>
 #include <vector>
@@ -42,10 +41,3 @@ constexpr auto AMEISENNAV_VERSION = "1.8.4.0";
         std::format("{:.2f} ms",                                      \
                     std::chrono::duration_cast<std::chrono::microseconds>(end_time_##name - name).count() / 1000.0f));
 
-static float frand() noexcept
-{
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_real_distribution<float> dis(0.0f, 1.0f);
-    return dis(gen);
-}

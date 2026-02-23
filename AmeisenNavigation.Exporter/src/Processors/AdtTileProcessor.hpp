@@ -145,8 +145,8 @@ public:
         const int tileCount = static_cast<int>(ceilf((TILESIZE / RcCfg.cs) / static_cast<float>(RcCfg.tileSize)));
         const int totalTileCount = tileCount * tileCount;
 
-        rcPolyMesh** spmeshes = new rcPolyMesh*[totalTileCount];
-        rcPolyMeshDetail** sdmeshes = new rcPolyMeshDetail*[totalTileCount];
+        rcPolyMesh** spmeshes = new rcPolyMesh*[totalTileCount]{};
+        rcPolyMeshDetail** sdmeshes = new rcPolyMeshDetail*[totalTileCount]{};
 
         std::vector<uint8_t> adtPixels;
         if (IsDebug)
@@ -335,10 +335,12 @@ private:
             int navDataSize = 0;
             dtTileRef tile;
 
-            if (dtCreateNavMeshData(&params, &navData, &navDataSize) &&
-                dtStatusSucceed(Navmesh->AddTile(params.tileX, params.tileY, navData, navDataSize, &tile)))
+            if (dtCreateNavMeshData(&params, &navData, &navDataSize))
             {
-                Navmesh->FreeTile(&navData, &navDataSize, &tile);
+                if (dtStatusFailed(Navmesh->AddTile(params.tileX, params.tileY, navData, navDataSize, &tile)))
+                {
+                    dtFree(navData);
+                }
             }
         }
 

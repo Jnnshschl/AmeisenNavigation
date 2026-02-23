@@ -97,7 +97,7 @@ static void BridsonsPoissonDiskSampling(const Vector3* vertices, int vertexCount
 
     while (activeCount > 0)
     {
-        auto randomIndex = std::uniform_int_distribution<int>(0, static_cast<int>(vertexCount) - 1)(rng);
+        auto randomIndex = std::uniform_int_distribution<int>(0, activeCount - 1)(rng);
         const auto currentPoint = tempBuffer[randomIndex];
         bool foundCandidate = false;
 

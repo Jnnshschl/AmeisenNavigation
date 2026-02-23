@@ -56,11 +56,14 @@ public:
     explicit Anp(const char* anpFilePath) noexcept
         : MapId(-1), Navmesh{dtAllocNavMesh()}, NavmeshParams{0}, Zip{0}, Mutex()
     {
-        if (mz_zip_reader_init_file(&Zip, anpFilePath, 0) &&
-            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "mapId", 0, 0), &MapId, sizeof(int),
-                                         0) &&
-            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "params", 0, 0), &NavmeshParams,
-                                         sizeof(dtNavMeshParams), 0))
+        if (!mz_zip_reader_init_file(&Zip, anpFilePath, 0))
+            return;
+
+        bool ok =
+            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "mapId", 0, 0), &MapId, sizeof(int), 0) &&
+            mz_zip_reader_extract_to_mem(&Zip, mz_zip_reader_locate_file(&Zip, "params", 0, 0), &NavmeshParams, sizeof(dtNavMeshParams), 0);
+
+        if (ok)
         {
             Navmesh->init(&NavmeshParams);
 
@@ -75,12 +78,13 @@ public:
                 {
                     size_t allocSize = 0;
                     void* navMeshData = mz_zip_reader_extract_to_heap(&Zip, fileIndex, &allocSize, 0);
-                    Navmesh->addTile(reinterpret_cast<unsigned char*>(navMeshData), allocSize, DT_TILE_FREE_DATA, 0, 0);
+                    if (navMeshData)
+                        Navmesh->addTile(reinterpret_cast<unsigned char*>(navMeshData), allocSize, DT_TILE_FREE_DATA, 0, 0);
                 }
             }
-
-            mz_zip_reader_end(&Zip);
         }
+
+        mz_zip_reader_end(&Zip);
     }
 
     ~Anp() noexcept
@@ -107,20 +111,28 @@ public:
         return Navmesh->removeTile(*tile, navData, navDataSize);
     }
 
-    inline void Save(const char* outputDir) noexcept
+    inline bool Save(const char* outputDir) noexcept
     {
         const std::lock_guard lock(Mutex);
         void* zipData = nullptr;
-        size_t zip_size;
-        mz_zip_writer_finalize_heap_archive(&Zip, &zipData, &zip_size);
+        size_t zip_size = 0;
+
+        if (!mz_zip_writer_finalize_heap_archive(&Zip, &zipData, &zip_size))
+            return false;
 
         std::filesystem::path outputDirPath(outputDir);
         outputDirPath.append(std::format("{:03}.anp", MapId));
 
         std::ofstream zip_file(outputDirPath, std::ios::binary);
-        zip_file.write(static_cast<const char*>(zipData), zip_size);
+        if (!zip_file.is_open())
+        {
+            mz_free(zipData);
+            return false;
+        }
 
+        zip_file.write(static_cast<const char*>(zipData), zip_size);
         mz_free(zipData);
+        return zip_file.good();
     }
 
     inline void SaveRecastDemoMesh(const char* path) noexcept

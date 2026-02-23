@@ -35,6 +35,10 @@ namespace CatmullRomSpline
             const float t2 = std::powf(std::powf(p2.x - p1.x, 2.0f) + std::powf(p2.y - p1.y, 2.0f) + std::powf(p2.z - p1.z, 2.0f), alpha * 0.5f) + t1;
             const float t3 = std::powf(std::powf(p3.x - p2.x, 2.0f) + std::powf(p3.y - p2.y, 2.0f) + std::powf(p3.z - p2.z, 2.0f), alpha * 0.5f) + t2;
 
+            // Skip degenerate segments where consecutive points are identical
+            if (t1 == t0 || t2 == t1 || t3 == t2 || t2 == t0 || t3 == t1)
+                continue;
+
             for (float t = t1; t < t2; t += ((t2 - t1) / static_cast<float>(points)))
             {
                 ScaleAndAddVector3(p0, (t1 - t) / (t1 - t0), p1, (t - t0) / (t1 - t0), A1);

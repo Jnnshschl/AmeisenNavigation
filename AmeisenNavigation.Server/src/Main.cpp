@@ -106,24 +106,13 @@ int __cdecl main(int argc, const char* argv[])
     Server->Run();
 
     LogI("Stopped server...");
-    delete Config;
-    delete Nav;
+
+    // Server::Run() deletes all ClientHandlers, which fires OnClientDisconnect
+    // for each connected client — that callback frees the path buffers and
+    // erases from ClientPathBuffers. So no manual cleanup is needed here.
     delete Server;
-
-    for (const auto& [id, buffers] : ClientPathBuffers)
-    {
-        if (buffers.first)
-        {
-            delete[] buffers.first->points;
-            delete[] buffers.first;
-        }
-
-        if (buffers.second)
-        {
-            delete[] buffers.second->points;
-            delete[] buffers.second;
-        }
-    }
+    delete Nav;
+    delete Config;
 }
 
 int __stdcall SigIntHandler(unsigned long signal)
@@ -285,6 +274,13 @@ void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data
     const ConfigureFilterData request = *reinterpret_cast<const ConfigureFilterData*>(data);
 
     AmeisenNavClient* client = Nav->GetClient(handler->GetId());
+    if (!client)
+    {
+        result = false;
+        handler->SendData(type, &result, sizeof(bool));
+        return;
+    }
+
     client->ResetQueryFilter();
 
     const FilterConfig* filterConfigs = &request.firstFilterConfig;
