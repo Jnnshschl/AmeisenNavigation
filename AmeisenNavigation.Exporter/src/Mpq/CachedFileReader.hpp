@@ -47,7 +47,10 @@ public:
             }
         }
 
-        return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(Cache[hash].first) : nullptr;
+        // The wrapper classes (Dbc, Wdt, Adt, Wmo, M2, etc.) all have layout {unsigned char* Data; unsigned int Size;}
+        // which matches std::pair<void*, unsigned int>. Returning a pointer to the pair lets the wrapper class
+        // use pair.first as its Data pointer and pair.second as its Size — do NOT "fix" this to return .first.
+        return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(&Cache[hash]) : nullptr;
     }
 
     inline void Clear() noexcept
