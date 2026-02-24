@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <mutex>
 #include <unordered_map>
 #include <vector>
@@ -111,14 +112,18 @@ struct WaterMap
         gridH = static_cast<int>(ceilf((maxZ - gridMinZ) / GRID_CELL_SIZE)) + 1;
         gridCells.resize(static_cast<size_t>(gridW) * gridH);
 
-        // Insert each rect into all grid cells it overlaps
+        // Insert each rect into all grid cells it overlaps.
+        // Expand by 1 cell in each direction to handle floating-point boundary mismatches
+        // between insertion and query (grid cell size ≈ chunk size, so accumulated float
+        // error at chunk boundaries can cause rects to be indexed in a different cell than
+        // the query maps to).
         for (uint32_t i = 0; i < static_cast<uint32_t>(rects.size()); ++i)
         {
             const auto& r = rects[i];
-            int x0 = std::clamp(GridCellX(r.minX), 0, gridW - 1);
-            int x1 = std::clamp(GridCellX(r.maxX), 0, gridW - 1);
-            int z0 = std::clamp(GridCellZ(r.minZ), 0, gridH - 1);
-            int z1 = std::clamp(GridCellZ(r.maxZ), 0, gridH - 1);
+            int x0 = std::clamp(GridCellX(r.minX) - 1, 0, gridW - 1);
+            int x1 = std::clamp(GridCellX(r.maxX) + 1, 0, gridW - 1);
+            int z0 = std::clamp(GridCellZ(r.minZ) - 1, 0, gridH - 1);
+            int z1 = std::clamp(GridCellZ(r.maxZ) + 1, 0, gridH - 1);
 
             for (int cx = x0; cx <= x1; ++cx)
                 for (int cz = z0; cz <= z1; ++cz)
@@ -184,12 +189,12 @@ struct WaterMap
 private:
     inline int GridCellX(float x) const noexcept
     {
-        return static_cast<int>((x - gridMinX) / GRID_CELL_SIZE);
+        return static_cast<int>(floorf((x - gridMinX) / GRID_CELL_SIZE));
     }
 
     inline int GridCellZ(float z) const noexcept
     {
-        return static_cast<int>((z - gridMinZ) / GRID_CELL_SIZE);
+        return static_cast<int>(floorf((z - gridMinZ) / GRID_CELL_SIZE));
     }
 
     static inline float InterpolateHeight(const Rect& r, float rdX, float rdZ) noexcept
