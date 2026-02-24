@@ -1,24 +1,19 @@
 #pragma once
 
+/// Area IDs for navmesh triangles and compact heightfield spans.
+///
+/// IMPORTANT: The numeric ordering matters because Recast's span merge uses
+/// rcMax(area1, area2) when two spans overlap. Higher values win. Liquid types
+/// are placed AFTER terrain types so that water surfaces always take priority
+/// over terrain during heightfield rasterization. This ensures correct water
+/// coverage without relying solely on post-hoc MarkWaterAreas() fixup.
+///
+/// All values must be <= RC_WALKABLE_AREA (63).
 enum TriAreaId : unsigned char
 {
     NO_TYPE,
 
-    LIQUID_LAVA,
-    ALLIANCE_LIQUID_LAVA,
-    HORDE_LIQUID_LAVA,
-
-    LIQUID_SLIME,
-    ALLIANCE_LIQUID_SLIME,
-    HORDE_LIQUID_SLIME,
-
-    LIQUID_OCEAN,
-    ALLIANCE_LIQUID_OCEAN,
-    HORDE_LIQUID_OCEAN,
-
-    LIQUID_WATER,
-    ALLIANCE_LIQUID_WATER,
-    HORDE_LIQUID_WATER,
+    // ── Terrain / structure types (lower priority in span merge) ──
 
     TERRAIN_GROUND,
     ALLIANCE_TERRAIN_GROUND,
@@ -39,6 +34,24 @@ enum TriAreaId : unsigned char
     DOODAD,
     ALLIANCE_DOODAD,
     HORDE_DOODAD,
+
+    // ── Liquid types (higher priority — wins over terrain in span merge) ──
+
+    LIQUID_WATER,
+    ALLIANCE_LIQUID_WATER,
+    HORDE_LIQUID_WATER,
+
+    LIQUID_OCEAN,
+    ALLIANCE_LIQUID_OCEAN,
+    HORDE_LIQUID_OCEAN,
+
+    LIQUID_LAVA,
+    ALLIANCE_LIQUID_LAVA,
+    HORDE_LIQUID_LAVA,
+
+    LIQUID_SLIME,
+    ALLIANCE_LIQUID_SLIME,
+    HORDE_LIQUID_SLIME,
 };
 
 enum TriFlag : unsigned char

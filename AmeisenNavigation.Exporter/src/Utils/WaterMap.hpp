@@ -16,6 +16,8 @@
 ///
 /// After all rects are added, call BuildSpatialIndex() before querying.
 /// This builds a grid-based spatial index for O(1) cell lookup instead of O(n) linear scan.
+/// When the spatial index misses but the query is within the global water bounds,
+/// a brute-force linear scan is used as a fallback to guarantee correctness.
 /// </summary>
 struct WaterMap
 {
@@ -41,6 +43,7 @@ struct WaterMap
     // Spatial index (grid-based, built after all rects are added)
     static constexpr float GRID_CELL_SIZE = 33.3334f; // ~CHUNKSIZE (TILESIZE/16)
     float gridMinX = 0.0f, gridMinZ = 0.0f;
+    float gridMaxX = 0.0f, gridMaxZ = 0.0f; // Global bounds for fallback
     int gridW = 0, gridH = 0;
     std::vector<std::vector<uint32_t>> gridCells;
     bool spatialIndexBuilt = false;
@@ -62,7 +65,10 @@ struct WaterMap
         float rdZ_SE = wowSE.x; // SE has lower wowX
 
         Rect r;
-        constexpr float eps = 0.01f;
+        // Pad rects slightly to avoid floating-point gaps between adjacent sub-cells.
+        // 0.05 is about 1/4 of a navmesh cell (cs ≈ 0.2083), which ensures that cell
+        // centers at the boundary always fall within at least one rect.
+        constexpr float eps = 0.05f;
         r.minX = std::min(rdX_NW, rdX_SE) - eps;
         r.maxX = std::max(rdX_NW, rdX_SE) + eps;
         r.minZ = std::min(rdZ_NW, rdZ_SE) - eps;
@@ -95,21 +101,22 @@ struct WaterMap
         if (rects.empty())
             return;
 
-        // Compute bounds from all rects
-        float maxX = rects[0].maxX, maxZ = rects[0].maxZ;
+        // Compute global bounds from all rects
         gridMinX = rects[0].minX;
         gridMinZ = rects[0].minZ;
+        gridMaxX = rects[0].maxX;
+        gridMaxZ = rects[0].maxZ;
 
         for (const auto& r : rects)
         {
             gridMinX = std::min(gridMinX, r.minX);
             gridMinZ = std::min(gridMinZ, r.minZ);
-            maxX = std::max(maxX, r.maxX);
-            maxZ = std::max(maxZ, r.maxZ);
+            gridMaxX = std::max(gridMaxX, r.maxX);
+            gridMaxZ = std::max(gridMaxZ, r.maxZ);
         }
 
-        gridW = static_cast<int>(ceilf((maxX - gridMinX) / GRID_CELL_SIZE)) + 1;
-        gridH = static_cast<int>(ceilf((maxZ - gridMinZ) / GRID_CELL_SIZE)) + 1;
+        gridW = static_cast<int>(ceilf((gridMaxX - gridMinX) / GRID_CELL_SIZE)) + 1;
+        gridH = static_cast<int>(ceilf((gridMaxZ - gridMinZ) / GRID_CELL_SIZE)) + 1;
         gridCells.resize(static_cast<size_t>(gridW) * gridH);
 
         // Insert each rect into all grid cells it overlaps.
@@ -136,7 +143,8 @@ struct WaterMap
     /// <summary>
     /// Query water at a world position in RD coordinates.
     /// Returns the highest interpolated water height and its type.
-    /// Uses spatial index if built, otherwise falls back to linear scan.
+    /// Uses spatial index for fast lookup, with a brute-force linear scan fallback
+    /// when the spatial index misses but the query is within the global water bounds.
     /// </summary>
     inline bool QueryRD(float rdX, float rdZ, QueryResult& result) const noexcept
     {
@@ -145,30 +153,60 @@ struct WaterMap
             int cx = GridCellX(rdX);
             int cz = GridCellZ(rdZ);
 
-            if (cx < 0 || cx >= gridW || cz < 0 || cz >= gridH)
-                return false;
-
-            const auto& cell = gridCells[cx + cz * gridW];
-            bool found = false;
-
-            for (uint32_t idx : cell)
+            // Fast path: spatial index lookup
+            if (cx >= 0 && cx < gridW && cz >= 0 && cz < gridH)
             {
-                const auto& r = rects[idx];
-                if (rdX >= r.minX && rdX <= r.maxX && rdZ >= r.minZ && rdZ <= r.maxZ)
+                const auto& cell = gridCells[cx + cz * gridW];
+                bool found = false;
+
+                for (uint32_t idx : cell)
                 {
-                    float h = InterpolateHeight(r, rdX, rdZ);
-                    if (!found || h > result.height)
+                    const auto& r = rects[idx];
+                    if (rdX >= r.minX && rdX <= r.maxX && rdZ >= r.minZ && rdZ <= r.maxZ)
                     {
-                        result.height = h;
-                        result.type = r.type;
-                        found = true;
+                        float h = InterpolateHeight(r, rdX, rdZ);
+                        if (!found || h > result.height)
+                        {
+                            result.height = h;
+                            result.type = r.type;
+                            found = true;
+                        }
                     }
                 }
+
+                if (found)
+                    return true;
             }
-            return found;
+
+            // Fallback: if the query is within the global water bounds but the spatial
+            // index didn't find a match, do a linear scan. This catches any edge cases
+            // from floating-point grid mapping issues.
+            if (rdX >= gridMinX && rdX <= gridMaxX && rdZ >= gridMinZ && rdZ <= gridMaxZ)
+            {
+                return LinearScan(rdX, rdZ, result);
+            }
+
+            return false;
         }
 
-        // Fallback: linear scan (before spatial index is built)
+        // No spatial index: full linear scan
+        return LinearScan(rdX, rdZ, result);
+    }
+
+private:
+    inline int GridCellX(float x) const noexcept
+    {
+        return static_cast<int>(floorf((x - gridMinX) / GRID_CELL_SIZE));
+    }
+
+    inline int GridCellZ(float z) const noexcept
+    {
+        return static_cast<int>(floorf((z - gridMinZ) / GRID_CELL_SIZE));
+    }
+
+    /// Linear scan of all rects — guaranteed correct but O(n).
+    inline bool LinearScan(float rdX, float rdZ, QueryResult& result) const noexcept
+    {
         bool found = false;
         for (const auto& r : rects)
         {
@@ -184,17 +222,6 @@ struct WaterMap
             }
         }
         return found;
-    }
-
-private:
-    inline int GridCellX(float x) const noexcept
-    {
-        return static_cast<int>(floorf((x - gridMinX) / GRID_CELL_SIZE));
-    }
-
-    inline int GridCellZ(float z) const noexcept
-    {
-        return static_cast<int>(floorf((z - gridMinZ) / GRID_CELL_SIZE));
     }
 
     static inline float InterpolateHeight(const Rect& r, float rdX, float rdZ) noexcept
