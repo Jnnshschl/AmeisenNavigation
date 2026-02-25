@@ -220,6 +220,7 @@ int main(int argc, char** argv) noexcept
 
                 START_TIMER(startTimeNavmesh);
                 waterMap.BuildSpatialIndex();
+                roadMap.BuildSpatialIndex();
                 rcCalcBounds(mapGeometry.Verts(), mapGeometry.verts.size(), mapGeometry.bbMin, mapGeometry.bbMax);
 
                 if (isDebug)

@@ -24,16 +24,38 @@
 // AdtTileProcessor — orchestrates the navmesh
 // generation pipeline for a single ADT tile.
 //
-// Pipeline per sub-tile:
-//   1. Rasterize triangles → heightfield
-//   2. Filter walkable spans
-//   3. Build compact heightfield
-//   4. Erode + median filter
-//   5. Mark water areas (AreaMarker)
-//   6. Mark road areas (AreaMarker)
-//   7. Render to BMP (BmpRenderer, debug only)
-//   8. Build regions → contours → polymesh
+// Pipeline per sub-tile (two-pass rasterization):
+//   1a. Rasterize TERRAIN triangles → heightfield
+//   2.  Filter walkable spans (ledge, low-height, etc.)
+//   1b. Rasterize WATER triangles → same heightfield (AFTER filters)
+//   3.  Build compact heightfield
+//   4.  Erode + median filter
+//   5.  Mark water areas (AreaMarker — rect-to-cell)
+//   6.  Mark road areas (AreaMarker)
+//   7.  Render to BMP (BmpRenderer, debug only)
+//   8.  Build regions → contours → polymesh
+//
+// Water triangles are rasterized AFTER terrain filters
+// because Recast's ledge/height filters are designed for
+// terrain and incorrectly clear water surface spans (water
+// doesn't have ledges — agents can swim at any depth).
 // ─────────────────────────────────────────────
+
+/// Holds terrain-only and water-only triangle data, split from
+/// the main Structure so they can be rasterized in separate passes.
+struct SplitGeometry
+{
+    // Terrain triangles (indices into the shared vertex array)
+    std::vector<int> terrainTris;
+    std::vector<unsigned char> terrainAreas;
+
+    // Water surface triangles (indices into the shared vertex array)
+    std::vector<int> waterTris;
+    std::vector<unsigned char> waterAreas;
+
+    int TerrainTriCount() const noexcept { return static_cast<int>(terrainAreas.size()); }
+    int WaterTriCount() const noexcept { return static_cast<int>(waterAreas.size()); }
+};
 
 class AdtTileProcessor : public rcContext
 {
@@ -132,8 +154,52 @@ public:
         if (!structure)
             return;
 
+        // Clear steep triangles (sets area to RC_NULL_AREA for slopes > walkableSlopeAngle).
+        // Water surface triangles are flat (slope ≈ 0°) and always survive this step.
         rcClearUnwalkableTriangles(this, RcCfg.walkableSlopeAngle, structure->Verts(), structure->verts.size(),
                                    structure->Tris(), structure->tris.size(), structure->AreaIds());
+
+        // Split triangles into terrain-only and water-only arrays.
+        // Water triangles are rasterized in a separate pass AFTER terrain filters
+        // to prevent the ledge/height filters from clearing water surface spans.
+        SplitGeometry split;
+        {
+            const int* allTris = structure->Tris();
+            const unsigned char* allAreas = structure->AreaIds();
+            const int triCount = static_cast<int>(structure->tris.size());
+
+            // Pre-reserve to avoid reallocations during the split loop.
+            // Most triangles are terrain; water is typically a small fraction.
+            split.terrainTris.reserve(static_cast<size_t>(triCount) * 3);
+            split.terrainAreas.reserve(triCount);
+            split.waterTris.reserve(static_cast<size_t>(triCount / 4) * 3);
+            split.waterAreas.reserve(triCount / 4);
+
+            for (int i = 0; i < triCount; ++i)
+            {
+                unsigned char a = allAreas[i];
+                if (a >= LIQUID_WATER && a <= HORDE_LIQUID_SLIME)
+                {
+                    split.waterTris.push_back(allTris[i * 3]);
+                    split.waterTris.push_back(allTris[i * 3 + 1]);
+                    split.waterTris.push_back(allTris[i * 3 + 2]);
+                    split.waterAreas.push_back(a);
+                }
+                else
+                {
+                    split.terrainTris.push_back(allTris[i * 3]);
+                    split.terrainTris.push_back(allTris[i * 3 + 1]);
+                    split.terrainTris.push_back(allTris[i * 3 + 2]);
+                    split.terrainAreas.push_back(a);
+                }
+            }
+
+            if (IsDebug)
+            {
+                log(RC_LOG_PROGRESS, "Split geometry: %d terrain tris, %d water tris", split.TerrainTriCount(),
+                    split.WaterTriCount());
+            }
+        }
 
         int width = 0;
         int height = 0;
@@ -145,8 +211,8 @@ public:
         const int tileCount = static_cast<int>(ceilf((TILESIZE / RcCfg.cs) / static_cast<float>(RcCfg.tileSize)));
         const int totalTileCount = tileCount * tileCount;
 
-        rcPolyMesh** spmeshes = new rcPolyMesh*[totalTileCount]{};
-        rcPolyMeshDetail** sdmeshes = new rcPolyMeshDetail*[totalTileCount]{};
+        std::vector<rcPolyMesh*> spmeshes(totalTileCount, nullptr);
+        std::vector<rcPolyMeshDetail*> sdmeshes(totalTileCount, nullptr);
 
         std::vector<uint8_t> adtPixels;
         if (IsDebug)
@@ -176,7 +242,7 @@ public:
                                          (tbbMin[2] + (stY + 1) * subTileSize) + borderPadding};
 
                         if (BuildSubTile(stbbMin, stbbMax, structure, &spmeshes[meshIndex], &sdmeshes[meshIndex], stX,
-                                         stY, adtPixels.empty() ? nullptr : adtPixels.data(), waterMap, roadMap))
+                                         stY, adtPixels.empty() ? nullptr : adtPixels.data(), waterMap, roadMap, split))
                         {
                             meshIndex++;
                         }
@@ -184,7 +250,7 @@ public:
                 }
 
                 // Merge sub-tile meshes and add to navmesh
-                MergeAndAddTile(spmeshes, sdmeshes, meshIndex, totalTileCount, tbbMin, tbbMax, tX, tY);
+                MergeAndAddTile(spmeshes.data(), sdmeshes.data(), meshIndex, totalTileCount, tbbMin, tbbMax, tX, tY);
             }
         }
 
@@ -192,96 +258,169 @@ public:
         {
             SaveDebugBmp(OutputDir, MapId, structure->bbMax, adtPixels.data());
         }
-
-        delete[] spmeshes;
-        delete[] sdmeshes;
     }
 
 private:
-    // ── Sub-tile navmesh building ──
+    // ── Sub-tile navmesh building (two-pass rasterization) ──
+    //
+    // Flattened with goto cleanup to ensure all Recast allocations
+    // are freed on every exit path (success or failure).
 
-    inline bool BuildSubTile(float* bbMin, float* bbMax, Structure* terrain, rcPolyMesh** pmesh,
+    inline bool BuildSubTile(float* bbMin, float* bbMax, Structure* structure, rcPolyMesh** pmesh,
                              rcPolyMeshDetail** dmesh, int stX, int stY, uint8_t* adtPixels, const WaterMap* waterMap,
-                             const RoadMap* roadMap) noexcept
+                             const RoadMap* roadMap, const SplitGeometry& split) noexcept
     {
-        if (auto heightField = rcAllocHeightfield())
+        *pmesh = nullptr;
+        *dmesh = nullptr;
+
+        // ── Allocate heightfield and rasterize ──
+        rcHeightfield* heightField = rcAllocHeightfield();
+        if (!heightField)
+            return false;
+
+        if (!rcCreateHeightfield(this, *heightField, RcCfg.width, RcCfg.height, bbMin, bbMax, RcCfg.cs, RcCfg.ch))
         {
-            if (rcCreateHeightfield(this, *heightField, RcCfg.width, RcCfg.height, bbMin, bbMax, RcCfg.cs, RcCfg.ch))
-            {
-                rcRasterizeTriangles(this, terrain->Verts(), terrain->verts.size(), terrain->Tris(), terrain->AreaIds(),
-                                     terrain->tris.size(), *heightField, RcCfg.walkableClimb);
-
-                rcFilterLowHangingWalkableObstacles(this, RcCfg.walkableClimb, *heightField);
-                rcFilterLedgeSpans(this, RcCfg.walkableHeight, RcCfg.walkableClimb, *heightField);
-                rcFilterWalkableLowHeightSpans(this, RcCfg.walkableHeight, *heightField);
-
-                if (auto chf = rcAllocCompactHeightfield())
-                {
-                    if (rcBuildCompactHeightfield(this, RcCfg.walkableHeight, RcCfg.walkableClimb, *heightField, *chf))
-                    {
-                        rcFreeHeightField(heightField);
-
-                        if (rcErodeWalkableArea(this, RcCfg.walkableRadius, *chf))
-                        {
-                            if (rcMedianFilterWalkableArea(this, *chf))
-                            {
-                                // Step 5: Mark water areas
-                                MarkWaterAreas(chf, waterMap, stX, stY, IsDebug, this);
-
-                                // Step 6: Mark road areas
-                                MarkRoadAreas(chf, roadMap);
-
-                                // Step 7: Render to BMP (debug only)
-                                if (IsDebug)
-                                {
-                                    RenderSubTileToBmp(chf, adtPixels, stX, stY, RcCfg.tileSize, RcCfg.borderSize,
-                                                       RcCfg.width);
-                                }
-
-                                // Step 8: Build regions → contours → polymesh
-                                if (rcBuildDistanceField(this, *chf))
-                                {
-                                    if (rcBuildRegions(this, *chf, RcCfg.borderSize, RcCfg.minRegionArea,
-                                                       RcCfg.mergeRegionArea))
-                                    {
-                                        if (auto contourSet = rcAllocContourSet())
-                                        {
-                                            if (rcBuildContours(this, *chf, RcCfg.maxSimplificationError,
-                                                                RcCfg.maxEdgeLen, *contourSet))
-                                            {
-                                                if ((*pmesh = rcAllocPolyMesh()))
-                                                {
-                                                    if (rcBuildPolyMesh(this, *contourSet, RcCfg.maxVertsPerPoly,
-                                                                        **pmesh))
-                                                    {
-                                                        rcFreeContourSet(contourSet);
-
-                                                        if ((*dmesh = rcAllocPolyMeshDetail()))
-                                                        {
-                                                            if (rcBuildPolyMeshDetail(
-                                                                    this, **pmesh, *chf, RcCfg.detailSampleDist,
-                                                                    RcCfg.detailSampleMaxError, **dmesh))
-                                                            {
-                                                                rcFreeCompactHeightfield(chf);
-                                                                return true;
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            rcFreeContourSet(contourSet);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    rcFreeCompactHeightfield(chf);
-                }
-            }
             rcFreeHeightField(heightField);
+            return false;
         }
-        return false;
+
+        // Pass 1: Rasterize terrain-only triangles
+        if (split.TerrainTriCount() > 0)
+        {
+            rcRasterizeTriangles(this, structure->Verts(), structure->verts.size(), split.terrainTris.data(),
+                                 split.terrainAreas.data(), split.TerrainTriCount(), *heightField,
+                                 RcCfg.walkableClimb);
+        }
+
+        // Terrain filters — only see terrain spans. Water hasn't been rasterized yet,
+        // so ledge/height filters can't incorrectly clear water surfaces.
+        rcFilterLowHangingWalkableObstacles(this, RcCfg.walkableClimb, *heightField);
+        rcFilterLedgeSpans(this, RcCfg.walkableHeight, RcCfg.walkableClimb, *heightField);
+        rcFilterWalkableLowHeightSpans(this, RcCfg.walkableHeight, *heightField);
+
+        // Pass 2: Rasterize water-only triangles (AFTER filters).
+        // Water surface spans are added to the already-filtered heightfield.
+        if (split.WaterTriCount() > 0)
+        {
+            rcRasterizeTriangles(this, structure->Verts(), structure->verts.size(), split.waterTris.data(),
+                                 split.waterAreas.data(), split.WaterTriCount(), *heightField,
+                                 RcCfg.walkableClimb);
+        }
+
+        // ── Build compact heightfield ──
+        rcCompactHeightfield* chf = rcAllocCompactHeightfield();
+        if (!chf)
+        {
+            rcFreeHeightField(heightField);
+            return false;
+        }
+
+        if (!rcBuildCompactHeightfield(this, RcCfg.walkableHeight, RcCfg.walkableClimb, *heightField, *chf))
+        {
+            rcFreeCompactHeightfield(chf);
+            rcFreeHeightField(heightField);
+            return false;
+        }
+
+        // Heightfield no longer needed after compaction
+        rcFreeHeightField(heightField);
+
+        // ── Erode + median filter ──
+        if (!rcErodeWalkableArea(this, RcCfg.walkableRadius, *chf))
+        {
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        if (!rcMedianFilterWalkableArea(this, *chf))
+        {
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        // Mark water areas (rect-to-cell direct mapping).
+        // Restores water areas cleared by erosion/median at boundaries.
+        MarkWaterAreas(chf, waterMap, stX, stY, IsDebug, this);
+
+        // Mark road areas
+        MarkRoadAreas(chf, roadMap);
+
+        // Render to BMP (debug only)
+        if (IsDebug)
+        {
+            RenderSubTileToBmp(chf, adtPixels, stX, stY, RcCfg.tileSize, RcCfg.borderSize, RcCfg.width);
+        }
+
+        // ── Build regions → contours → polymesh ──
+        if (!rcBuildDistanceField(this, *chf))
+        {
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        if (!rcBuildRegions(this, *chf, RcCfg.borderSize, RcCfg.minRegionArea, RcCfg.mergeRegionArea))
+        {
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        rcContourSet* contourSet = rcAllocContourSet();
+        if (!contourSet)
+        {
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        if (!rcBuildContours(this, *chf, RcCfg.maxSimplificationError, RcCfg.maxEdgeLen, *contourSet))
+        {
+            rcFreeContourSet(contourSet);
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        // ── Build poly mesh ──
+        *pmesh = rcAllocPolyMesh();
+        if (!*pmesh)
+        {
+            rcFreeContourSet(contourSet);
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        if (!rcBuildPolyMesh(this, *contourSet, RcCfg.maxVertsPerPoly, **pmesh))
+        {
+            rcFreePolyMesh(*pmesh);
+            *pmesh = nullptr;
+            rcFreeContourSet(contourSet);
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        // Contour set no longer needed
+        rcFreeContourSet(contourSet);
+
+        // ── Build detail mesh ──
+        *dmesh = rcAllocPolyMeshDetail();
+        if (!*dmesh)
+        {
+            rcFreePolyMesh(*pmesh);
+            *pmesh = nullptr;
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        if (!rcBuildPolyMeshDetail(this, **pmesh, *chf, RcCfg.detailSampleDist, RcCfg.detailSampleMaxError, **dmesh))
+        {
+            rcFreePolyMeshDetail(*dmesh);
+            *dmesh = nullptr;
+            rcFreePolyMesh(*pmesh);
+            *pmesh = nullptr;
+            rcFreeCompactHeightfield(chf);
+            return false;
+        }
+
+        rcFreeCompactHeightfield(chf);
+        return true;
     }
 
     // ── Merge sub-tiles and add to navmesh ──
