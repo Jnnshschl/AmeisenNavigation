@@ -5,14 +5,19 @@
     <TargetFramework>net10.0-windows7.0</TargetFramework>
     <UseWPF>true</UseWPF>
     <PlatformTarget>x86</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Drawing.Common" Version="10.0.3" />
+    <ProjectReference Include="..\AnTCP.Client\AnTCP.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AnTCP.Client\AnTCP.Client.csproj" />
+    <None Include="..\dep\StormLib\Win32\StormLib.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>StormLib.dll</Link>
+    </None>
   </ItemGroup>
 
 </Project>

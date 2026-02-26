@@ -1,53 +1,229 @@
-﻿<Window x:Class="AmeisenNavigation.Tester.MainWindow"
+<Window x:Class="AmeisenNavigation.Tester.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-        xmlns:local="clr-namespace:AmeisenNavigation.Tester"
-        mc:Ignorable="d"
-        Title="AmeisenNavigation Tester" Height="450" Width="900" MinHeight="450" MinWidth="900" Loaded="Window_Loaded">
-    <Window.Resources>
-        <ObjectDataProvider x:Key="ContentDict" MethodName="GetChoises"/>
-    </Window.Resources>
+        xmlns:controls="clr-namespace:AmeisenNavigation.Tester.Controls"
+        Title="AmeisenNavigation Tester" Height="750" Width="1250"
+        MinHeight="600" MinWidth="1000"
+        Loaded="Window_Loaded" Closing="Window_Closing">
+
     <Grid>
-        <ComboBox x:Name="ComboBoxMap" Margin="385,10,0,0"  ItemsSource="{Binding Source={StaticResource ContentDict}}" SelectedValue="Key" DisplayMemberPath="Value" HorizontalAlignment="Left" VerticalAlignment="Top" Width="120" Height="18"/>
-        <Button x:Name="ButtonRun" Content="GetPath" Margin="385,33,0,0" VerticalAlignment="Top" Click="ButtonRun_Click" Height="18" HorizontalAlignment="Left" Width="120" />
-        <Rectangle x:Name="ImgRect" Margin="10,60,280,10" Fill="Gainsboro" />
-        <Image x:Name="ImgCanvas" Margin="10,60,280,10" />
-        <ListBox x:Name="PointList" Margin="0,300,10,10" HorizontalAlignment="Right" Width="265" />
-        <Label Content="Start" HorizontalAlignment="Left" Margin="10,10,0,0" VerticalAlignment="Top" Padding="1"/>
-        <Label Content="End" HorizontalAlignment="Left" Margin="10,33,0,0" VerticalAlignment="Top" Padding="1"/>
-        <TextBox x:Name="TextBoxStartX" HorizontalAlignment="Left" Margin="41,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
-        <TextBox x:Name="TextBoxStartY" HorizontalAlignment="Left" Margin="146,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
-        <TextBox x:Name="TextBoxStartZ" HorizontalAlignment="Left" Margin="251,10,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
-        <TextBox x:Name="TextBoxEndX" HorizontalAlignment="Left" Margin="41,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
-        <TextBox x:Name="TextBoxEndY" HorizontalAlignment="Left" Margin="146,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
-        <TextBox x:Name="TextBoxEndZ" HorizontalAlignment="Left" Margin="251,33,0,0" Text="0.0" TextWrapping="Wrap" VerticalAlignment="Top" Width="100"/>
-        <Button x:Name="ButtonRandomStart" Content="R" HorizontalAlignment="Left" Margin="356,10,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomStart_Click"/>
-        <Button x:Name="ButtonRandomEnd" Content="R" HorizontalAlignment="Left" Margin="356,33,0,0" VerticalAlignment="Top" Height="18" Padding="0" Width="24" FontSize="10" Click="ButtonRandomEnd_Click"/>
-        <Label Content="PathType" Margin="0,2,218,0" VerticalAlignment="Top" FontWeight="Bold" HorizontalAlignment="Right" Width="62"/>
-        <RadioButton x:Name="rbPathTypeStraight" Content="STRAIGHT" Margin="0,32,202,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" IsChecked="True" GroupName="pathType" Click="TypeFlags_Click"/>
-        <RadioButton x:Name="rbPathTypeRandom" Content="RANDOM" Margin="0,32,126,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="71" GroupName="pathType" Click="TypeFlags_Click"/>
-        <Label Content="Flags" Margin="0,52,218,0" VerticalAlignment="Top" FontWeight="Bold" HorizontalAlignment="Right" Width="62"/>
-        <CheckBox x:Name="rbPathFlagsChaikin" Content="CHAIKIN" Margin="0,82,202,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" Checked="RbPathFlagsChaikin_Checked" Click="TypeFlags_Click"/>
-        <CheckBox x:Name="rbPathFlagsCatmullRom" Content="CATMULLROM" Margin="0,82,99,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="98" Checked="RbPathFlagsCatmullRom_Checked" Click="TypeFlags_Click"/>
-        <CheckBox x:Name="rbPathFlagsBezier" Content="BEZIER" Margin="0,82,16,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" Checked="RbPathFlagsBezier_Checked" Click="TypeFlags_Click"/>
-        <CheckBox x:Name="rbPathFlagsValidateCpop" Content="VALIDATE_CPOP" Margin="0,102,173,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="102" Checked="RbPathFlagsValidateCpop_Checked" Click="TypeFlags_Click"/>
-        <CheckBox x:Name="rbPathFlagsValidateMas" Content="VALIDATE_MAS" Margin="0,102,60,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="102" Checked="RbPathFlagsValidateMas_Checked" Click="TypeFlags_Click"/>
-        <Label x:Name="lblPointCount" Content="Points: 0" Margin="506,2,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" Width="102"/>
-        <Label x:Name="lblDistance" Content="0 m" Margin="506,18,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" Width="102"/>
-        <Label x:Name="lblTime" Content="0 ms" Margin="506,32,0,0" VerticalAlignment="Top" HorizontalAlignment="Left" Width="102"/>
-        <Label Content="ClientState" Margin="0,122,202,0" VerticalAlignment="Top" FontWeight="Bold" HorizontalAlignment="Right" Width="78"/>
-        <RadioButton x:Name="rbClientStateNormal" Content="NORMAL" Margin="0,153,202,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" IsChecked="True" GroupName="clientState" Click="RbClientState_Click"/>
-        <RadioButton x:Name="rbClientStateDead" Content="DEAD" Margin="0,173,202,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="73" GroupName="clientState" Click="RbClientState_Click"/>
-        <RadioButton x:Name="rbClientStateNormalAlly" Content="NORMAL ALLIANCE" Margin="0,153,52,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="132" GroupName="clientState" Click="RbClientState_Click"/>
-        <RadioButton x:Name="rbClientStateNormalHorde" Content="NORMAL HORDE" Margin="0,173,60,0" VerticalAlignment="Top" HorizontalAlignment="Right" Width="124" GroupName="clientState" Click="RbClientState_Click"/>
-        <Label Content="AreaCosts" Margin="0,193,202,0" VerticalAlignment="Top" FontWeight="Bold" HorizontalAlignment="Right" Width="78"/>
-        <Slider x:Name="sldCostWater" Margin="0,219,10,0" VerticalAlignment="Top" Value="1.3" Maximum="25" Minimum="1" ValueChanged="SldCostWater_ValueChanged" HorizontalAlignment="Right" Width="152"/>
-        <Label x:Name="lblCostWater" Content="Water: 1.3" HorizontalAlignment="Right" Margin="0,215,167,0" VerticalAlignment="Top"/>
-        <Slider x:Name="sldCostBadLiquid" Margin="0,246,10,0" VerticalAlignment="Top" Value="4" Maximum="25" Minimum="1" ValueChanged="SldCostBadLiquid_ValueChanged" HorizontalAlignment="Right" Width="152"/>
-        <Label x:Name="lblCostBadLiquid" Content="Magma/Slime: 4.0" HorizontalAlignment="Right" Margin="0,242,167,0" VerticalAlignment="Top"/>
-        <Slider x:Name="sldCostGround" Margin="0,272,10,0" VerticalAlignment="Top" Value="1" Maximum="25" Minimum="1" ValueChanged="SldCostGround_ValueChanged" HorizontalAlignment="Right" Width="152"/>
-        <Label x:Name="lblCostGround" Content="Ground: 1.0" HorizontalAlignment="Right" Margin="0,268,167,0" VerticalAlignment="Top"/>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*" MinWidth="400"/>
+            <ColumnDefinition Width="5"/>
+            <ColumnDefinition Width="300" MinWidth="250" MaxWidth="450"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- Map Canvas -->
+        <Border Grid.Column="0" Grid.Row="0"
+                BorderBrush="{StaticResource BorderBrush}" BorderThickness="0,0,1,0">
+            <controls:MapCanvas x:Name="MapCanvas" ClipToBounds="True"/>
+        </Border>
+
+        <!-- Splitter -->
+        <GridSplitter Grid.Column="1" Grid.Row="0"
+                      Width="5" HorizontalAlignment="Stretch"
+                      ResizeBehavior="PreviousAndNext"/>
+
+        <!-- Control Panel -->
+        <ScrollViewer Grid.Column="2" Grid.Row="0"
+                      VerticalScrollBarVisibility="Auto"
+                      HorizontalScrollBarVisibility="Disabled"
+                      Background="{StaticResource BackgroundDark}">
+            <StackPanel Margin="8">
+
+                <!-- Data Source -->
+                <GroupBox Header="Data Source" Margin="0,0,0,6">
+                    <DockPanel>
+                        <Button x:Name="BtnBrowseData" Content="Browse"
+                                DockPanel.Dock="Right" Width="60" Margin="4,0,0,0"
+                                Click="BtnBrowseData_Click"/>
+                        <TextBox x:Name="TxtDataDir" IsReadOnly="True"
+                                 Text="Select WoW Data directory..."
+                                 Foreground="{StaticResource ForegroundDimBrush}"/>
+                    </DockPanel>
+                </GroupBox>
+
+                <!-- Connection -->
+                <GroupBox Header="Connection" Margin="0,0,0,6">
+                    <StackPanel>
+                        <DockPanel>
+                            <Label Content="Map" Width="40"/>
+                            <ComboBox x:Name="ComboBoxMap"
+                                      DisplayMemberPath="Value" SelectedValuePath="Key"
+                                      SelectionChanged="ComboBoxMap_SelectionChanged"/>
+                        </DockPanel>
+                        <DockPanel Margin="0,4,0,0">
+                            <Button x:Name="ButtonRun" Content="Get Path"
+                                    DockPanel.Dock="Right" Width="80"
+                                    Click="ButtonRun_Click"/>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                <Ellipse x:Name="StatusIndicator" Width="10" Height="10"
+                                         Fill="#ff3333" Margin="4,0,6,0"/>
+                                <TextBlock x:Name="TxtConnectionStatus" Text="Disconnected"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </DockPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Coordinates -->
+                <GroupBox Header="Coordinates" Margin="0,0,0,6">
+                    <StackPanel>
+                        <TextBlock Text="Right-click map to set End, Shift+Right-click for Start"
+                                   Foreground="{StaticResource ForegroundDimBrush}"
+                                   FontSize="10" Margin="0,0,0,4"/>
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="38"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="26"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="4"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Text="Start"
+                                       VerticalAlignment="Center" Foreground="#00ff00"/>
+                            <TextBox x:Name="TextBoxStartX" Grid.Row="0" Grid.Column="1" Margin="2,0"/>
+                            <TextBox x:Name="TextBoxStartY" Grid.Row="0" Grid.Column="2" Margin="2,0"/>
+                            <TextBox x:Name="TextBoxStartZ" Grid.Row="0" Grid.Column="3" Margin="2,0"/>
+                            <Button x:Name="ButtonRandomStart" Grid.Row="0" Grid.Column="4"
+                                    Content="R" Padding="0" FontSize="10"
+                                    Click="ButtonRandomStart_Click"/>
+
+                            <TextBlock Grid.Row="2" Grid.Column="0" Text="End"
+                                       VerticalAlignment="Center" Foreground="#ff3333"/>
+                            <TextBox x:Name="TextBoxEndX" Grid.Row="2" Grid.Column="1" Margin="2,0"/>
+                            <TextBox x:Name="TextBoxEndY" Grid.Row="2" Grid.Column="2" Margin="2,0"/>
+                            <TextBox x:Name="TextBoxEndZ" Grid.Row="2" Grid.Column="3" Margin="2,0"/>
+                            <Button x:Name="ButtonRandomEnd" Grid.Row="2" Grid.Column="4"
+                                    Content="R" Padding="0" FontSize="10"
+                                    Click="ButtonRandomEnd_Click"/>
+                        </Grid>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Path Options -->
+                <GroupBox Header="Path Options" Margin="0,0,0,6">
+                    <StackPanel>
+                        <TextBlock Text="Type" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <WrapPanel>
+                            <RadioButton x:Name="rbPathTypeStraight" Content="Straight"
+                                         IsChecked="True" GroupName="pathType"
+                                         Margin="0,0,12,0" Click="PathOption_Changed"/>
+                            <RadioButton x:Name="rbPathTypeRandom" Content="Random"
+                                         GroupName="pathType" Click="PathOption_Changed"/>
+                        </WrapPanel>
+
+                        <TextBlock Text="Smoothing" FontWeight="SemiBold" Margin="0,8,0,2"/>
+                        <WrapPanel>
+                            <CheckBox x:Name="rbPathFlagsChaikin" Content="Chaikin"
+                                      Margin="0,0,12,0" Click="PathOption_Changed"
+                                      Checked="RbPathFlagsChaikin_Checked"/>
+                            <CheckBox x:Name="rbPathFlagsCatmullRom" Content="Catmull-Rom"
+                                      Margin="0,0,12,0" Click="PathOption_Changed"
+                                      Checked="RbPathFlagsCatmullRom_Checked"/>
+                            <CheckBox x:Name="rbPathFlagsBezier" Content="Bezier"
+                                      Margin="0,0,12,0" Click="PathOption_Changed"
+                                      Checked="RbPathFlagsBezier_Checked"/>
+                        </WrapPanel>
+
+                        <TextBlock Text="Validation" FontWeight="SemiBold" Margin="0,8,0,2"/>
+                        <WrapPanel>
+                            <CheckBox x:Name="rbPathFlagsValidateCpop" Content="CPOP"
+                                      Margin="0,0,12,0" Click="PathOption_Changed"
+                                      Checked="RbPathFlagsValidateCpop_Checked"/>
+                            <CheckBox x:Name="rbPathFlagsValidateMas" Content="MAS"
+                                      Margin="0,0,12,0" Click="PathOption_Changed"
+                                      Checked="RbPathFlagsValidateMas_Checked"/>
+                        </WrapPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Filter Config -->
+                <GroupBox Header="Filter Config" Margin="0,0,0,6">
+                    <StackPanel>
+                        <TextBlock Text="Client State" FontWeight="SemiBold" Margin="0,0,0,2"/>
+                        <WrapPanel>
+                            <RadioButton x:Name="rbClientStateNormal" Content="Normal"
+                                         IsChecked="True" GroupName="clientState"
+                                         Margin="0,0,10,4" Click="RbClientState_Click"/>
+                            <RadioButton x:Name="rbClientStateDead" Content="Dead"
+                                         GroupName="clientState"
+                                         Margin="0,0,10,4" Click="RbClientState_Click"/>
+                            <RadioButton x:Name="rbClientStateNormalAlly" Content="Alliance"
+                                         GroupName="clientState"
+                                         Margin="0,0,10,4" Click="RbClientState_Click"/>
+                            <RadioButton x:Name="rbClientStateNormalHorde" Content="Horde"
+                                         GroupName="clientState"
+                                         Margin="0,0,10,4" Click="RbClientState_Click"/>
+                        </WrapPanel>
+
+                        <TextBlock Text="Area Costs" FontWeight="SemiBold" Margin="0,6,0,2"/>
+                        <DockPanel Margin="0,2,0,0">
+                            <TextBlock x:Name="lblCostWater" Text="Water: 1.3" Width="100"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="sldCostWater" Minimum="1" Maximum="25" Value="1.3"
+                                    ValueChanged="SldCostWater_ValueChanged"/>
+                        </DockPanel>
+                        <DockPanel Margin="0,2,0,0">
+                            <TextBlock x:Name="lblCostBadLiquid" Text="Magma/Slime: 4.0" Width="100"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="sldCostBadLiquid" Minimum="1" Maximum="25" Value="4"
+                                    ValueChanged="SldCostBadLiquid_ValueChanged"/>
+                        </DockPanel>
+                        <DockPanel Margin="0,2,0,0">
+                            <TextBlock x:Name="lblCostGround" Text="Ground: 1.0" Width="100"
+                                       VerticalAlignment="Center"/>
+                            <Slider x:Name="sldCostGround" Minimum="1" Maximum="25" Value="1"
+                                    ValueChanged="SldCostGround_ValueChanged"/>
+                        </DockPanel>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Stats -->
+                <GroupBox Header="Stats" Margin="0,0,0,6">
+                    <StackPanel>
+                        <TextBlock x:Name="lblPointCount" Text="Points: 0"/>
+                        <TextBlock x:Name="lblDistance" Text="0 m"/>
+                        <TextBlock x:Name="lblTime" Text="0 ms"/>
+                    </StackPanel>
+                </GroupBox>
+
+                <!-- Path Points -->
+                <GroupBox Header="Path Points" Margin="0,0,0,6">
+                    <ListBox x:Name="PointList" MaxHeight="200"
+                             FontFamily="Consolas" FontSize="11"/>
+                </GroupBox>
+
+            </StackPanel>
+        </ScrollViewer>
+
+        <!-- Status Bar -->
+        <StatusBar Grid.Row="1" Grid.ColumnSpan="3">
+            <StatusBarItem>
+                <TextBlock x:Name="TxtStatusConnection" Text="Disconnected" Foreground="#ff3333"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock x:Name="TxtStatusCoords" Text="X: 0.0  Y: 0.0"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock x:Name="TxtStatusTile" Text="Tile: -, -"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock x:Name="TxtStatusZoom" Text="Zoom: 1.0x"/>
+            </StatusBarItem>
+        </StatusBar>
     </Grid>
 </Window>

@@ -1,397 +1,466 @@
-﻿using AnTCP.Client;
+using AmeisenNavigation.Tester.Controls;
+using AmeisenNavigation.Tester.Converters;
+using AmeisenNavigation.Tester.Services;
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
-using System.Drawing.Imaging;
+using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Numerics;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Media.Imaging;
+using System.Windows.Media;
 
 namespace AmeisenNavigation.Tester
 {
-    public enum MessageType
-    {
-        PATH,                   // Generate a simple straight path
-        MOVE_ALONG_SURFACE,     // Move an entity by small deltas using pathfinding (usefull to prevent falling off edges...)
-        RANDOM_POINT,           // Get a random point on the mesh
-        RANDOM_POINT_AROUND,    // Get a random point on the mesh in a circle
-        CAST_RAY,               // Cast a movement ray to test for obstacles
-        RANDOM_PATH,            // Generate a straight path where the nodes get offsetted by a random value
-        EXPLORE_POLY,           // Generate a route to explore the polygon (W.I.P)
-        CONFIGURE_FILTER,       // Cpnfigure the clients dtQueryFilter area costs
-    };
-
-    public enum PathType
-    {
-        STRAIGHT,
-        RANDOM,
-    };
-
     public partial class MainWindow : Window
     {
+        private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
+
+        private readonly NavmeshClient _navClient = new();
+        private MpqArchiveSet? _mpq;
+        private TileCache? _tileCache;
+        private bool _isBusy;
+
+        // Debounce for cost/filter slider changes
+        private CancellationTokenSource? _filterDebounce;
+
+        private static readonly string SettingsPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "AmeisenNavigation", "tester_settings.txt");
+
         private int MapId
         {
             get
             {
-                return ComboBoxMap.SelectedItem is KeyValuePair<int, string> kvp ? kvp.Key : 0;
+                if (ComboBoxMap.SelectedItem is KeyValuePair<int, string> kvp)
+                    return kvp.Key;
+                return 0;
             }
         }
 
         public MainWindow()
         {
             InitializeComponent();
-            Client = new("127.0.0.1", 47110);
+            ComboBoxMap.ItemsSource = MapDefinitions.GetChoices();
+
+            MapCanvas.StartPointSet += MapCanvas_StartPointSet;
+            MapCanvas.EndPointSet += MapCanvas_EndPointSet;
+            MapCanvas.CursorMoved += MapCanvas_CursorMoved;
         }
 
-        private AnTcpClient Client { get; set; }
+        private async void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            ComboBoxMap.SelectedIndex = 0;
 
-        public IEnumerable<Vector3> GetPath(MessageType msgType, int mapId, Vector3 start, Vector3 end, int flags)
+            TextBoxStartX.Text = "-8826.5625";
+            TextBoxStartY.Text = "-371.8398";
+            TextBoxStartZ.Text = "71.6384";
+            TextBoxEndX.Text = "-8918.4063";
+            TextBoxEndY.Text = "-130.2973";
+            TextBoxEndZ.Text = "80.9064";
+
+            await TryRestoreDataDirAsync();
+            await UpdateConnectionStatusAsync();
+        }
+
+        private void Window_Closing(object sender, CancelEventArgs e)
+        {
+            _filterDebounce?.Cancel();
+            _navClient.Dispose();
+            _mpq?.Dispose();
+        }
+
+        // --- Busy guard ---
+
+        private void SetBusy(bool busy)
+        {
+            _isBusy = busy;
+            ButtonRun.IsEnabled = !busy;
+            ButtonRandomStart.IsEnabled = !busy;
+            ButtonRandomEnd.IsEnabled = !busy;
+        }
+
+        // --- Data Source ---
+
+        private async void BtnBrowseData_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFileDialog
+            {
+                Title = "Select any file in WoW Data directory",
+                Filter = "MPQ files (*.mpq)|*.mpq|All files (*.*)|*.*",
+                CheckFileExists = true,
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                string? dir = Path.GetDirectoryName(dialog.FileName);
+                if (dir != null)
+                    await LoadDataDirAsync(dir);
+            }
+        }
+
+        private async Task LoadDataDirAsync(string dir)
+        {
+            _mpq?.Dispose();
+            _tileCache?.ClearMemoryCache();
+
+            TxtDataDir.Text = "Loading MPQ archives...";
+            TxtDataDir.Foreground = (Brush)FindResource("ForegroundDimBrush");
+
+            var mpq = new MpqArchiveSet();
+            bool loaded = await Task.Run(() => mpq.Load(dir));
+
+            if (!loaded)
+            {
+                MessageBox.Show($"No MPQ files found in:\n{dir}", "Error",
+                    MessageBoxButton.OK, MessageBoxImage.Warning);
+                mpq.Dispose();
+                return;
+            }
+
+            _mpq = mpq;
+            TxtDataDir.Text = $"{dir} ({_mpq.ArchiveCount} MPQs)";
+            TxtDataDir.Foreground = (Brush)FindResource("ForegroundBrush");
+
+            _tileCache = new TileCache(_mpq, Dispatcher, () => MapCanvas.InvalidateVisual());
+            MapCanvas.SetTileCache(_tileCache);
+            UpdateMapCanvas();
+
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+                File.WriteAllText(SettingsPath, dir);
+            }
+            catch { }
+        }
+
+        private async Task TryRestoreDataDirAsync()
         {
             try
             {
-                return Client.IsConnected ? Client.Send((byte)msgType, (mapId, flags, start, end)).AsArray<Vector3>() : [];
+                if (File.Exists(SettingsPath))
+                {
+                    string dir = File.ReadAllText(SettingsPath).Trim();
+                    if (Directory.Exists(dir))
+                        await LoadDataDirAsync(dir);
+                }
             }
-            catch
-            {
-                return [];
-            }
+            catch { }
         }
 
-        public Vector3 GetPoint(int mapId)
+        // --- Connection ---
+
+        private async Task UpdateConnectionStatusAsync()
         {
+            bool connected = await _navClient.TryConnectAsync();
+            StatusIndicator.Fill = connected
+                ? new SolidColorBrush(Color.FromRgb(0, 200, 0))
+                : new SolidColorBrush(Color.FromRgb(255, 51, 51));
+            TxtConnectionStatus.Text = connected ? "Connected" : "Disconnected";
+            TxtStatusConnection.Text = TxtConnectionStatus.Text;
+            TxtStatusConnection.Foreground = StatusIndicator.Fill;
+        }
+
+        // --- Map ---
+
+        private void ComboBoxMap_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            _tileCache?.ClearMemoryCache();
+            UpdateMapCanvas();
+        }
+
+        private void UpdateMapCanvas()
+        {
+            int mapId = MapId;
+            if (MapDefinitions.InternalNames.TryGetValue(mapId, out string? name))
+                MapCanvas.SetMapName(name);
+        }
+
+        // --- Coordinates (map click) → auto-pathfind ---
+
+        private async void MapCanvas_StartPointSet(object? sender, WorldPointEventArgs e)
+        {
+            TextBoxStartX.Text = e.WorldX.ToString("F2", Inv);
+            TextBoxStartY.Text = e.WorldY.ToString("F2", Inv);
+            await TrySnapZAsync(TextBoxStartZ, e.WorldX, e.WorldY);
+            UpdateEndpointsOnCanvas();
+            await RunPathfindingAsync(fitToPath: false);
+        }
+
+        private async void MapCanvas_EndPointSet(object? sender, WorldPointEventArgs e)
+        {
+            TextBoxEndX.Text = e.WorldX.ToString("F2", Inv);
+            TextBoxEndY.Text = e.WorldY.ToString("F2", Inv);
+            await TrySnapZAsync(TextBoxEndZ, e.WorldX, e.WorldY);
+            UpdateEndpointsOnCanvas();
+            await RunPathfindingAsync(fitToPath: false);
+        }
+
+        private async Task TrySnapZAsync(TextBox zBox, float worldX, float worldY)
+        {
+            if (!_navClient.IsConnected)
+            {
+                if (!float.TryParse(zBox.Text, Inv, out _))
+                    zBox.Text = "0";
+                return;
+            }
+
+            float currentZ = float.TryParse(zBox.Text, Inv, out float z) ? z : 200f;
+            var probe = new Vector3(worldX, worldY, currentZ);
+            var snapped = await _navClient.MoveAlongSurfaceAsync(MapId, probe, probe);
+
+            if (snapped.X != 0 || snapped.Y != 0 || snapped.Z != 0)
+                zBox.Text = snapped.Z.ToString("F2", Inv);
+        }
+
+        private void UpdateEndpointsOnCanvas()
+        {
+            MapCanvas.SetEndpoints(TryParseStartPoint(), TryParseEndPoint());
+            MapCanvas.InvalidateVisual();
+        }
+
+        private void MapCanvas_CursorMoved(object? sender, WorldPointEventArgs e)
+        {
+            TxtStatusCoords.Text = $"X: {e.WorldX:F1}  Y: {e.WorldY:F1}";
+            var (tx, ty) = WowCoordinateConverter.WorldToTile(e.WorldX, e.WorldY);
+            TxtStatusTile.Text = $"Tile: {tx}, {ty}";
+            if (_tileCache != null)
+                TxtStatusZoom.Text = $"Tiles: {_tileCache.TilesLoaded} loaded, {_tileCache.TilesFailed} missing";
+        }
+
+        // --- Path ---
+
+        private async void ButtonRun_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isBusy) return;
+            SetBusy(true);
             try
             {
-                return Client.IsConnected ? Client.Send((byte)MessageType.RANDOM_POINT, mapId).As<Vector3>() : new();
+                await UpdateConnectionStatusAsync();
+                await RunPathfindingAsync(fitToPath: true);
             }
-            catch
+            finally { SetBusy(false); }
+        }
+
+        private async void ButtonRandomStart_Click(object sender, RoutedEventArgs e)
+        {
+            if (_isBusy) return;
+            SetBusy(true);
+            try
             {
-                return new();
+                await UpdateConnectionStatusAsync();
+                if (!_navClient.IsConnected) return;
+
+                Vector3 pos = await _navClient.GetRandomPointAsync(MapId);
+                TextBoxStartX.Text = pos.X.ToString("F4", Inv);
+                TextBoxStartY.Text = pos.Y.ToString("F4", Inv);
+                TextBoxStartZ.Text = pos.Z.ToString("F4", Inv);
+                await RunPathfindingAsync(fitToPath: true);
             }
+            finally { SetBusy(false); }
         }
 
-        private static void DrawPath(IEnumerable<Vector3> path, float minX, float minY, int padding, float factor, Graphics graphics, Pen linePen, SolidBrush nodeStartBrush, SolidBrush nodeEndBrush, SolidBrush nodeBrush)
+        private async void ButtonRandomEnd_Click(object sender, RoutedEventArgs e)
         {
-            int nodeSize = (int)(factor * 2);
-            Vector2 lastN = new(path.First().X - minX + padding, path.First().Y - minY + padding);
-            int nodeCount = path.Count();
-
-            for (int i = 1; i < nodeCount; ++i)
+            if (_isBusy) return;
+            SetBusy(true);
+            try
             {
-                Vector2 n = new(path.ElementAt(i).X - minX + padding, path.ElementAt(i).Y - minY + padding);
+                await UpdateConnectionStatusAsync();
+                if (!_navClient.IsConnected) return;
 
-                int x = (int)(n.X * factor);
-                int y = (int)(n.Y * factor);
-
-                int prevX = (int)(lastN.X * factor);
-                int prevY = (int)(lastN.Y * factor);
-
-                graphics.DrawLine(linePen, x, y, prevX, prevY);
-                graphics.FillRectangle(i == nodeCount - 1 ? nodeEndBrush : nodeBrush, new(x - (nodeSize / 2), y - (nodeSize / 2), nodeSize, nodeSize));
-                graphics.FillRectangle(i == 1 ? nodeStartBrush : nodeBrush, new(prevX - (nodeSize / 2), prevY - (nodeSize / 2), nodeSize, nodeSize));
-
-                lastN = n;
+                Vector3 pos = await _navClient.GetRandomPointAsync(MapId);
+                TextBoxEndX.Text = pos.X.ToString("F4", Inv);
+                TextBoxEndY.Text = pos.Y.ToString("F4", Inv);
+                TextBoxEndZ.Text = pos.Z.ToString("F4", Inv);
+                await RunPathfindingAsync(fitToPath: true);
             }
+            finally { SetBusy(false); }
         }
 
-        private static bool TryLoadFloat(TextBox textBox, out float f)
+        /// <summary>
+        /// Core pathfinding. Does NOT manage busy state — callers handle that.
+        /// When fitToPath is false, the camera stays where it is (map clicks, cost re-runs).
+        /// When the path is empty, nothing changes (no camera move, no path clear).
+        /// </summary>
+        private async Task RunPathfindingAsync(bool fitToPath)
         {
-            bool result = float.TryParse(textBox.Text, out f);
-            // mark textbox red
-            return result;
-        }
+            if (!_navClient.IsConnected) return;
 
-        private void ButtonRandomEnd_Click(object sender, RoutedEventArgs e)
-        {
-            if (!Client.IsConnected)
-            {
-                try
-                {
-                    Client.Connect();
-                }
-                catch
-                {
-                    // ignored, will happen when we cant connect
-                    return;
-                }
-            }
+            var start = TryParseStartPoint();
+            var end = TryParseEndPoint();
+            if (start == null || end == null) return;
 
-            Vector3 pos = GetPoint(MapId);
-            TextBoxEndX.Text = pos.X.ToString();
-            TextBoxEndY.Text = pos.Y.ToString();
-            TextBoxEndZ.Text = pos.Z.ToString();
-
-            GetPathAndDraw();
-        }
-
-        private void ButtonRandomStart_Click(object sender, RoutedEventArgs e)
-        {
-            if (!Client.IsConnected)
-            {
-                try
-                {
-                    Client.Connect();
-                }
-                catch
-                {
-                    // ignored, will happen when we cant connect
-                    return;
-                }
-            }
-
-            Vector3 pos = GetPoint(MapId);
-            TextBoxStartX.Text = pos.X.ToString();
-            TextBoxStartY.Text = pos.Y.ToString();
-            TextBoxStartZ.Text = pos.Z.ToString();
-
-            GetPathAndDraw();
-        }
-
-        private void ButtonRun_Click(object sender, RoutedEventArgs e)
-        {
-            GetPathAndDraw();
-        }
-
-        private void GetPathAndDraw()
-        {
             int flags = 0;
+            if (rbPathFlagsChaikin.IsChecked == true) flags |= 1;
+            if (rbPathFlagsCatmullRom.IsChecked == true) flags |= 2;
+            if (rbPathFlagsBezier.IsChecked == true) flags |= 4;
+            if (rbPathFlagsValidateCpop.IsChecked == true) flags |= 8;
+            if (rbPathFlagsValidateMas.IsChecked == true) flags |= 16;
 
-            if (rbPathFlagsChaikin.IsChecked == true) { flags |= 1; }
-            if (rbPathFlagsCatmullRom.IsChecked == true) { flags |= 2; }
-            if (rbPathFlagsBezier.IsChecked == true) { flags |= 4; }
-            if (rbPathFlagsValidateCpop.IsChecked == true) { flags |= 8; }
-            if (rbPathFlagsValidateMas.IsChecked == true) { flags |= 16; }
+            MessageType msgType = rbPathTypeRandom.IsChecked == true
+                ? MessageType.RANDOM_PATH
+                : MessageType.PATH;
 
-            PathType type = PathType.STRAIGHT;
+            long startTime = Stopwatch.GetTimestamp();
+            var path = await _navClient.GetPathAsync(msgType, MapId, start.Value, end.Value, flags);
+            TimeSpan elapsed = Stopwatch.GetElapsedTime(startTime);
 
-            if (rbPathTypeRandom.IsChecked == true) { type = PathType.RANDOM; }
+            if (path.Count == 0)
+            {
+                TxtStatusConnection.Text = "No path found";
+                return;
+            }
 
-            Run(flags, type);
+            MapCanvas.SetPath(path);
+            MapCanvas.SetEndpoints(start, end);
+
+            if (fitToPath)
+                MapCanvas.FitPathInView();
+            else
+                MapCanvas.InvalidateVisual();
+
+            lblPointCount.Text = $"Points: {path.Count}";
+            lblTime.Text = $"{elapsed.TotalMilliseconds:F2} ms";
+
+            float distance = 0;
+            for (int i = 1; i < path.Count; i++)
+                distance += (float)path[i - 1].GetDistance(path[i]);
+            lblDistance.Text = $"{MathF.Round(distance, 2)} m";
+
+            PointList.ItemsSource = path.Select(p => p.ToString());
         }
 
-        private void RbPathFlagsBezier_Checked(object sender, RoutedEventArgs e)
+        private Vector3? TryParseStartPoint()
         {
-            rbPathFlagsChaikin.IsChecked = false;
-            rbPathFlagsCatmullRom.IsChecked = false;
+            if (float.TryParse(TextBoxStartX.Text, Inv, out float x)
+                && float.TryParse(TextBoxStartY.Text, Inv, out float y)
+                && float.TryParse(TextBoxStartZ.Text, Inv, out float z))
+                return new Vector3(x, y, z);
+            return null;
+        }
+
+        private Vector3? TryParseEndPoint()
+        {
+            if (float.TryParse(TextBoxEndX.Text, Inv, out float x)
+                && float.TryParse(TextBoxEndY.Text, Inv, out float y)
+                && float.TryParse(TextBoxEndZ.Text, Inv, out float z))
+                return new Vector3(x, y, z);
+            return null;
+        }
+
+        // --- Smoothing mutual exclusion ---
+
+        private void RbPathFlagsChaikin_Checked(object sender, RoutedEventArgs e)
+        {
+            if (rbPathFlagsCatmullRom != null) rbPathFlagsCatmullRom.IsChecked = false;
+            if (rbPathFlagsBezier != null) rbPathFlagsBezier.IsChecked = false;
         }
 
         private void RbPathFlagsCatmullRom_Checked(object sender, RoutedEventArgs e)
         {
-            rbPathFlagsChaikin.IsChecked = false;
-            rbPathFlagsBezier.IsChecked = false;
+            if (rbPathFlagsChaikin != null) rbPathFlagsChaikin.IsChecked = false;
+            if (rbPathFlagsBezier != null) rbPathFlagsBezier.IsChecked = false;
         }
 
-        private void RbPathFlagsChaikin_Checked(object sender, RoutedEventArgs e)
+        private void RbPathFlagsBezier_Checked(object sender, RoutedEventArgs e)
         {
-            rbPathFlagsBezier.IsChecked = false;
-            rbPathFlagsCatmullRom.IsChecked = false;
+            if (rbPathFlagsChaikin != null) rbPathFlagsChaikin.IsChecked = false;
+            if (rbPathFlagsCatmullRom != null) rbPathFlagsCatmullRom.IsChecked = false;
         }
 
         private void RbPathFlagsValidateCpop_Checked(object sender, RoutedEventArgs e)
         {
-            rbPathFlagsValidateMas.IsChecked = false;
+            if (rbPathFlagsValidateMas != null) rbPathFlagsValidateMas.IsChecked = false;
         }
 
         private void RbPathFlagsValidateMas_Checked(object sender, RoutedEventArgs e)
         {
-            rbPathFlagsValidateCpop.IsChecked = false;
+            if (rbPathFlagsValidateCpop != null) rbPathFlagsValidateCpop.IsChecked = false;
         }
 
-        private void Run(int flags, PathType type)
+        private void PathOption_Changed(object sender, RoutedEventArgs e)
         {
-            if (!Client.IsConnected)
-            {
-                try
-                {
-                    Client.Connect();
-                }
-                catch
-                {
-                    // ignored, will happen when we cant connect
-                    return;
-                }
-            }
-
-            if (TryLoadFloat(TextBoxStartX, out float sX) && TryLoadFloat(TextBoxStartY, out float sY) && TryLoadFloat(TextBoxStartZ, out float sZ)
-                && TryLoadFloat(TextBoxEndX, out float eX) && TryLoadFloat(TextBoxEndY, out float eY) && TryLoadFloat(TextBoxEndZ, out float eZ))
-            {
-                Vector3 start = new(sX, sY, sZ);
-                Vector3 end = new(eX, eY, eZ);
-
-                long startTime = Stopwatch.GetTimestamp();
-                IEnumerable<Vector3> path = type switch
-                {
-                    PathType.STRAIGHT => GetPath(MessageType.PATH, MapId, start, end, flags),
-                    PathType.RANDOM => GetPath(MessageType.RANDOM_PATH, MapId, start, end, flags),
-                    _ => throw new NotImplementedException(),
-                };
-                TimeSpan elapsedTime = Stopwatch.GetElapsedTime(startTime);
-
-                if (path == null || !path.Any())
-                {
-                    return;
-                }
-
-                UpdateViews(path, elapsedTime);
-
-                float minX = float.MaxValue;
-                float maxX = float.MinValue;
-                float minY = float.MaxValue;
-                float maxY = float.MinValue;
-
-                foreach (Vector3 point in path)
-                {
-                    minX = Math.Min(minX, point.X);
-                    maxX = Math.Max(maxX, point.X);
-                    minY = Math.Min(minY, point.Y);
-                    maxY = Math.Max(maxY, point.Y);
-                }
-
-                int padding = 12;
-                int sizeX = (int)MathF.Abs(maxX - minX) + (2 * padding);
-                int sizeY = (int)MathF.Abs(maxY - minY) + (2 * padding);
-
-                float factor = MathF.Max((float)ImgRect.ActualHeight / sizeY, (float)ImgRect.ActualWidth / sizeX);
-
-                using Pen linePen = new(Color.Black, factor);
-                using SolidBrush nodeStartBrush = new(Color.LimeGreen);
-                using SolidBrush nodeEndBrush = new(Color.Red);
-                using SolidBrush nodeBrush = new(Color.White);
-
-                using Bitmap bitmap = new((int)(sizeX * factor), (int)(sizeY * factor));
-                using Graphics graphics = Graphics.FromImage(bitmap);
-
-                DrawPath(path, minX, minY, padding, factor, graphics, linePen, nodeStartBrush, nodeEndBrush, nodeBrush);
-
-                using MemoryStream memory = new();
-                bitmap.Save(memory, ImageFormat.Png);
-
-                BitmapImage bitmapImagePath = new();
-                bitmapImagePath.BeginInit();
-                bitmapImagePath.StreamSource = memory;
-                bitmapImagePath.CacheOption = BitmapCacheOption.OnLoad;
-                bitmapImagePath.EndInit();
-
-                ImgCanvas.Source = bitmapImagePath;
-                ImgCanvas.Visibility = Visibility.Visible;
-            }
+            // Smoothing/validation changed → re-run immediately (no debounce needed)
+            _ = RunPathfindingAsync(fitToPath: false);
         }
 
-        private void UpdateViews(IEnumerable<Vector3> path, TimeSpan duration)
-        {
-            PointList.ItemsSource = path;
-            lblPointCount.Content = $"Points: {path.Count()}";
-            lblTime.Content = duration;
+        // --- Filter Config (debounced) ---
 
-            Vector3 last = default;
-            float distance = 0.0f;
-
-            foreach (Vector3 point in path)
-            {
-                if (last != default)
-                {
-                    distance += (float)last.GetDistance(point);
-                }
-
-                last = point;
-            }
-
-            lblDistance.Content = $"{MathF.Round(distance, 2)} m";
-        }
-
-        private void Window_Loaded(object sender, RoutedEventArgs e)
-        {
-            Vector3 start = new(-8826.562500f, -371.839752f, 71.638428f);
-            Vector3 end = new(-8918.406250f, -130.297256f, 80.906364f);
-
-            TextBoxStartX.Text = start.X.ToString();
-            TextBoxStartY.Text = start.Y.ToString();
-            TextBoxStartZ.Text = start.Z.ToString();
-
-            TextBoxEndX.Text = end.X.ToString();
-            TextBoxEndY.Text = end.Y.ToString();
-            TextBoxEndZ.Text = end.Z.ToString();
-
-            GetPathAndDraw();
-        }
-
-        private void TypeFlags_Click(object sender, RoutedEventArgs e)
-        {
-            GetPathAndDraw();
-        }
+        private void RbClientState_Click(object sender, RoutedEventArgs e) => ScheduleFilterUpdate();
 
         private void SldCostWater_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            float v = MathF.Round((float)sldCostWater.Value, 1);
-            if (lblCostWater != null) lblCostWater.Content = $"Water: {v,1}";
-            UpdateFilterConfig();
-        }
-
-        private void SldCostGround_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
-            float v = MathF.Round((float)sldCostGround.Value, 1);
-            if (lblCostGround != null) lblCostGround.Content = $"Ground: {v,1}";
-            UpdateFilterConfig();
+            if (lblCostWater != null)
+                lblCostWater.Text = $"Water: {MathF.Round((float)sldCostWater.Value, 1)}";
+            ScheduleFilterUpdate();
         }
 
         private void SldCostBadLiquid_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            float v = MathF.Round((float)sldCostBadLiquid.Value, 2);
-            if (lblCostBadLiquid != null) lblCostBadLiquid.Content = $"Magma/Slime: {v,1}";
-            UpdateFilterConfig();
+            if (lblCostBadLiquid != null)
+                lblCostBadLiquid.Text = $"Magma/Slime: {MathF.Round((float)sldCostBadLiquid.Value, 1)}";
+            ScheduleFilterUpdate();
         }
 
-        struct FilterConfig
+        private void SldCostGround_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            public char State;
-            public int Count = 3;
-            public char GroundArea = (char)13;
-            public float GroundCost;
-            public char WaterArea = (char)10;
-            public float WaterAreaCost;
-            public char BadLiquidArea = (char)1;
-            public float BadLiquidCost;
-
-            public FilterConfig() { }
+            if (lblCostGround != null)
+                lblCostGround.Text = $"Ground: {MathF.Round((float)sldCostGround.Value, 1)}";
+            ScheduleFilterUpdate();
         }
 
-        private void RbClientState_Click(object sender, RoutedEventArgs e)
+        /// <summary>
+        /// Debounces filter/cost changes: waits 400ms after the last change,
+        /// then sends the filter config and re-runs pathfinding.
+        /// </summary>
+        private void ScheduleFilterUpdate()
         {
-            UpdateFilterConfig();
+            _filterDebounce?.Cancel();
+            _filterDebounce = new CancellationTokenSource();
+            var token = _filterDebounce.Token;
+            _ = DebouncedFilterUpdateAsync(token);
         }
 
-        private void UpdateFilterConfig()
+        private async Task DebouncedFilterUpdateAsync(CancellationToken token)
         {
             try
             {
+                await Task.Delay(400, token);
+            }
+            catch (TaskCanceledException)
+            {
+                return;
+            }
+
+            if (token.IsCancellationRequested) return;
+
+            await ApplyFilterConfigAsync();
+            await RunPathfindingAsync(fitToPath: false);
+        }
+
+        private async Task ApplyFilterConfigAsync()
+        {
+            try
+            {
+                if (!_navClient.IsConnected) return;
+
                 char state = (char)0;
+                if (rbClientStateNormalAlly?.IsChecked == true) state = (char)1;
+                else if (rbClientStateNormalHorde?.IsChecked == true) state = (char)2;
+                else if (rbClientStateDead?.IsChecked == true) state = (char)3;
 
-                if (rbClientStateNormalAlly.IsChecked == true)
+                await _navClient.ConfigureFilterAsync(new FilterConfig
                 {
-                    state = (char)1;
-                }
-                else if (rbClientStateNormalHorde.IsChecked == true)
-                {
-                    state = (char)2;
-                }
-                else if (rbClientStateDead.IsChecked == true)
-                {
-                    state = (char)3;
-                }
-
-                if (Client != null && Client.IsConnected)
-                {
-                    bool result = Client.Send((byte)MessageType.CONFIGURE_FILTER, new FilterConfig()
-                    {
-                        State = state,
-                        GroundCost = (float)sldCostGround.Value,
-                        WaterAreaCost = (float)sldCostWater.Value,
-                        BadLiquidCost = (float)sldCostBadLiquid.Value,
-                    }).As<bool>();
-                }
+                    State = state,
+                    GroundCost = (float)(sldCostGround?.Value ?? 1.0),
+                    WaterAreaCost = (float)(sldCostWater?.Value ?? 1.3),
+                    BadLiquidCost = (float)(sldCostBadLiquid?.Value ?? 4.0),
+                });
             }
             catch { }
         }
