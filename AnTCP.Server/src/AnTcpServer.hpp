@@ -53,7 +53,7 @@ private:
     std::atomic<bool>& ShouldExit;
     std::unordered_map <AnTcpMessageType, std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>>* Callbacks;
 
-    bool IsActive;
+    std::atomic<bool> IsActive;
     std::thread* Thread;
 
     std::function<void(ClientHandler*)>* OnClientConnected;
@@ -110,7 +110,7 @@ public:
     /// <summary>
     /// Returns true when the client has disconnected and can be cleaned up.
     /// </summary>
-    constexpr bool IsDisconnected() const noexcept { return !IsActive; }
+    bool IsDisconnected() const noexcept { return !IsActive.load(std::memory_order_acquire); }
 
     /// <summary>
     /// Send data to the client. Size will be sizeof(T).
@@ -163,10 +163,10 @@ public:
     /// </summary>
     inline void Disconnect() noexcept
     {
-        if (!IsActive)
+        if (!IsActive.load(std::memory_order_acquire))
             return;
 
-        IsActive = false;
+        IsActive.store(false, std::memory_order_release);
 
         if (OnClientDisconnected)
         {
@@ -215,7 +215,7 @@ private:
     /// <param name="type">Message type.</param>
     /// <param name="data">Data received.</param>
     /// <returns>True if callback was fired, false if not.</returns>
-    inline bool ProcessPacket(const char* data, AnTcpMessageType size) noexcept
+    inline bool ProcessPacket(const char* data, AnTcpSizeType size) noexcept
     {
         auto msgType = *reinterpret_cast<const AnTcpMessageType*>(data);
 

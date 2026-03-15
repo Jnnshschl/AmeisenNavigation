@@ -14,7 +14,7 @@ int __cdecl main(int argc, const char* argv[])
               << std::endl;
 
     std::filesystem::path configPath(std::filesystem::path(argv[0]).parent_path().string() + "\\config.cfg");
-    Config = new AmeisenNavConfig();
+    auto* config = new AmeisenNavConfig();
 
     if (argc > 1)
     {
@@ -24,54 +24,60 @@ int __cdecl main(int argc, const char* argv[])
         {
             LogE("Configfile does not exists: \"", argv[1], "\"");
             std::cin.get();
+            delete config;
             return 1;
         }
     }
 
     if (std::filesystem::exists(configPath))
     {
-        Config->Load(configPath);
+        config->Load(configPath);
         LogI("Loaded Configfile: \"", configPath.string(), "\"");
 
         // directly save again to add new entries to it
-        Config->Save(configPath);
+        config->Save(configPath);
     }
     else
     {
-        Config->Save(configPath);
+        config->Save(configPath);
 
         LogI("Created default Configfile: \"", configPath.string(), "\"");
         LogI("Edit it and restart the server, press any key to exit...");
         std::cin.get();
+        delete config;
         return 1;
     }
 
     // validate config
-    if (!std::filesystem::exists(Config->mmapsPath))
+    if (!std::filesystem::exists(config->mmapsPath))
     {
-        LogE("MMAPS folder does not exists: \"", Config->mmapsPath, "\"");
+        LogE("MMAPS folder does not exists: \"", config->mmapsPath, "\"");
         std::cin.get();
+        delete config;
         return 1;
     }
 
-    if (Config->maxPolyPath <= 0)
+    if (config->maxPolyPath <= 0)
     {
         LogE("iMaxPolyPath has to be a value > 0");
         std::cin.get();
+        delete config;
         return 1;
     }
 
-    if (Config->port <= 0 || Config->port > 65535)
+    if (config->port <= 0 || config->port > 65535)
     {
         LogE("iPort has to be a value bewtween 1 and 65535");
         std::cin.get();
+        delete config;
         return 1;
     }
 
-    if (Config->maxSearchNodes <= 0 || Config->maxSearchNodes > 65535)
+    if (config->maxSearchNodes <= 0 || config->maxSearchNodes > 65535)
     {
         LogE("iMaxSearchNodes has to be a value bewtween 1 and 65535");
         std::cin.get();
+        delete config;
         return 1;
     }
 
@@ -80,39 +86,21 @@ int __cdecl main(int argc, const char* argv[])
     {
         LogE("SetConsoleCtrlHandler() failed: ", GetLastError());
         std::cin.get();
+        delete config;
         return 1;
     }
 
-    Nav =
-        new AmeisenNavigation(Config->mmapsPath, Config->maxPolyPath, Config->maxSearchNodes, Config->useAnpFileFormat);
-    Server = new AnTcpServer(Config->ip, Config->port);
+    // NavServer takes ownership of config
+    g_NavServer = new NavServer(config);
+    g_NavServer->RegisterCallbacks();
 
-    Server->SetOnClientConnected(OnClientConnect);
-    Server->SetOnClientDisconnected(OnClientDisconnect);
-
-    Server->AddCallback(static_cast<char>(MessageType::PATH), PathCallback);
-    Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT_AROUND), RandomPointAroundCallback);
-    Server->AddCallback(static_cast<char>(MessageType::MOVE_ALONG_SURFACE), MoveAlongSurfaceCallback);
-    Server->AddCallback(static_cast<char>(MessageType::CAST_RAY), CastRayCallback);
-
-    Server->AddCallback(static_cast<char>(MessageType::RANDOM_PATH), RandomPathCallback);
-    Server->AddCallback(static_cast<char>(MessageType::RANDOM_POINT), RandomPointCallback);
-
-    Server->AddCallback(static_cast<char>(MessageType::EXPLORE_POLY), ExplorePolyCallback);
-
-    Server->AddCallback(static_cast<char>(MessageType::CONFIGURE_FILTER), ConfigureFilterCallback);
-
-    LogS("Starting server on: ", Config->ip, ":", std::to_string(Config->port));
-    Server->Run();
+    LogS("Starting server on: ", config->ip, ":", std::to_string(config->port));
+    g_NavServer->Run();
 
     LogI("Stopped server...");
 
-    // Server::Run() deletes all ClientHandlers, which fires OnClientDisconnect
-    // for each connected client — that callback frees the path buffers and
-    // erases from ClientPathBuffers. So no manual cleanup is needed here.
-    delete Server;
-    delete Nav;
-    delete Config;
+    delete g_NavServer;
+    g_NavServer = nullptr;
 }
 
 int __stdcall SigIntHandler(unsigned long signal)
@@ -120,7 +108,7 @@ int __stdcall SigIntHandler(unsigned long signal)
     if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT)
     {
         LogI("Received CTRL-C or CTRL-EXIT, stopping server...");
-        Server->Stop();
+        if (g_NavServer) g_NavServer->Stop();
     }
 
     return 1;
@@ -130,32 +118,17 @@ void OnClientConnect(ClientHandler* handler) noexcept
 {
     LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
 
-    ClientPathBuffers[handler->GetId()] =
-        std::make_pair(new Path(Config->maxPointPath), new Path(Config->maxPointPath));
-
-    Nav->NewClient(handler->GetId(), static_cast<MmapFormat>(Config->mmapFormat));
+    g_NavServer->AllocClientBuffers(handler->GetId());
+    g_NavServer->Nav()->NewClient(handler->GetId(), static_cast<MmapFormat>(g_NavServer->Config()->mmapFormat));
 }
 
 void OnClientDisconnect(ClientHandler* handler) noexcept
 {
-    if (ClientPathBuffers.find(handler->GetId()) == ClientPathBuffers.end())
+    if (!g_NavServer->HasClientBuffers(handler->GetId()))
         return;
 
-    Nav->FreeClient(handler->GetId());
-
-    if (ClientPathBuffers[handler->GetId()].first->points)
-        delete[] ClientPathBuffers[handler->GetId()].first->points;
-    if (ClientPathBuffers[handler->GetId()].first)
-        delete ClientPathBuffers[handler->GetId()].first;
-    ClientPathBuffers[handler->GetId()].first = nullptr;
-
-    if (ClientPathBuffers[handler->GetId()].second->points)
-        delete[] ClientPathBuffers[handler->GetId()].second->points;
-    if (ClientPathBuffers[handler->GetId()].second)
-        delete ClientPathBuffers[handler->GetId()].second;
-    ClientPathBuffers[handler->GetId()].second = nullptr;
-
-    ClientPathBuffers.erase(handler->GetId());
+    g_NavServer->Nav()->FreeClient(handler->GetId());
+    g_NavServer->FreeClientBuffers(handler->GetId());
 
     LogI("Client Disconnected: ", handler->GetIpAddress(), ":", handler->GetPort());
 }
@@ -174,7 +147,7 @@ void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* dat
 {
     const MoveRequestData request = *reinterpret_cast<const MoveRequestData*>(data);
     Vector3 point;
-    Nav->MoveAlongSurface(handler->GetId(), request.mapId, request.start, request.end, point);
+    g_NavServer->Nav()->MoveAlongSurface(handler->GetId(), request.mapId, request.start, request.end, point);
     handler->SendData(type, point, sizeof(Vector3));
 }
 
@@ -183,7 +156,7 @@ void CastRayCallback(ClientHandler* handler, char type, const void* data, int si
     const CastRayData request = *reinterpret_cast<const CastRayData*>(data);
     dtRaycastHit hit;
 
-    if (Nav->CastMovementRay(handler->GetId(), request.mapId, request.start, request.end, &hit))
+    if (g_NavServer->Nav()->CastMovementRay(handler->GetId(), request.mapId, request.start, request.end, &hit))
     {
         handler->SendData(type, request.end, sizeof(Vector3));
     }
@@ -199,17 +172,18 @@ void GenericPathCallback(ClientHandler* handler, char type, const void* data, in
     const PathRequestData request = *reinterpret_cast<const PathRequestData*>(data);
     bool pathGenerated = false;
 
-    Path& path = *ClientPathBuffers[handler->GetId()].first;
-    Path& pathMisc = *ClientPathBuffers[handler->GetId()].second;
+    auto buffers = g_NavServer->GetClientBuffers(handler->GetId());
+    Path& path = *buffers.first;
+    Path& pathMisc = *buffers.second;
 
     switch (pathType)
     {
         case PathType::STRAIGHT:
-            pathGenerated = Nav->GetPath(handler->GetId(), request.mapId, request.start, request.end, path);
+            pathGenerated = g_NavServer->Nav()->GetPath(handler->GetId(), request.mapId, request.start, request.end, path);
             break;
         case PathType::RANDOM:
-            pathGenerated = Nav->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path,
-                                               Config->randomPathMaxDistance);
+            pathGenerated = g_NavServer->Nav()->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path,
+                                               g_NavServer->Config()->randomPathMaxDistance);
             break;
     }
 
@@ -231,7 +205,7 @@ void RandomPointCallback(ClientHandler* handler, char type, const void* data, in
 {
     const int mapId = *reinterpret_cast<const int*>(data);
     Vector3 point;
-    Nav->GetRandomPoint(handler->GetId(), mapId, point);
+    g_NavServer->Nav()->GetRandomPoint(handler->GetId(), mapId, point);
     handler->SendData(type, point, sizeof(Vector3));
 }
 
@@ -239,7 +213,7 @@ void RandomPointAroundCallback(ClientHandler* handler, char type, const void* da
 {
     const RandomPointAroundData request = *reinterpret_cast<const RandomPointAroundData*>(data);
     Vector3 point;
-    Nav->GetRandomPointAround(handler->GetId(), request.mapId, request.start, request.radius, point);
+    g_NavServer->Nav()->GetRandomPointAround(handler->GetId(), request.mapId, request.start, request.radius, point);
     handler->SendData(type, point, sizeof(Vector3));
 }
 
@@ -247,11 +221,12 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
 {
     const ExplorePolyData request = *reinterpret_cast<const ExplorePolyData*>(data);
 
-    Path& path = *ClientPathBuffers[handler->GetId()].first;
-    Path& pathMisc = *ClientPathBuffers[handler->GetId()].second;
+    auto buffers = g_NavServer->GetClientBuffers(handler->GetId());
+    Path& path = *buffers.first;
+    Path& pathMisc = *buffers.second;
 
     bool pathGenerated =
-        Nav->GetPolyExplorationPath(handler->GetId(), request.mapId, &request.firstPolyPoint, request.polyPointCount,
+        g_NavServer->Nav()->GetPolyExplorationPath(handler->GetId(), request.mapId, &request.firstPolyPoint, request.polyPointCount,
                                     path, pathMisc, request.start, request.viewDistance);
 
     if (pathGenerated)
@@ -271,10 +246,26 @@ void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, in
 void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data, int size) noexcept
 {
     bool result = true;
-    const ConfigureFilterData request = *reinterpret_cast<const ConfigureFilterData*>(data);
 
-    AmeisenNavClient* client = Nav->GetClient(handler->GetId());
+    // IMPORTANT: Use a pointer into the original data buffer, NOT a local copy.
+    // ConfigureFilterData uses a "flexible array" pattern where filterConfigs[1..N]
+    // follow firstFilterConfig in the raw buffer. A local copy would only contain
+    // the struct's 16 bytes, causing filterConfigs[1+] to read garbage from the stack.
+    const auto* request = reinterpret_cast<const ConfigureFilterData*>(data);
+
+    AmeisenNavClient* client = g_NavServer->Nav()->GetClient(handler->GetId());
     if (!client)
+    {
+        result = false;
+        handler->SendData(type, &result, sizeof(bool));
+        return;
+    }
+
+    // Validate entry count against received data size
+    int expectedSize = static_cast<int>(sizeof(ConfigureFilterData))
+        + (request->filterConfigCount - 1) * static_cast<int>(sizeof(FilterConfig));
+
+    if (request->filterConfigCount <= 0 || size < expectedSize)
     {
         result = false;
         handler->SendData(type, &result, sizeof(bool));
@@ -283,13 +274,28 @@ void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data
 
     client->ResetQueryFilter();
 
-    const FilterConfig* filterConfigs = &request.firstFilterConfig;
+    const FilterConfig* filterConfigs = &request->firstFilterConfig;
 
-    for (int i = 0; i < request.filterConfigCount; ++i)
+    for (int i = 0; i < request->filterConfigCount; ++i)
     {
         client->ConfigureQueryFilter(filterConfigs[i].areaId, filterConfigs[i].cost);
     }
 
-    client->UpdateQueryFilter(request.state);
+    client->UpdateQueryFilter(request->state);
     handler->SendData(type, &result, sizeof(bool));
+}
+
+void NavServer::RegisterCallbacks() noexcept
+{
+    server_->SetOnClientConnected(OnClientConnect);
+    server_->SetOnClientDisconnected(OnClientDisconnect);
+
+    server_->AddCallback(static_cast<char>(MessageType::PATH), PathCallback);
+    server_->AddCallback(static_cast<char>(MessageType::RANDOM_POINT_AROUND), RandomPointAroundCallback);
+    server_->AddCallback(static_cast<char>(MessageType::MOVE_ALONG_SURFACE), MoveAlongSurfaceCallback);
+    server_->AddCallback(static_cast<char>(MessageType::CAST_RAY), CastRayCallback);
+    server_->AddCallback(static_cast<char>(MessageType::RANDOM_PATH), RandomPathCallback);
+    server_->AddCallback(static_cast<char>(MessageType::RANDOM_POINT), RandomPointCallback);
+    server_->AddCallback(static_cast<char>(MessageType::EXPLORE_POLY), ExplorePolyCallback);
+    server_->AddCallback(static_cast<char>(MessageType::CONFIGURE_FILTER), ConfigureFilterCallback);
 }

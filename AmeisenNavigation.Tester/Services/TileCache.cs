@@ -1,8 +1,6 @@
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.IO;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Media.Imaging;
@@ -22,9 +20,12 @@ namespace AmeisenNavigation.Tester.Services
         private readonly ConcurrentDictionary<(string map, int x, int y), byte> _loading = new();
 
         // md5translate.trs: maps "MapName\mapX_Y.blp" -> hash filename
-        private Dictionary<string, string>? _md5Translate;
+        private Md5TranslateTable? _md5Translate;
         private volatile bool _md5TranslateLoaded;
         private readonly object _trsLock = new();
+
+        // Coalesced invalidation — avoids flooding dispatcher with per-tile callbacks
+        private int _pendingInvalidate;
 
         public int TilesLoaded;
         public int TilesFailed;
@@ -121,9 +122,16 @@ namespace AmeisenNavigation.Tester.Services
 
         private void NotifyTileLoaded()
         {
-            if (_tileLoadedCallback != null)
+            if (_tileLoadedCallback == null) return;
+
+            // Only schedule one dispatcher callback at a time; subsequent tiles just set the flag
+            if (Interlocked.Exchange(ref _pendingInvalidate, 1) == 0)
             {
-                _dispatcher.BeginInvoke(_tileLoadedCallback, DispatcherPriority.Render);
+                _dispatcher.BeginInvoke(() =>
+                {
+                    Interlocked.Exchange(ref _pendingInvalidate, 0);
+                    _tileLoadedCallback();
+                }, DispatcherPriority.Render);
             }
         }
 
@@ -194,31 +202,7 @@ namespace AmeisenNavigation.Tester.Services
                 if (_md5TranslateLoaded) return;
 
                 byte[]? trsData = _mpq.ReadFile(@"Textures\Minimap\md5translate.trs");
-                if (trsData == null)
-                {
-                    _md5TranslateLoaded = true;
-                    return;
-                }
-
-                var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-                string content = Encoding.UTF8.GetString(trsData);
-
-                foreach (string line in content.Split('\n', StringSplitOptions.RemoveEmptyEntries))
-                {
-                    string trimmed = line.Trim('\r', ' ');
-                    if (trimmed.Length == 0) continue;
-
-                    int tabIdx = trimmed.IndexOf('\t');
-                    if (tabIdx < 0) continue;
-
-                    string mapKey = trimmed[..tabIdx].Trim();
-                    string hashValue = trimmed[(tabIdx + 1)..].Trim();
-
-                    if (mapKey.Length > 0 && hashValue.Length > 0)
-                        dict[mapKey] = hashValue;
-                }
-
-                _md5Translate = dict;
+                _md5Translate = trsData != null ? Md5TranslateTable.Parse(trsData) : null;
                 _md5TranslateLoaded = true;
             }
         }

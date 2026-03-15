@@ -1,54 +1,52 @@
-﻿using System;
-using System.Buffers;
+using System;
+using System.Runtime.InteropServices;
 
 namespace AnTCP.Client.Objects
 {
-    public readonly unsafe ref struct AnTcpResponse(Memory<byte> memory)
+    public readonly unsafe ref struct AnTcpResponse
     {
-        /// <summary>
-        /// Raw data received by the TCP client.
-        /// </summary>
-        public Span<byte> Data { get; } = memory.Span[1..];
+        private readonly Span<byte> _data;
+
+        internal AnTcpResponse(byte[] buffer, int length)
+        {
+            Type = buffer[0];
+            _data = buffer.AsSpan(1, length - 1);
+        }
 
         /// <summary>
-        /// Lenght of the data array.
+        /// Raw response data (excluding the type byte).
+        /// Backed by a reusable buffer — only valid until the next Send call.
         /// </summary>
-        public int Length => Data.Length;
+        public Span<byte> Data => _data;
+
+        /// <summary>
+        /// Length of the data (excluding the type byte).
+        /// </summary>
+        public int Length => _data.Length;
 
         /// <summary>
         /// Type of the response.
         /// </summary>
-        public byte Type { get; } = memory.Span[0];
+        public byte Type { get; }
 
         /// <summary>
-        /// Retrieve the data as any unmanaged type or struct.
+        /// Read the data as a single unmanaged value. Zero allocations.
         /// </summary>
-        /// <typeparam name="T">Unmanaged type</typeparam>
-        /// <returns>Data</returns>
-        public T As<T>() where T : unmanaged => *Pointer<T>();
+        public T As<T>() where T : unmanaged
+            => MemoryMarshal.Read<T>(_data);
 
         /// <summary>
-        /// Retrieve the data as any unmanaged type array.
+        /// Copy the data into a new array of unmanaged values.
+        /// One allocation for the result array.
         /// </summary>
-        /// <typeparam name="T">Unmanaged type</typeparam>
-        /// <returns>Data array</returns>
         public T[] AsArray<T>() where T : unmanaged
-        {
-            T[] array = new T[Length / sizeof(T)];
-            using MemoryHandle h = array.AsMemory().Pin();
-            Buffer.MemoryCopy(Pointer<T>(), h.Pointer, Length, Length);
-            return array;
-        }
+            => MemoryMarshal.Cast<byte, T>(_data).ToArray();
 
         /// <summary>
-        /// Retrieve the data as any unamanaged pointer.
+        /// View the data as a span of unmanaged values. Zero allocations.
+        /// Only valid until the next Send call on the same client.
         /// </summary>
-        /// <typeparam name="T">Unmanaged type</typeparam>
-        /// <returns>Pointer to the data</returns>
-        public T* Pointer<T>() where T : unmanaged
-        {
-            fixed (byte* ptr = Data)
-                return (T*)ptr;
-        }
+        public ReadOnlySpan<T> AsSpan<T>() where T : unmanaged
+            => MemoryMarshal.Cast<byte, T>(_data);
     }
 }

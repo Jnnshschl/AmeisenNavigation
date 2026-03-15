@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>17.0</VCProjectVersion>
+    <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{85cbbe30-3458-438a-bee6-432685bf1fd8}</ProjectGuid>
     <RootNamespace>AmeisenNavigationExporter</RootNamespace>

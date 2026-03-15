@@ -75,7 +75,7 @@
     <Text Include="License.txt" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>17.0</VCProjectVersion>
+    <VCProjectVersion>18.0</VCProjectVersion>
     <ProjectGuid>{E1E5031F-CCFD-45B9-9DB1-57050AABCCFA}</ProjectGuid>
     <RootNamespace>recastnavigation</RootNamespace>
     <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>

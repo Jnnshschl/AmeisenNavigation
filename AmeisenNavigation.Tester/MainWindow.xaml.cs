@@ -1,3 +1,4 @@
+using AmeisenNavigation.Client;
 using AmeisenNavigation.Tester.Controls;
 using AmeisenNavigation.Tester.Converters;
 using AmeisenNavigation.Tester.Services;
@@ -23,6 +24,7 @@ namespace AmeisenNavigation.Tester
         private readonly NavmeshClient _navClient = new();
         private MpqArchiveSet? _mpq;
         private TileCache? _tileCache;
+        private AnpTileReader? _anpReader;
         private bool _isBusy;
 
         // Debounce for cost/filter slider changes
@@ -124,45 +126,120 @@ namespace AmeisenNavigation.Tester
 
             _mpq = mpq;
             TxtDataDir.Text = $"{dir} ({_mpq.ArchiveCount} MPQs)";
+            TxtDataDir.Tag = dir;
             TxtDataDir.Foreground = (Brush)FindResource("ForegroundBrush");
 
             _tileCache = new TileCache(_mpq, Dispatcher, () => MapCanvas.InvalidateVisual());
             MapCanvas.SetTileCache(_tileCache);
             UpdateMapCanvas();
 
-            try
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
-                File.WriteAllText(SettingsPath, dir);
-            }
-            catch { }
+            SaveSettings(dir, _anpReader?.MeshesPath);
         }
 
         private async Task TryRestoreDataDirAsync()
         {
             try
             {
-                if (File.Exists(SettingsPath))
+                if (!File.Exists(SettingsPath)) return;
+
+                var lines = File.ReadAllLines(SettingsPath);
+
+                if (lines.Length > 0)
                 {
-                    string dir = File.ReadAllText(SettingsPath).Trim();
+                    string dir = lines[0].Trim();
                     if (Directory.Exists(dir))
                         await LoadDataDirAsync(dir);
                 }
+
+                if (lines.Length > 1)
+                {
+                    string meshDir = lines[1].Trim();
+                    if (Directory.Exists(meshDir))
+                        LoadMeshesDir(meshDir);
+                }
+            }
+            catch { }
+        }
+
+        // --- Navmesh Overlay ---
+
+        private void BtnBrowseMeshes_Click(object sender, RoutedEventArgs e)
+        {
+            var dialog = new Microsoft.Win32.OpenFolderDialog
+            {
+                Title = "Select meshes output directory (containing .anp files)",
+            };
+
+            if (dialog.ShowDialog() == true)
+            {
+                LoadMeshesDir(dialog.FolderName);
+                SaveSettings(TxtDataDir.Tag as string, dialog.FolderName);
+            }
+        }
+
+        private void LoadMeshesDir(string dir)
+        {
+            _anpReader = new AnpTileReader(Dispatcher, () => MapCanvas.InvalidateVisual());
+            _anpReader.SetMeshesPath(dir);
+            MapCanvas.SetAnpReader(_anpReader);
+
+            TxtMeshesDir.Text = dir;
+            TxtMeshesDir.Foreground = (Brush)FindResource("ForegroundBrush");
+        }
+
+        private void ChkShowAreas_Click(object sender, RoutedEventArgs e)
+        {
+            MapCanvas.SetShowNavmeshAreas(ChkShowAreas.IsChecked == true);
+        }
+
+        private void SldOverlayOpacity_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (lblOverlayOpacity != null)
+                lblOverlayOpacity.Text = $"Opacity: {(int)sldOverlayOpacity.Value}%";
+            MapCanvas?.SetNavmeshOpacity((byte)(sldOverlayOpacity.Value * 2.55));
+        }
+
+        // --- Settings persistence ---
+
+        private static void SaveSettings(string? dataDir, string? meshesDir)
+        {
+            try
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(SettingsPath)!);
+                var lines = new List<string>
+                {
+                    dataDir ?? "",
+                    meshesDir ?? "",
+                };
+                File.WriteAllLines(SettingsPath, lines);
             }
             catch { }
         }
 
         // --- Connection ---
 
+        private static readonly Brush ConnectedBrush = new SolidColorBrush(Color.FromRgb(0, 200, 0));
+        private static readonly Brush DisconnectedBrush = new SolidColorBrush(Color.FromRgb(255, 51, 51));
+
+        static MainWindow()
+        {
+            ConnectedBrush.Freeze();
+            DisconnectedBrush.Freeze();
+        }
+
         private async Task UpdateConnectionStatusAsync()
         {
+            bool wasConnected = _navClient.IsConnected;
             bool connected = await _navClient.TryConnectAsync();
-            StatusIndicator.Fill = connected
-                ? new SolidColorBrush(Color.FromRgb(0, 200, 0))
-                : new SolidColorBrush(Color.FromRgb(255, 51, 51));
+            var brush = connected ? ConnectedBrush : DisconnectedBrush;
+            StatusIndicator.Fill = brush;
             TxtConnectionStatus.Text = connected ? "Connected" : "Disconnected";
             TxtStatusConnection.Text = TxtConnectionStatus.Text;
-            TxtStatusConnection.Foreground = StatusIndicator.Fill;
+            TxtStatusConnection.Foreground = brush;
+
+            // Send filter config on first connect so server state matches UI
+            if (connected && !wasConnected)
+                await ApplyFilterConfigAsync();
         }
 
         // --- Map ---
@@ -170,12 +247,14 @@ namespace AmeisenNavigation.Tester
         private void ComboBoxMap_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             _tileCache?.ClearMemoryCache();
+            _anpReader?.ClearCache();
             UpdateMapCanvas();
         }
 
         private void UpdateMapCanvas()
         {
             int mapId = MapId;
+            MapCanvas.SetMapId(mapId);
             if (MapDefinitions.InternalNames.TryGetValue(mapId, out string? name))
                 MapCanvas.SetMapName(name);
         }
@@ -213,7 +292,7 @@ namespace AmeisenNavigation.Tester
             var probe = new Vector3(worldX, worldY, currentZ);
             var snapped = await _navClient.MoveAlongSurfaceAsync(MapId, probe, probe);
 
-            if (snapped.X != 0 || snapped.Y != 0 || snapped.Z != 0)
+            if (!snapped.IsZero)
                 zBox.Text = snapped.Z.ToString("F2", Inv);
         }
 
@@ -295,19 +374,19 @@ namespace AmeisenNavigation.Tester
             var end = TryParseEndPoint();
             if (start == null || end == null) return;
 
-            int flags = 0;
-            if (rbPathFlagsChaikin.IsChecked == true) flags |= 1;
-            if (rbPathFlagsCatmullRom.IsChecked == true) flags |= 2;
-            if (rbPathFlagsBezier.IsChecked == true) flags |= 4;
-            if (rbPathFlagsValidateCpop.IsChecked == true) flags |= 8;
-            if (rbPathFlagsValidateMas.IsChecked == true) flags |= 16;
+            var flags = PathFlags.None;
+            if (rbPathFlagsChaikin.IsChecked == true) flags |= PathFlags.SmoothChaikin;
+            if (rbPathFlagsCatmullRom.IsChecked == true) flags |= PathFlags.SmoothCatmullRom;
+            if (rbPathFlagsBezier.IsChecked == true) flags |= PathFlags.SmoothBezier;
+            if (rbPathFlagsValidateCpop.IsChecked == true) flags |= PathFlags.ValidateClosestPointOnPoly;
+            if (rbPathFlagsValidateMas.IsChecked == true) flags |= PathFlags.ValidateMoveAlongSurface;
 
-            MessageType msgType = rbPathTypeRandom.IsChecked == true
-                ? MessageType.RANDOM_PATH
-                : MessageType.PATH;
+            PathType pathType = rbPathTypeRandom.IsChecked == true
+                ? PathType.RANDOM
+                : PathType.STRAIGHT;
 
             long startTime = Stopwatch.GetTimestamp();
-            var path = await _navClient.GetPathAsync(msgType, MapId, start.Value, end.Value, flags);
+            var path = await _navClient.GetPathAsync(pathType, MapId, start.Value, end.Value, flags);
             TimeSpan elapsed = Stopwatch.GetElapsedTime(startTime);
 
             if (path.Count == 0)
@@ -329,7 +408,7 @@ namespace AmeisenNavigation.Tester
 
             float distance = 0;
             for (int i = 1; i < path.Count; i++)
-                distance += (float)path[i - 1].GetDistance(path[i]);
+                distance += path[i - 1].DistanceTo(path[i]);
             lblDistance.Text = $"{MathF.Round(distance, 2)} m";
 
             PointList.ItemsSource = path.Select(p => p.ToString());
@@ -393,6 +472,20 @@ namespace AmeisenNavigation.Tester
 
         private void RbClientState_Click(object sender, RoutedEventArgs e) => ScheduleFilterUpdate();
 
+        private void SldCostGround_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (lblCostGround != null)
+                lblCostGround.Text = $"Ground: {MathF.Round((float)sldCostGround.Value, 1)}";
+            ScheduleFilterUpdate();
+        }
+
+        private void SldCostRoad_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        {
+            if (lblCostRoad != null)
+                lblCostRoad.Text = $"Road: {MathF.Round((float)sldCostRoad.Value, 2)}";
+            ScheduleFilterUpdate();
+        }
+
         private void SldCostWater_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
             if (lblCostWater != null)
@@ -407,10 +500,10 @@ namespace AmeisenNavigation.Tester
             ScheduleFilterUpdate();
         }
 
-        private void SldCostGround_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+        private void SldFactionDanger_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
         {
-            if (lblCostGround != null)
-                lblCostGround.Text = $"Ground: {MathF.Round((float)sldCostGround.Value, 1)}";
+            if (lblFactionDanger != null)
+                lblFactionDanger.Text = $"Faction: {MathF.Round((float)sldFactionDanger.Value, 1)}";
             ScheduleFilterUpdate();
         }
 
@@ -449,18 +542,21 @@ namespace AmeisenNavigation.Tester
             {
                 if (!_navClient.IsConnected) return;
 
-                char state = (char)0;
-                if (rbClientStateNormalAlly?.IsChecked == true) state = (char)1;
-                else if (rbClientStateNormalHorde?.IsChecked == true) state = (char)2;
-                else if (rbClientStateDead?.IsChecked == true) state = (char)3;
+                byte state = 0;
+                if (rbClientStateNormalAlly?.IsChecked == true) state = 1;
+                else if (rbClientStateNormalHorde?.IsChecked == true) state = 2;
+                else if (rbClientStateDead?.IsChecked == true) state = 3;
 
-                await _navClient.ConfigureFilterAsync(new FilterConfig
-                {
-                    State = state,
-                    GroundCost = (float)(sldCostGround?.Value ?? 1.0),
-                    WaterAreaCost = (float)(sldCostWater?.Value ?? 1.3),
-                    BadLiquidCost = (float)(sldCostBadLiquid?.Value ?? 4.0),
-                });
+                float ground = (float)(sldCostGround?.Value ?? 1.0);
+                float road = (float)(sldCostRoad?.Value ?? 0.75);
+                float water = (float)(sldCostWater?.Value ?? 1.6);
+                float badLiquid = (float)(sldCostBadLiquid?.Value ?? 4.0);
+                float danger = (float)(sldFactionDanger?.Value ?? 3.0);
+
+                float allyMult = state == 2 ? danger : 1.0f;  // Horde bot → alliance areas costly
+                float hordeMult = state == 1 ? danger : 1.0f;  // Alliance bot → horde areas costly
+
+                await _navClient.ApplyFilterAsync(state, ground, road, water, badLiquid, allyMult, hordeMult);
             }
             catch { }
         }

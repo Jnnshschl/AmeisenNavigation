@@ -36,6 +36,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AnTCP.Client", "AnTCP.Clien
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AnTCP.Server", "AnTCP.Server\AnTCP.Server.vcxproj", "{925C53F9-9F86-4C19-BEFC-3D33F9202532}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AmeisenNavigation.Client", "AmeisenNavigation.Client\AmeisenNavigation.Client.csproj", "{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -140,6 +142,18 @@ Global
 		{925C53F9-9F86-4C19-BEFC-3D33F9202532}.Release|x64.Build.0 = Release|x64
 		{925C53F9-9F86-4C19-BEFC-3D33F9202532}.Release|x86.ActiveCfg = Release|Win32
 		{925C53F9-9F86-4C19-BEFC-3D33F9202532}.Release|x86.Build.0 = Release|Win32
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Debug|x64.Build.0 = Debug|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Debug|x86.Build.0 = Debug|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Release|x64.ActiveCfg = Release|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Release|x64.Build.0 = Release|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Release|x86.ActiveCfg = Release|Any CPU
+		{D74B21A4-E7A2-1A46-4AE1-679BDAA4071D}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

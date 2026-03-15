@@ -7,6 +7,7 @@
 #include <iostream>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 constexpr auto AMEISENNAV_VERSION = "1.8.4.0";

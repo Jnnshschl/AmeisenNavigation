@@ -10,7 +10,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\AnTCP.Client\AnTCP.Client.csproj" />
+    <ProjectReference Include="..\AmeisenNavigation.Client\AmeisenNavigation.Client.csproj" />
   </ItemGroup>
 
   <ItemGroup>

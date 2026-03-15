@@ -1,189 +1,67 @@
-using AnTCP.Client;
+using AmeisenNavigation.Client;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 
 namespace AmeisenNavigation.Tester.Services
 {
-    public enum MessageType : byte
-    {
-        PATH,
-        MOVE_ALONG_SURFACE,
-        RANDOM_POINT,
-        RANDOM_POINT_AROUND,
-        CAST_RAY,
-        RANDOM_PATH,
-        EXPLORE_POLY,
-        CONFIGURE_FILTER,
-    }
-
     public enum PathType
     {
         STRAIGHT,
         RANDOM,
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    public struct FilterConfig
-    {
-        public char State;
-        public int Count = 3;
-        public char GroundArea = (char)13;
-        public float GroundCost;
-        public char WaterArea = (char)10;
-        public float WaterAreaCost;
-        public char BadLiquidArea = (char)1;
-        public float BadLiquidCost;
-
-        public FilterConfig() { }
-    }
-
-    [StructLayout(LayoutKind.Sequential)]
-    public struct MoveRequestData
-    {
-        public int MapId;
-        public Vector3 Start;
-        public Vector3 End;
-    }
-
     public sealed class NavmeshClient : IDisposable
     {
-        private readonly AnTcpClient _client;
-        private readonly SemaphoreSlim _lock = new(1, 1);
+        private readonly AmeisenNavClient _nav;
 
-        public bool IsConnected => _client.IsConnected;
+        public bool IsConnected => _nav.IsConnected;
 
         public NavmeshClient(string ip = "127.0.0.1", int port = 47110)
         {
-            _client = new(ip, port);
+            _nav = new AmeisenNavClient(ip, port);
         }
 
-        public async Task<bool> TryConnectAsync()
+        public Task<bool> TryConnectAsync()
         {
-            if (_client.IsConnected) return true;
+            return Task.Run(() => _nav.TryConnect());
+        }
 
-            return await Task.Run(() =>
+        public Task<List<Vector3>> GetPathAsync(PathType pathType, int mapId, Vector3 start, Vector3 end, PathFlags flags)
+        {
+            return Task.Run(() =>
             {
-                try
-                {
-                    _client.Connect();
-                    return _client.IsConnected;
-                }
-                catch
-                {
-                    return false;
-                }
+                var path = pathType == PathType.RANDOM
+                    ? _nav.GetRandomPath(mapId, start, end, flags)
+                    : _nav.GetPath(mapId, start, end, flags);
+                return path?.ToList() ?? [];
             });
         }
 
-        public async Task<List<Vector3>> GetPathAsync(MessageType msgType, int mapId, Vector3 start, Vector3 end, int flags)
+        public Task<Vector3> GetRandomPointAsync(int mapId)
         {
-            if (!IsConnected) return [];
-
-            await _lock.WaitAsync();
-            try
-            {
-                return await Task.Run(() =>
-                {
-                    try
-                    {
-                        return _client.Send((byte)msgType, (mapId, flags, start, end)).AsArray<Vector3>().ToList();
-                    }
-                    catch
-                    {
-                        return new List<Vector3>();
-                    }
-                });
-            }
-            finally
-            {
-                _lock.Release();
-            }
+            return Task.Run(() => _nav.GetRandomPoint(mapId));
         }
 
-        public async Task<Vector3> GetRandomPointAsync(int mapId)
+        public Task<Vector3> MoveAlongSurfaceAsync(int mapId, Vector3 start, Vector3 end)
         {
-            if (!IsConnected) return new();
-
-            await _lock.WaitAsync();
-            try
-            {
-                return await Task.Run(() =>
-                {
-                    try
-                    {
-                        return _client.Send((byte)MessageType.RANDOM_POINT, mapId).As<Vector3>();
-                    }
-                    catch
-                    {
-                        return new Vector3();
-                    }
-                });
-            }
-            finally
-            {
-                _lock.Release();
-            }
+            return Task.Run(() => _nav.MoveAlongSurface(mapId, start, end));
         }
 
-        public async Task<Vector3> MoveAlongSurfaceAsync(int mapId, Vector3 start, Vector3 end)
+        public Task<bool> ApplyFilterAsync(byte state, float ground, float road, float water, float badLiquid, float allyMult, float hordeMult)
         {
-            if (!IsConnected) return new();
-
-            await _lock.WaitAsync();
-            try
+            return Task.Run(() =>
             {
-                return await Task.Run(() =>
-                {
-                    try
-                    {
-                        var request = new MoveRequestData { MapId = mapId, Start = start, End = end };
-                        return _client.Send((byte)MessageType.MOVE_ALONG_SURFACE, request).As<Vector3>();
-                    }
-                    catch
-                    {
-                        return new Vector3();
-                    }
-                });
-            }
-            finally
-            {
-                _lock.Release();
-            }
-        }
-
-        public async Task<bool> ConfigureFilterAsync(FilterConfig config)
-        {
-            if (!IsConnected) return false;
-
-            await _lock.WaitAsync();
-            try
-            {
-                return await Task.Run(() =>
-                {
-                    try
-                    {
-                        return _client.Send((byte)MessageType.CONFIGURE_FILTER, config).As<bool>();
-                    }
-                    catch
-                    {
-                        return false;
-                    }
-                });
-            }
-            finally
-            {
-                _lock.Release();
-            }
+                _nav.SetClientState((ClientState)state);
+                _nav.SetAreaCosts(ground, road, water, badLiquid, allyMult, hordeMult);
+                return _nav.ApplyFilter();
+            });
         }
 
         public void Dispose()
         {
-            try { if (_client.IsConnected) _client.Disconnect(); } catch { }
-            _lock.Dispose();
+            _nav.Dispose();
         }
     }
 }

@@ -12,6 +12,8 @@
 
 #include "../../../AmeisenNavigation.Pack/src/Anp.hpp"
 
+#include "../Utils/CityMap.hpp"
+#include "../Utils/FactionMap.hpp"
 #include "../Utils/RoadMap.hpp"
 #include "../Utils/Structure.hpp"
 #include "../Utils/WaterMap.hpp"
@@ -32,6 +34,8 @@
 //   4.  Erode + median filter
 //   5.  Mark water areas (AreaMarker — rect-to-cell)
 //   6.  Mark road areas (AreaMarker)
+//   6b. Mark city areas (AreaMarker — upgrades TERRAIN_GROUND → TERRAIN_CITY)
+//   6c. Mark faction areas (AreaMarker — upgrades neutral → Alliance/Horde)
 //   7.  Render to BMP (BmpRenderer, debug only)
 //   8.  Build regions → contours → polymesh
 //
@@ -86,12 +90,12 @@ public:
         RcCfg.walkableHeight = static_cast<int>(floorf(2.0f / RcCfg.ch));
         RcCfg.walkableRadius = static_cast<int>(ceilf(0.6f / RcCfg.cs));
 
-        RcCfg.minRegionArea = static_cast<int>(rcSqr(12));
-        RcCfg.mergeRegionArea = static_cast<int>(rcSqr(20));
+        RcCfg.minRegionArea = static_cast<int>(rcSqr(10));
+        RcCfg.mergeRegionArea = static_cast<int>(rcSqr(25));
         RcCfg.maxEdgeLen = static_cast<int>(12.0f / RcCfg.cs);
-        RcCfg.maxSimplificationError = 1.2f;
-        RcCfg.detailSampleDist = RcCfg.cs * 6.0f;
-        RcCfg.detailSampleMaxError = RcCfg.ch * 1.0f;
+        RcCfg.maxSimplificationError = 1.0f;
+        RcCfg.detailSampleDist = RcCfg.cs * 8.0f;
+        RcCfg.detailSampleMaxError = RcCfg.ch * 0.5f;
 
         RcCfg.tileSize = 80;
         RcCfg.borderSize = RcCfg.walkableRadius + 3;
@@ -149,7 +153,8 @@ public:
 
     // ── Main processing pipeline ──
 
-    inline void Process(Structure* structure, const WaterMap* waterMap, const RoadMap* roadMap) noexcept
+    inline void Process(Structure* structure, const WaterMap* waterMap, const RoadMap* roadMap,
+                        const FactionMap* factionMap = nullptr, const CityMap* cityMap = nullptr) noexcept
     {
         if (!structure)
             return;
@@ -242,7 +247,8 @@ public:
                                          (tbbMin[2] + (stY + 1) * subTileSize) + borderPadding};
 
                         if (BuildSubTile(stbbMin, stbbMax, structure, &spmeshes[meshIndex], &sdmeshes[meshIndex], stX,
-                                         stY, adtPixels.empty() ? nullptr : adtPixels.data(), waterMap, roadMap, split))
+                                         stY, adtPixels.empty() ? nullptr : adtPixels.data(), waterMap, roadMap,
+                                         factionMap, cityMap, split))
                         {
                             meshIndex++;
                         }
@@ -268,7 +274,8 @@ private:
 
     inline bool BuildSubTile(float* bbMin, float* bbMax, Structure* structure, rcPolyMesh** pmesh,
                              rcPolyMeshDetail** dmesh, int stX, int stY, uint8_t* adtPixels, const WaterMap* waterMap,
-                             const RoadMap* roadMap, const SplitGeometry& split) noexcept
+                             const RoadMap* roadMap, const FactionMap* factionMap, const CityMap* cityMap,
+                             const SplitGeometry& split) noexcept
     {
         *pmesh = nullptr;
         *dmesh = nullptr;
@@ -344,6 +351,14 @@ private:
 
         // Mark road areas
         MarkRoadAreas(chf, roadMap);
+
+        // Mark city areas (upgrades TERRAIN_GROUND → TERRAIN_CITY within city bounds).
+        // Runs after roads so that roads within cities stay TERRAIN_ROAD.
+        MarkCityAreas(chf, cityMap);
+
+        // Mark faction areas (upgrades neutral base IDs to Alliance/Horde variants).
+        // Must run after water, road, and city marking so all base area IDs are finalized.
+        MarkFactionAreas(chf, factionMap);
 
         // Render to BMP (debug only)
         if (IsDebug)

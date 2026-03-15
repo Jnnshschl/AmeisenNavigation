@@ -4,8 +4,11 @@
 #include <mutex>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 
 #include "../Mpq/CachedFileReader.hpp"
+#include "../Utils/CityMap.hpp"
+#include "../Utils/FactionMap.hpp"
 #include "../Utils/Matrix4x4.hpp"
 #include "../Utils/Structure.hpp"
 #include "../Utils/Tri.hpp"
@@ -401,6 +404,51 @@ inline void ExtractWmoGeometry(Adt* adt, CachedFileReader& reader, Structure* st
             }
         }
     }
+}
+
+/// Extract city coverage from one MCNK chunk (x, y) into a CityMap.
+/// Uses MCNK.areaid to check if this chunk is within a city area (capital or town).
+inline void ExtractCityCoverage(Adt* adt, unsigned int x, unsigned int y, CityMap* cityMap,
+                                const std::unordered_set<unsigned int>& areaCities) noexcept
+{
+    if (!cityMap || areaCities.empty())
+        return;
+
+    const MCNK* mcnk = adt->Mcnk(x, y);
+    if (!mcnk || mcnk->areaid == 0)
+        return;
+
+    if (areaCities.find(mcnk->areaid) == areaCities.end())
+        return; // Not a city area
+
+    // Each MCNK chunk covers CHUNKSIZE × CHUNKSIZE in world space.
+    Vector3 nw{mcnk->x, mcnk->y, 0.0f};
+    Vector3 se{mcnk->x - CHUNKSIZE, mcnk->y - CHUNKSIZE, 0.0f};
+    cityMap->AddRect(nw, se);
+}
+
+/// Extract faction coverage from one MCNK chunk (x, y) into a FactionMap.
+/// Uses MCNK.areaid to look up the AreaTable.dbc faction for this chunk.
+/// Only adds a rect if the area has a non-neutral faction (Alliance=1, Horde=2).
+inline void ExtractFactionCoverage(Adt* adt, unsigned int x, unsigned int y, FactionMap* factionMap,
+                                   const std::unordered_map<unsigned int, unsigned char>& areaFactions) noexcept
+{
+    if (!factionMap || areaFactions.empty())
+        return;
+
+    const MCNK* mcnk = adt->Mcnk(x, y);
+    if (!mcnk || mcnk->areaid == 0)
+        return;
+
+    auto it = areaFactions.find(mcnk->areaid);
+    if (it == areaFactions.end() || it->second == 0)
+        return; // Unknown or contested/sanctuary — no faction marking
+
+    // Each MCNK chunk covers CHUNKSIZE × CHUNKSIZE in world space.
+    // mcnk->x/y is the NW corner; extends negatively.
+    Vector3 nw{mcnk->x, mcnk->y, 0.0f};
+    Vector3 se{mcnk->x - CHUNKSIZE, mcnk->y - CHUNKSIZE, 0.0f};
+    factionMap->AddRect(nw, se, it->second);
 }
 
 /// Extract standalone doodad geometry from MDDF placements.

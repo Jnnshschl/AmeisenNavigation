@@ -19,6 +19,7 @@ private:
     std::map<std::string, void*> Map{
         {"bUseAnpFileFormat", &useAnpFileFormat},
         {"fCatmullRomSplineAlpha", &catmullRomSplineAlpha},
+        {"fFactionDangerCost", &factionDangerCost},
         {"fRandomPathMaxDistance", &randomPathMaxDistance},
         {"iBezierCurvePoints", &bezierCurvePoints},
         {"iCatmullRomSplinePoints", &catmullRomSplinePoints},
@@ -34,6 +35,7 @@ private:
 public:
     bool useAnpFileFormat = false; // this will become the default when its stable and field tested
     float catmullRomSplineAlpha = 0.5f;
+    float factionDangerCost = 3.0f; // cost multiplier for enemy faction areas (e.g., Horde in Alliance territory)
     float randomPathMaxDistance = 1.0f;
     int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;

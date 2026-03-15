@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>17.0</VCProjectVersion>
+    <VCProjectVersion>18.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{925c53f9-9f86-4c19-befc-3d33f9202532}</ProjectGuid>
     <RootNamespace>AnTCPServer</RootNamespace>

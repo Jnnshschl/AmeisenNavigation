@@ -105,6 +105,95 @@ int main(int argc, char** argv) noexcept
         }
     }
 
+    // Load AreaTable.dbc to build faction + city lookups
+    // WotLK 3.3.5a layout: field 0=ID, field 2=ParentAreaID, field 4=Flags, field 28=FactionGroupMask
+    // FactionGroupMask: 0=Contested, 2=Alliance, 4=Horde, 6=Sanctuary
+    // Flags: 0x08=Capital, 0x20=SlaveCapital (secondary town)
+    //
+    // Sub-areas (e.g., "Trade District") often have flags/faction=0 but inherit
+    // from their parent zone (e.g., "Stormwind City"). We walk up the parent chain
+    // so that all sub-areas get properly marked.
+    std::unordered_map<unsigned int, unsigned char> areaFactions;
+    std::unordered_set<unsigned int> areaCities;
+
+    if (Dbc* areaTableDbc = mpqReader.GetFileContent<Dbc>("DBFilesClient\\AreaTable.dbc"))
+    {
+        constexpr unsigned int AREA_FLAG_CAPITAL = 0x08;
+        constexpr unsigned int AREA_FLAG_SLAVE_CAPITAL = 0x20;
+
+        // Pass 1: read all areas — store parent, direct faction, and flags
+        struct AreaInfo
+        {
+            unsigned int parentId;
+            unsigned int flags;
+            unsigned char faction; // 0=unknown, 1=Alliance, 2=Horde
+        };
+        std::unordered_map<unsigned int, AreaInfo> allAreas;
+
+        for (unsigned int i = 0u; i < areaTableDbc->GetRecordCount(); ++i)
+        {
+            unsigned int areaId = areaTableDbc->Read<unsigned int>(i, 0u);
+            unsigned int parentId = areaTableDbc->Read<unsigned int>(i, 2u);
+            unsigned int flags = areaTableDbc->Read<unsigned int>(i, 4u);
+            unsigned int factionGroupMask = areaTableDbc->Read<unsigned int>(i, 28u);
+
+            unsigned char faction = 0;
+            if (factionGroupMask == 2)
+                faction = 1; // Alliance
+            else if (factionGroupMask == 4)
+                faction = 2; // Horde
+
+            allAreas[areaId] = {parentId, flags, faction};
+        }
+
+        // Pass 2: resolve faction by walking up parent chain for areas with faction=0
+        auto resolveFaction = [&](unsigned int areaId) -> unsigned char {
+            unsigned int current = areaId;
+            for (int depth = 0; depth < 10; ++depth)
+            {
+                auto it = allAreas.find(current);
+                if (it == allAreas.end())
+                    return 0;
+                if (it->second.faction != 0)
+                    return it->second.faction;
+                if (it->second.parentId == 0 || it->second.parentId == current)
+                    return 0;
+                current = it->second.parentId;
+            }
+            return 0;
+        };
+
+        // Pass 2b: resolve city status by walking up parent chain
+        auto resolveCity = [&](unsigned int areaId) -> bool {
+            unsigned int current = areaId;
+            for (int depth = 0; depth < 10; ++depth)
+            {
+                auto it = allAreas.find(current);
+                if (it == allAreas.end())
+                    return false;
+                if (it->second.flags & (AREA_FLAG_CAPITAL | AREA_FLAG_SLAVE_CAPITAL))
+                    return true;
+                if (it->second.parentId == 0 || it->second.parentId == current)
+                    return false;
+                current = it->second.parentId;
+            }
+            return false;
+        };
+
+        for (const auto& [areaId, info] : allAreas)
+        {
+            unsigned char faction = resolveFaction(areaId);
+            if (faction != 0)
+                areaFactions[areaId] = faction;
+
+            if (resolveCity(areaId))
+                areaCities.insert(areaId);
+        }
+
+        LogI(std::format("AreaTable.dbc: {} areas loaded, {} faction-marked, {} city-marked",
+                         allAreas.size(), areaFactions.size(), areaCities.size()));
+    }
+
     const std::set<int> unusedMapIds{
         13,  169, 25,  29,  42,  451, 573, 582, 584, 586, 587, 588, 589, 590, 591, 592, 593, 594, 596,
         597, 605, 606, 610, 612, 613, 614, 620, 621, 622, 623, 641, 642, 647, 672, 673, 712, 713, 718,
@@ -139,6 +228,8 @@ int main(int argc, char** argv) noexcept
             Structure mapGeometry;
             WaterMap waterMap;
             RoadMap roadMap;
+            FactionMap factionMap;
+            CityMap cityMap;
 
 #pragma omp parallel for schedule(dynamic)
             for (int i = 0; i < WDT_MAP_SIZE * WDT_MAP_SIZE; ++i)
@@ -176,6 +267,8 @@ int main(int argc, char** argv) noexcept
                             ExtractTerrain(adt, cx, cy, &terrain);
                             ExtractLiquid(adt, cx, cy, &waterMap, &terrain, liquidTypes);
                             ExtractRoadCoverage(adt, cx, cy, &roadMap, roadTextureIds);
+                            ExtractCityCoverage(adt, cx, cy, &cityMap, areaCities);
+                            ExtractFactionCoverage(adt, cx, cy, &factionMap, areaFactions);
                         }
 
                         // Step 3: Extract object geometry
@@ -237,9 +330,11 @@ int main(int argc, char** argv) noexcept
                                          (int)r.type));
                     }
                     LogI(std::format("RoadMap rects: {}", roadMap.rects.size()));
+                    LogI(std::format("CityMap rects: {}", cityMap.rects.size()));
+                    LogI(std::format("FactionMap rects: {}", factionMap.rects.size()));
                 }
 
-                tileProcessor.Process(&mapGeometry, &waterMap, &roadMap);
+                tileProcessor.Process(&mapGeometry, &waterMap, &roadMap, &factionMap, &cityMap);
                 STOP_TIMER(startTimeNavmesh, "Building Navmesh took");
 
                 anp.Save(outputDir.c_str());

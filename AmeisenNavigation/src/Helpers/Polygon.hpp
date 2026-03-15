@@ -58,8 +58,7 @@ static void BridsonsPoissonDiskSampling(const Vector3* vertices, int vertexCount
                                         Vector3* tempBuffer, int maxNodeCount, float minDistance,
                                         int numCandidates = 30) noexcept
 {
-    std::random_device rd;
-    std::mt19937 rng(rd());
+    thread_local std::mt19937 rng{ std::random_device{}() };
     std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
 
     auto maxX = std::numeric_limits<float>::min();

@@ -2,7 +2,9 @@
 
 void AmeisenNavigation::NewClient(size_t clientId, MmapFormat format) noexcept
 {
-    if (IsValidClient(clientId))
+    std::unique_lock lock(ClientsMutex);
+    auto it = Clients.find(clientId);
+    if (it != Clients.end() && it->second != nullptr)
     {
         return;
     }
@@ -13,19 +15,23 @@ void AmeisenNavigation::NewClient(size_t clientId, MmapFormat format) noexcept
 
 void AmeisenNavigation::FreeClient(size_t clientId) noexcept
 {
-    if (!IsValidClient(clientId))
+    std::unique_lock lock(ClientsMutex);
+    auto it = Clients.find(clientId);
+    if (it == Clients.end() || it->second == nullptr)
     {
         return;
     }
 
-    delete Clients[clientId];
-    Clients[clientId] = nullptr;
+    delete it->second;
+    Clients.erase(it);
     ANAV_DEBUG_ONLY(">> Freed Client: ", clientId);
 }
 
 AmeisenNavClient* AmeisenNavigation::GetClient(size_t clientId) noexcept
 {
-    return IsValidClient(clientId) ? Clients[clientId] : nullptr;
+    std::shared_lock lock(ClientsMutex);
+    auto it = Clients.find(clientId);
+    return (it != Clients.end()) ? it->second : nullptr;
 }
 
 bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const Vector3& startPosition, const Vector3& endPosition,
