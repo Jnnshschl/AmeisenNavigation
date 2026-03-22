@@ -1,10 +1,10 @@
 #pragma once
 
-#include <chrono>
-#include <iostream>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
-#include <utility>
+
+#include <Utils/Logger.hpp>
 
 #define XXH_STATIC_LINKING_ONLY
 #define XXH_IMPLEMENTATION
@@ -12,11 +12,20 @@
 
 #include "MpqManager.hpp"
 
+/// Matches the binary layout of file wrapper classes (Dbc, Wdt, Adt, Wmo, M2, etc.)
+/// which all start with: unsigned char* Data; unsigned int Size;
+/// This struct is what GetFileContent<T> actually returns a pointer to.
+struct CachedFileEntry
+{
+    unsigned char* Data;
+    unsigned int Size;
+};
+
 class CachedFileReader
 {
     MpqManager* Mpq;
-    std::mutex CacheMutex;
-    std::unordered_map<XXH64_hash_t, std::pair<void*, unsigned int>> Cache;
+    std::shared_mutex CacheMutex;
+    std::unordered_map<XXH64_hash_t, CachedFileEntry> Cache;
 
 public:
     explicit CachedFileReader(MpqManager* mpqManager) noexcept
@@ -25,37 +34,52 @@ public:
         Cache()
     {}
 
+    /// Returns a pointer to a cached file entry, reinterpreted as T*.
+    /// T must have layout-compatible first two members: unsigned char* Data; unsigned int Size;
+    /// (e.g., Dbc, Wdt, Adt, Wmo, M2).
     template<typename T>
     inline T* GetFileContent(const char* filename) noexcept
     {
         const auto hash = XXH3_64bits(filename, strlen(filename));
 
-        std::unique_lock<std::mutex> cacheLock(CacheMutex);
-
-        if (!Cache.contains(hash))
+        // Fast path: shared lock for cache hits (concurrent reads)
         {
-            unsigned int size = 0;
-
-            if (unsigned char* ptr = Mpq->GetFileContent(filename, size))
+            std::shared_lock readLock(CacheMutex);
+            auto it = Cache.find(hash);
+            if (it != Cache.end())
             {
-                Cache[hash] = std::make_pair(ptr, size);
-            }
-            else
-            {
-                std::cout << "[CachedFileReader] Failed to load: " << filename << std::endl;
-                Cache[hash] = std::make_pair(nullptr, 0);
+                return it->second.Data && it->second.Size > 0 ? reinterpret_cast<T*>(&it->second) : nullptr;
             }
         }
 
-        // The wrapper classes (Dbc, Wdt, Adt, Wmo, M2, etc.) all have layout {unsigned char* Data; unsigned int Size;}
-        // which matches std::pair<void*, unsigned int>. Returning a pointer to the pair lets the wrapper class
-        // use pair.first as its Data pointer and pair.second as its Size — do NOT "fix" this to return .first.
-        return Cache[hash].first && Cache[hash].second > 0 ? reinterpret_cast<T*>(&Cache[hash]) : nullptr;
+        // Slow path: exclusive lock for cache misses
+        std::unique_lock writeLock(CacheMutex);
+
+        // Double-check after acquiring exclusive lock
+        auto it = Cache.find(hash);
+        if (it != Cache.end())
+        {
+            return it->second.Data && it->second.Size > 0 ? reinterpret_cast<T*>(&it->second) : nullptr;
+        }
+
+        unsigned int size = 0;
+        if (unsigned char* ptr = Mpq->GetFileContent(filename, size))
+        {
+            Cache[hash] = CachedFileEntry{ptr, size};
+        }
+        else
+        {
+            LogW("Failed to load MPQ file: ", filename);
+            Cache[hash] = CachedFileEntry{nullptr, 0};
+        }
+
+        auto& entry = Cache[hash];
+        return entry.Data && entry.Size > 0 ? reinterpret_cast<T*>(&entry) : nullptr;
     }
 
     inline void Clear() noexcept
     {
-        // Don't delete the buffers here — MpqManager owns the memory
+        // Don't delete the buffers here - MpqManager owns the memory
         // (it tracks all allocations and frees them in its destructor).
         Cache.clear();
     }

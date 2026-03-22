@@ -48,7 +48,7 @@ struct Matrix4x4
         float cy = std::cosf(y), sy = std::sinf(y);
         float cz = std::cosf(z), sz = std::sinf(z);
 
-        // ZYX Euler rotation matrix — multiply into existing transform to preserve scale
+        // ZYX Euler rotation matrix - multiply into existing transform to preserve scale
         Matrix4x4 rot;
         rot.data[0][0] = cy * cz;
         rot.data[0][1] = cy * sz;
@@ -87,7 +87,7 @@ struct Matrix4x4
         float wy = w * y;
         float wz = w * z;
 
-        // Quaternion rotation matrix — multiply into existing transform to preserve scale
+        // Quaternion rotation matrix - multiply into existing transform to preserve scale
         Matrix4x4 rot;
         rot.data[0][0] = 1.0f - 2.0f * (yy + zz);
         rot.data[0][1] = 2.0f * (xy + wz);

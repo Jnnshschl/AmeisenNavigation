@@ -8,6 +8,7 @@ namespace AmeisenNavigation.Tester
         {
             [0] = "Eastern Kingdoms",
             [1] = "Kalimdor",
+            [529] = "Arathi Basin",
             [530] = "Outland",
             [571] = "Northrend",
         };
@@ -16,6 +17,7 @@ namespace AmeisenNavigation.Tester
         {
             [0] = "Azeroth",
             [1] = "Kalimdor",
+            [529] = "PVPZone04",
             [530] = "Expansion01",
             [571] = "Northrend",
         };

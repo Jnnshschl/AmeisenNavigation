@@ -7,7 +7,12 @@
     <PlatformTarget>x86</PlatformTarget>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <Nullable>enable</Nullable>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Content Include="icon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\AmeisenNavigation.Client\AmeisenNavigation.Client.csproj" />

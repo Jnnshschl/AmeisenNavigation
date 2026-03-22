@@ -14,8 +14,10 @@ enum class MessageType
     RANDOM_POINT_AROUND, // Get a random point on the mesh in a circle
     CAST_RAY,            // Cast a movement ray to test for obstacles
     RANDOM_PATH,         // Generate a straight path with random offsets
-    EXPLORE_POLY,        // Generate a route to explore the polygon (W.I.P)
+    EXPLORE_POLY,        // Reserved (not implemented)
     CONFIGURE_FILTER,    // Configure the client's dtQueryFilter area costs
+    GET_HEIGHT,          // Get the navmesh terrain height at a position
+    GET_CONFIG,          // Get the server's configuration (meshes path, format, etc.)
 };
 
 enum class PathType
@@ -63,14 +65,17 @@ struct RandomPointAroundData
     float radius;
 };
 
-struct ExplorePolyData
+struct GetHeightData
 {
     int mapId;
-    int flags;
-    Vector3 start;
-    float viewDistance;
-    int polyPointCount;
-    Vector3 firstPolyPoint;
+    Vector3 position;
+};
+
+struct GetConfigResponseHeader
+{
+    int mmapFormat;
+    int useAnpFileFormat;
+    int pathLength;
 };
 
 struct FilterConfig

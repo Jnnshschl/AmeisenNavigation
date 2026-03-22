@@ -1,9 +1,11 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
+#include <cstdio>
 #include <ctime>
 #include <format>
-#include <iostream>
+#include <mutex>
 #include <string>
 
 #ifdef _WIN32
@@ -25,10 +27,17 @@ enum class Level
     Error,
     Debug,
     Map,
-    Timer
+    Timer,
+    Progress
 };
 
-static void Initialize()
+inline std::mutex& GetMutex()
+{
+    static std::mutex mtx;
+    return mtx;
+}
+
+inline void Initialize()
 {
 #ifdef _WIN32
     HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
@@ -44,51 +53,113 @@ static void Initialize()
 #endif
 }
 
-static std::string GetTimestamp()
-{
-    auto now = std::chrono::system_clock::now();
-    auto in_time_t = std::chrono::system_clock::to_time_t(now);
-    std::tm bt;
-    localtime_s(&bt, &in_time_t);
-    return std::format("{:02}:{:02}:{:02}", bt.tm_hour, bt.tm_min, bt.tm_sec);
-}
-
-template <typename... Args>
-static void InternalLog(const std::string& levelStr, const std::string& color, Args&&... args)
-{
-    std::string timestamp = GetTimestamp();
-    std::cout << "\033[90m[" << timestamp << "] \033[0m" << color << "[" << levelStr << "]\033[0m ";
-    (std::cout << ... << args) << std::endl;
-}
-
-template <typename... Args>
-static void Log(Level level, Args&&... args)
+inline const char* LevelTag(Level level)
 {
     switch (level)
     {
-        case Level::Info:
-            InternalLog("INFO ", "\033[96m", std::forward<Args>(args)...);
-            break;
-        case Level::Success:
-            InternalLog("OK   ", "\033[92m", std::forward<Args>(args)...);
-            break;
-        case Level::Warning:
-            InternalLog("WARN ", "\033[93m", std::forward<Args>(args)...);
-            break;
-        case Level::Error:
-            InternalLog("ERR  ", "\033[91m", std::forward<Args>(args)...);
-            break;
-        case Level::Debug:
-            InternalLog("DEBUG", "\033[90m", std::forward<Args>(args)...);
-            break;
-        case Level::Map:
-            InternalLog("MAP  ", "\033[95m", std::forward<Args>(args)...); // Magenta
-            break;
-        case Level::Timer:
-            InternalLog("TIME ", "\033[94m", std::forward<Args>(args)...); // Blue
-            break;
+        case Level::Info:     return "\033[96m[INFO ]\033[0m";
+        case Level::Success:  return "\033[92m[OK   ]\033[0m";
+        case Level::Warning:  return "\033[93m[WARN ]\033[0m";
+        case Level::Error:    return "\033[91m[ERR  ]\033[0m";
+        case Level::Debug:    return "\033[90m[DEBUG]\033[0m";
+        case Level::Map:      return "\033[95m[MAP  ]\033[0m";
+        case Level::Timer:    return "\033[94m[TIME ]\033[0m";
+        case Level::Progress: return "\033[93m[PROG ]\033[0m";
+        default:              return "[?????]";
     }
 }
+
+inline std::string GetTimestamp() noexcept
+{
+    try
+    {
+        auto now = std::chrono::system_clock::now();
+        auto in_time_t = std::chrono::system_clock::to_time_t(now);
+        std::tm bt;
+        localtime_s(&bt, &in_time_t);
+        return std::format("{:02}:{:02}:{:02}", bt.tm_hour, bt.tm_min, bt.tm_sec);
+    }
+    catch (...) { return "??:??:??"; }
+}
+
+/// Thread-safe log implementation: formats to a single string, writes under lock.
+/// Named LogImpl to avoid overload-resolution ambiguity with the variadic template.
+/// Safe to call from noexcept contexts - never throws.
+inline void LogImpl(Level level, const std::string& msg) noexcept
+{
+    try
+    {
+        std::string timestamp = GetTimestamp();
+        std::string line = std::format("\033[90m[{}] \033[0m{} {}\n", timestamp, LevelTag(level), msg);
+
+        const std::lock_guard lock(GetMutex());
+        fputs(line.c_str(), stdout);
+        fflush(stdout);
+    }
+    catch (...) { /* swallow - cannot let logging crash noexcept callers */ }
+}
+
+/// Single-string overload - delegates to LogImpl.
+inline void Log(Level level, const std::string& msg) noexcept
+{
+    LogImpl(level, msg);
+}
+
+/// Variadic convenience - concatenates args into one string, then logs.
+/// Safe to call from noexcept contexts - never throws.
+template <typename... Args>
+inline void Log(Level level, Args&&... args) noexcept
+{
+    try
+    {
+        std::string msg;
+        ((msg += std::format("{}", std::forward<Args>(args))), ...);
+        LogImpl(level, msg);
+    }
+    catch (...) { /* swallow */ }
+}
+
+/// Overwrite-in-place progress line (no newline - uses \r).
+/// Thread-safe. Stays on one line until a normal Log() call adds a newline.
+inline void LogProgress(const std::string& msg) noexcept
+{
+    try
+    {
+        std::string timestamp = GetTimestamp();
+        std::string line = std::format("\r\033[90m[{}] \033[0m{} {}\033[K", timestamp, LevelTag(Level::Progress), msg);
+
+        const std::lock_guard lock(GetMutex());
+        fputs(line.c_str(), stdout);
+        fflush(stdout);
+    }
+    catch (...) {}
+}
+
+/// End a progress sequence: print a final newline so subsequent logs start on a fresh line.
+inline void EndProgress()
+{
+    const std::lock_guard lock(GetMutex());
+    fputs("\n", stdout);
+    fflush(stdout);
+}
+
+/// Format seconds as "Xh Ym Zs" or "Ym Zs" or "Zs".
+inline std::string FormatDuration(double seconds) noexcept
+{
+    try
+    {
+        if (seconds < 0.0)
+            return "?";
+        int s = static_cast<int>(seconds);
+        if (s >= 3600)
+            return std::format("{}h {:02}m {:02}s", s / 3600, (s % 3600) / 60, s % 60);
+        if (s >= 60)
+            return std::format("{}m {:02}s", s / 60, s % 60);
+        return std::format("{}s", s);
+    }
+    catch (...) { return "?"; }
+}
+
 } // namespace Logger
 
 // Global Macros for ease of use
@@ -97,3 +168,4 @@ static void Log(Level level, Args&&... args)
 #define LogW(...) Logger::Log(Logger::Level::Warning, __VA_ARGS__)
 #define LogE(...) Logger::Log(Logger::Level::Error, __VA_ARGS__)
 #define LogD(...) Logger::Log(Logger::Level::Debug, __VA_ARGS__)
+#define LogP(msg) Logger::LogProgress(msg)

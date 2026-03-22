@@ -246,7 +246,7 @@ namespace AmeisenNavigation.Tester.Controls
                     var tileData = _anpReader.GetTile(_mapId, tx, ty);
                     if (tileData == null) continue;
 
-                    // Draw pre-built frozen geometries — one DrawGeometry call per area
+                    // Draw pre-built frozen geometries - one DrawGeometry call per area
                     foreach (var entry in tileData.AreaGeometries)
                     {
                         var brush = AreaColors.GetBrush(entry.AreaId, _navmeshOpacity);

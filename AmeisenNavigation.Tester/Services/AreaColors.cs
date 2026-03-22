@@ -37,7 +37,7 @@ namespace AmeisenNavigation.Tester.Services
 
         /// <summary>
         /// Get a frozen brush for the given area ID at a specific opacity (0-255).
-        /// Returns a cached semi-transparent brush — no allocation after first call
+        /// Returns a cached semi-transparent brush - no allocation after first call
         /// for each unique (areaId, opacity) pair.
         /// </summary>
         public static SolidColorBrush GetBrush(byte areaId, byte opacity = 100)

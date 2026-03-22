@@ -2,125 +2,118 @@
 
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <map>
 #include <sstream>
 #include <string>
+#include <variant>
 
-constexpr auto CONFIG_CHAR_BOOL = 'b';
-constexpr auto CONFIG_CHAR_INT = 'i';
-constexpr auto CONFIG_CHAR_CHAR = 'c';
-constexpr auto CONFIG_CHAR_STRING = 's';
-constexpr auto CONFIG_CHAR_FLOAT = 'f';
-constexpr auto CONFIG_CHAR_DELIMITER = '=';
+/// Type-safe configuration entry: wraps a reference to the actual config field.
+using ConfigRef = std::variant<
+    std::reference_wrapper<bool>,
+    std::reference_wrapper<int>,
+    std::reference_wrapper<float>,
+    std::reference_wrapper<std::string>
+>;
 
 struct AmeisenNavConfig
 {
-private:
-    std::map<std::string, void*> Map{
-        {"bUseAnpFileFormat", &useAnpFileFormat},
-        {"fCatmullRomSplineAlpha", &catmullRomSplineAlpha},
-        {"fFactionDangerCost", &factionDangerCost},
-        {"fRandomPathMaxDistance", &randomPathMaxDistance},
-        {"iBezierCurvePoints", &bezierCurvePoints},
-        {"iCatmullRomSplinePoints", &catmullRomSplinePoints},
-        {"iMaxPointPath", &maxPointPath},
-        {"iMaxPolyPath", &maxPolyPath},
-        {"iMaxSearchNodes", &maxSearchNodes},
-        {"iMmapFormat", &mmapFormat},
-        {"iPort", &port},
-        {"sIp", &ip},
-        {"sMmapsPath", &mmapsPath},
-    };
+    // ── Configuration Fields ─────────────────────────────────────────
 
-public:
-    bool useAnpFileFormat = false; // this will become the default when its stable and field tested
+    bool useAnpFileFormat = false;
     float catmullRomSplineAlpha = 0.5f;
-    float factionDangerCost = 3.0f; // cost multiplier for enemy faction areas (e.g., Horde in Alliance territory)
+    float factionDangerCost = 3.0f;
     float randomPathMaxDistance = 1.0f;
     int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;
     int maxPointPath = 512;
     int maxPolyPath = 2048;
     int maxSearchNodes = 65535;
-    int mmapFormat = static_cast<int>(MmapFormat::UNKNOWN);
+    int mmapFormat = 0; // MmapFormat::UNKNOWN
     int port = 47110;
     std::string ip = "127.0.0.1";
     std::string mmapsPath = "C:\\meshes\\";
 
+    // ── Serialization ────────────────────────────────────────────────
+
     void Save(const std::filesystem::path& path)
     {
-        std::ofstream outputFile(path);
+        std::ofstream out(path);
+        if (!out.is_open())
+            return;
 
-        for (auto const& x : Map)
+        for (const auto& [key, ref] : GetFieldMap())
         {
-            switch (x.first[0])
-            {
-                case CONFIG_CHAR_BOOL:
-                    outputFile << x.first << CONFIG_CHAR_DELIMITER
-                               << static_cast<unsigned int>(*static_cast<bool*>(x.second)) << std::endl;
-                    break;
-                case CONFIG_CHAR_CHAR:
-                    outputFile << x.first << CONFIG_CHAR_DELIMITER
-                               << static_cast<unsigned int>(*static_cast<char*>(x.second)) << std::endl;
-                    break;
-                case CONFIG_CHAR_FLOAT:
-                    outputFile << x.first << CONFIG_CHAR_DELIMITER << std::to_string(*static_cast<float*>(x.second))
-                               << std::endl;
-                    break;
-                case CONFIG_CHAR_INT:
-                    outputFile << x.first << CONFIG_CHAR_DELIMITER << *static_cast<int*>(x.second) << std::endl;
-                    break;
-                case CONFIG_CHAR_STRING:
-                    outputFile << x.first << CONFIG_CHAR_DELIMITER << *static_cast<std::string*>(x.second) << std::endl;
-                    break;
-                default:
-                    break;
-            }
+            std::visit([&](auto&& r) {
+                using T = std::decay_t<decltype(r.get())>;
+                if constexpr (std::is_same_v<T, bool>)
+                    out << key << '=' << static_cast<unsigned int>(r.get()) << '\n';
+                else if constexpr (std::is_same_v<T, float>)
+                    out << key << '=' << std::to_string(r.get()) << '\n';
+                else
+                    out << key << '=' << r.get() << '\n';
+            }, ref);
         }
-
-        outputFile.close();
     }
 
     void Load(const std::filesystem::path& path)
     {
-        std::ifstream input(path);
-        std::string item;
+        std::ifstream in(path);
+        if (!in.is_open())
+            return;
 
-        for (std::string line; std::getline(input, line);)
+        auto fields = GetFieldMap();
+
+        for (std::string line; std::getline(in, line);)
         {
-            std::stringstream ss(line);
-            std::vector<std::string> result;
+            auto delim = line.find('=');
+            if (delim == std::string::npos)
+                continue;
 
-            while (std::getline(ss, item, CONFIG_CHAR_DELIMITER))
-            {
-                result.push_back(item);
-            }
+            std::string key = line.substr(0, delim);
+            std::string val = line.substr(delim + 1);
 
-            if (result.size() == 2 && Map.count(result[0]))
-            {
-                switch (result[0][0])
+            auto it = fields.find(key);
+            if (it == fields.end())
+                continue;
+
+            std::visit([&](auto&& r) {
+                using T = std::decay_t<decltype(r.get())>;
+                try
                 {
-                    case CONFIG_CHAR_BOOL:
-                        *static_cast<bool*>(Map.at(result[0])) = std::stoi(result[1]) > 0;
-                        break;
-                    case CONFIG_CHAR_CHAR:
-                        *static_cast<char*>(Map.at(result[0])) = static_cast<char>(std::stoi(result[1]));
-                        break;
-                    case CONFIG_CHAR_FLOAT:
-                        *static_cast<float*>(Map.at(result[0])) = std::stof(result[1]);
-                        break;
-                    case CONFIG_CHAR_INT:
-                        *static_cast<int*>(Map.at(result[0])) = std::stoi(result[1]);
-                        break;
-                    case CONFIG_CHAR_STRING:
-                        *static_cast<std::string*>(Map.at(result[0])) = result[1];
-                        break;
-                    default:
-                        break;
+                    if constexpr (std::is_same_v<T, bool>)
+                        r.get() = std::stoi(val) > 0;
+                    else if constexpr (std::is_same_v<T, int>)
+                        r.get() = std::stoi(val);
+                    else if constexpr (std::is_same_v<T, float>)
+                        r.get() = std::stof(val);
+                    else if constexpr (std::is_same_v<T, std::string>)
+                        r.get() = val;
                 }
-            }
+                catch (...) { /* skip malformed values */ }
+            }, it->second);
         }
+    }
 
-        input.close();
+private:
+    /// Returns an ordered map of config key -> reference to the field.
+    /// Key prefix convention: b=bool, i=int, f=float, s=string.
+    std::map<std::string, ConfigRef> GetFieldMap()
+    {
+        return {
+            {"bUseAnpFileFormat",       std::ref(useAnpFileFormat)},
+            {"fCatmullRomSplineAlpha",  std::ref(catmullRomSplineAlpha)},
+            {"fFactionDangerCost",      std::ref(factionDangerCost)},
+            {"fRandomPathMaxDistance",   std::ref(randomPathMaxDistance)},
+            {"iBezierCurvePoints",      std::ref(bezierCurvePoints)},
+            {"iCatmullRomSplinePoints", std::ref(catmullRomSplinePoints)},
+            {"iMaxPointPath",           std::ref(maxPointPath)},
+            {"iMaxPolyPath",            std::ref(maxPolyPath)},
+            {"iMaxSearchNodes",         std::ref(maxSearchNodes)},
+            {"iMmapFormat",             std::ref(mmapFormat)},
+            {"iPort",                   std::ref(port)},
+            {"sIp",                     std::ref(ip)},
+            {"sMmapsPath",              std::ref(mmapsPath)},
+        };
     }
 };

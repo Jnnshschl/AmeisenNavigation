@@ -4,7 +4,7 @@
 #include "Mver.hpp"
 
 // ─────────────────────────────────────────────
-// Adt — thin accessor class for ADT file data.
+// Adt - thin accessor class for ADT file data.
 // Provides typed access to ADT sub-chunks via MHDR offsets.
 // All data extraction logic lives in AdtChunkExtractor.hpp
 // and RoadDetector.hpp as free functions.

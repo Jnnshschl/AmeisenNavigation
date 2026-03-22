@@ -25,7 +25,7 @@ namespace AmeisenNavigation.Tester.Services
     ///
     /// Performance: All geometry is pre-built as frozen StreamGeometry in pixel
     /// coordinates at parse time. Rendering uses a single MatrixTransform for
-    /// zoom/pan — zero per-vertex math, zero per-frame allocation.
+    /// zoom/pan - zero per-vertex math, zero per-frame allocation.
     /// </summary>
     public sealed class AnpTileReader
     {

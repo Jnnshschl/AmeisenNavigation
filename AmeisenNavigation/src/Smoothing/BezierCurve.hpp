@@ -7,15 +7,7 @@
 
 namespace BezierCurve
 {
-    /// <summary>
-    /// Interpolate points using a Bezier-Curve.
-    /// </summary>
-    /// <param name="p0">Point0.</param>
-    /// <param name="p1">Point1.</param>
-    /// <param name="p2">Point2.</param>
-    /// <param name="p3">Point3.</param>
-    /// <param name="p">Interpolated point.</param>
-    /// <param name="t">Curve progress.</param>
+    /// Cubic Bezier interpolation at parameter t ∈ [0,1].
     inline void Interpolate(const float* p0, const float* p1, const float* p2, const float* p3, float* p, float t) noexcept
     {
         const float u = 1.0f - t;

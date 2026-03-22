@@ -5,7 +5,9 @@
 #include "Protocol.hpp"
 #include "Config/Config.hpp"
 
+#include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <unordered_map>
 
 /// Owns all server state: TCP server, navigation engine, config, and per-client path buffers.
@@ -13,82 +15,70 @@
 class NavServer
 {
 public:
-    NavServer(AmeisenNavConfig* config)
-        : config_(config)
-        , nav_(new AmeisenNavigation(
-              config->mmapsPath, config->maxPolyPath, config->maxSearchNodes,
-              config->useAnpFileFormat, config->factionDangerCost))
-        , server_(new AnTcpServer(config->ip, config->port))
+    NavServer(std::unique_ptr<AmeisenNavConfig> config)
+        : config_(std::move(config))
+        , nav_(std::make_unique<AmeisenNavigation>(
+              config_->mmapsPath, config_->maxPolyPath, config_->maxSearchNodes,
+              config_->useAnpFileFormat, config_->factionDangerCost))
+        , server_(std::make_unique<AnTcpServer>(config_->ip, config_->port))
     {
     }
 
-    ~NavServer()
-    {
-        delete server_;
-        delete nav_;
-        delete config_;
-    }
+    ~NavServer() = default;
 
     NavServer(const NavServer&) = delete;
     NavServer& operator=(const NavServer&) = delete;
 
     // ── Accessors ────────────────────────────────────────────────────
 
-    AnTcpServer* Server() noexcept { return server_; }
-    AmeisenNavigation* Nav() noexcept { return nav_; }
-    AmeisenNavConfig* Config() noexcept { return config_; }
+    AnTcpServer* Server() noexcept { return server_.get(); }
+    AmeisenNavigation* Nav() noexcept { return nav_.get(); }
+    AmeisenNavConfig* Config() noexcept { return config_.get(); }
 
     // ── Client path buffer management ────────────────────────────────
 
-    void AllocClientBuffers(size_t clientId) noexcept
+    void AllocClientBuffers(size_t clientId)
     {
-        std::lock_guard lock(bufferMutex_);
+        std::unique_lock lock(bufferMutex_);
         clientBuffers_[clientId] =
-            std::make_pair(new Path(config_->maxPointPath), new Path(config_->maxPointPath));
+            std::make_pair(std::make_unique<Path>(config_->maxPointPath), std::make_unique<Path>(config_->maxPointPath));
     }
 
     void FreeClientBuffers(size_t clientId) noexcept
     {
-        std::lock_guard lock(bufferMutex_);
-        auto it = clientBuffers_.find(clientId);
-        if (it == clientBuffers_.end())
-            return;
-
-        delete[] it->second.first->points;
-        delete it->second.first;
-        delete[] it->second.second->points;
-        delete it->second.second;
-
-        clientBuffers_.erase(it);
+        std::unique_lock lock(bufferMutex_);
+        clientBuffers_.erase(clientId);
     }
 
     bool HasClientBuffers(size_t clientId) noexcept
     {
-        std::lock_guard lock(bufferMutex_);
+        std::shared_lock lock(bufferMutex_);
         return clientBuffers_.find(clientId) != clientBuffers_.end();
     }
 
     /// Get the path buffer pair for a client. Caller must ensure clientId is valid.
     std::pair<Path*, Path*> GetClientBuffers(size_t clientId) noexcept
     {
-        std::lock_guard lock(bufferMutex_);
-        return clientBuffers_[clientId];
+        std::shared_lock lock(bufferMutex_);
+        auto it = clientBuffers_.find(clientId);
+        if (it == clientBuffers_.end()) return { nullptr, nullptr };
+        return { it->second.first.get(), it->second.second.get() };
     }
 
     // ── Server lifecycle ─────────────────────────────────────────────
 
-    void RegisterCallbacks() noexcept;
+    void RegisterCallbacks();
     void Run() noexcept { server_->Run(); }
     void Stop() noexcept { server_->Stop(); }
 
 private:
-    AmeisenNavConfig* config_;
-    AmeisenNavigation* nav_;
-    AnTcpServer* server_;
+    std::unique_ptr<AmeisenNavConfig> config_;
+    std::unique_ptr<AmeisenNavigation> nav_;
+    std::unique_ptr<AnTcpServer> server_;
 
-    std::mutex bufferMutex_;
-    std::unordered_map<size_t, std::pair<Path*, Path*>> clientBuffers_;
+    std::shared_mutex bufferMutex_;
+    std::unordered_map<size_t, std::pair<std::unique_ptr<Path>, std::unique_ptr<Path>>> clientBuffers_;
 };
 
 /// Single global access point for C-style callbacks.
-inline NavServer* g_NavServer = nullptr;
+inline std::unique_ptr<NavServer> g_NavServer;

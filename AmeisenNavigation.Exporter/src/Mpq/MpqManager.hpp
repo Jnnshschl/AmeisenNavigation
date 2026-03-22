@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <filesystem>
+#include <memory>
 #include <unordered_map>
+
+#include <Utils/Logger.hpp>
 
 #define STORMLIB_NO_AUTO_LINK
 #include <stormlib.h>
@@ -13,7 +16,7 @@ class MpqManager
 {
 	const char* GameDir;
 	std::vector<void*> Mpqs;
-	std::vector<unsigned char*> Allocations;
+	std::vector<std::unique_ptr<unsigned char[]>> Allocations;
 
 public:
 	explicit MpqManager(const char* gameDir) noexcept
@@ -52,18 +55,12 @@ public:
 			}
 		}
 
-		std::cout << "[MPQManager] Loaded: " << Mpqs.size() << " MPQ files" << std::endl;
+		LogS(std::format("Loaded {} MPQ archives", Mpqs.size()));
 	}
 
 	~MpqManager() noexcept
 	{
-		for (void* alloc : Allocations)
-		{
-			if (alloc)
-			{
-				delete[] alloc;
-			}
-		}
+		Allocations.clear();
 
 		for (void* mpq : Mpqs)
 		{
@@ -71,9 +68,8 @@ public:
 		}
 	}
 
-	inline bool GetFile(const char* name, SFILE_FIND_DATA& resultFindData, void*& mpqHanle) noexcept
+	inline bool GetFile(const char* name, SFILE_FIND_DATA& resultFindData, void*& mpqHandle) noexcept
 	{
-		bool result = false;
 		SFILE_FIND_DATA findData{ 0 };
 
 		for (void* mpq : Mpqs)
@@ -81,13 +77,13 @@ public:
 			if (void* fileFind = SFileFindFirstFile(mpq, name, &findData, nullptr))
 			{
 				resultFindData = findData;
-				mpqHanle = mpq;
+				mpqHandle = mpq;
 				SFileFindClose(fileFind);
 				return true;
 			}
 		}
 
-		return result;
+		return false;
 	}
 
 	inline unsigned char* GetFileContent(const char* name, unsigned int& bufferSize) noexcept
@@ -103,16 +99,15 @@ public:
 
 				if (bufferSize > 0)
 				{
-					unsigned char* buffer = new unsigned char[bufferSize];
+					auto buffer = std::make_unique<unsigned char[]>(bufferSize);
 
-					if (SFileReadFile(hFile, buffer, bufferSize, 0, 0)
+					if (SFileReadFile(hFile, buffer.get(), bufferSize, 0, 0)
 						&& SFileCloseFile(hFile))
 					{
-						Allocations.push_back(buffer);
-						return buffer;
+						unsigned char* ptr = buffer.get();
+						Allocations.push_back(std::move(buffer));
+						return ptr;
 					}
-
-					delete[] buffer;
 				}
 
 				SFileCloseFile(hFile);

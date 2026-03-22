@@ -19,7 +19,7 @@ namespace AnTCP.Client
 
         private NetworkStream Stream { get; set; }
 
-        // Reusable buffers — grow as needed, never shrink.
+        // Reusable buffers - grow as needed, never shrink.
         // Safe because each AnTcpClient instance is used from one thread at a time
         // (AmeisenNavClient wraps calls in a lock).
         private byte[] _sendBuf = new byte[256];

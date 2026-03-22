@@ -24,7 +24,7 @@ namespace AmeisenNavigation.Tester.Services
         private volatile bool _md5TranslateLoaded;
         private readonly object _trsLock = new();
 
-        // Coalesced invalidation — avoids flooding dispatcher with per-tile callbacks
+        // Coalesced invalidation - avoids flooding dispatcher with per-tile callbacks
         private int _pendingInvalidate;
 
         public int TilesLoaded;

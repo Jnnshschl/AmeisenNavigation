@@ -34,4 +34,11 @@ namespace AmeisenNavigation.Client
         public Vector3 Start;
         public float Radius;
     }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GetHeightData
+    {
+        public int MapId;
+        public Vector3 Position;
+    }
 }

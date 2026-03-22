@@ -4,26 +4,20 @@
 
 #include "Vector3.hpp"
 
-/// <summary>
-/// Helper function to insert a vector3 into a float buffer.
-/// </summary>
+/// Copy a Vector3 from vec[offset] to target[index].
 __forceinline void InsertVector3At(Vector3* target, int index, const Vector3* vec, int offset = 0) noexcept
 {
     memcpy(target + index, vec + offset, sizeof(Vector3));
 }
 
-/// <summary>
-/// Helper function to insert a vector3 into a float buffer.
-/// </summary>
+/// Copy a Vector3 from vec[offset] to target[index], then increment index.
 __forceinline void InsertVector3(Vector3* target, int& index, const Vector3* vec, int offset = 0) noexcept
 {
     InsertVector3At(target, index, vec, offset);
     index++;
 }
 
-/// <summary>
-/// Helper function to remove a vector3 from a float buffer.
-/// </summary>
+/// Remove Vector3 at target[index] by shifting subsequent elements left.
 __forceinline void EraseVector3(Vector3* target, int count, int& index) noexcept
 {
     memset(target + index, 0, sizeof(Vector3));
@@ -31,10 +25,7 @@ __forceinline void EraseVector3(Vector3* target, int count, int& index) noexcept
     index--;
 }
 
-/// <summary>
-/// Helper function to scale two vectors and add them. 
-/// Used by the smoothing algorithms.
-/// </summary>
+/// Compute output = vec0 * fac0 + vec1 * fac1 (component-wise).
 __forceinline void ScaleAndAddVector3(const Vector3& vec0, float fac0, const Vector3& vec1, float fac1, Vector3& output) noexcept
 {
     output[0] = vec0.x * fac0 + vec1.x * fac1;

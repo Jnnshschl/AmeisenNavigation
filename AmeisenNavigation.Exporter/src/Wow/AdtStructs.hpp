@@ -124,6 +124,24 @@ struct MCLY_Entry
 };
 
 // ─────────────────────────────────────────────
+// MCLQ — old per-chunk liquid (pre-WotLK)
+// ─────────────────────────────────────────────
+
+struct MCLQ
+{
+    float minHeight;
+    float maxHeight;
+
+    struct Vert
+    {
+        unsigned char data[4]; // depth/flow (water) or UV (magma) — unused for height
+        float height;          // liquid surface height
+    } verts[9 * 9]; // 9×9 grid matching the outer terrain vertex grid
+
+    unsigned char tiles[8 * 8]; // 8×8 render flags; 0x0F = don't render
+};
+
+// ─────────────────────────────────────────────
 // MH2O (liquid) structures
 // ─────────────────────────────────────────────
 
@@ -265,6 +283,20 @@ struct MCNK
         if (!holes)
             return false;
         return ((holes & 0x0000FFFFu) & ((1 << (x / 2)) << ((y / 4) << 2))) != 0;
+    }
+
+    /// Access the old-style MCLQ liquid sub-chunk (if present).
+    inline const MCLQ* Mclq() const noexcept
+    {
+        // sizeMclq includes the 8-byte sub-chunk header (magic+size).
+        // The actual MCLQ data is 720 bytes, so total must be > 8.
+        if (!offsMclq || sizeMclq <= 8)
+            return nullptr;
+        // offsMclq is relative to the MCNK chunk start (magic+size), like all MCNK
+        // sub-chunk offsets. 'this' points to the MCNK start. Skip the 8-byte sub-chunk
+        // header (magic+size of the MCLQ sub-chunk itself) to get to the MCLQ data.
+        return reinterpret_cast<const MCLQ*>(
+            reinterpret_cast<const unsigned char*>(this) + offsMclq + 8);
     }
 };
 

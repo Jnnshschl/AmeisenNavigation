@@ -30,6 +30,7 @@ namespace AmeisenNavigation.Tester
         // Debounce for cost/filter slider changes
         private CancellationTokenSource? _filterDebounce;
 
+
         private static readonly string SettingsPath = Path.Combine(
             Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
             "AmeisenNavigation", "tester_settings.txt");
@@ -65,8 +66,19 @@ namespace AmeisenNavigation.Tester
             TextBoxEndY.Text = "-130.2973";
             TextBoxEndZ.Text = "80.9064";
 
+            bool hasSettings = File.Exists(SettingsPath);
+
+            if (hasSettings)
+                ShowLoading("Restoring session...", "Reading saved settings");
+
             await TryRestoreDataDirAsync();
+
+            if (hasSettings)
+                SetLoadingStatus("Connecting to navigation server...");
+
             await UpdateConnectionStatusAsync();
+
+            HideLoading();
         }
 
         private void Window_Closing(object sender, CancelEventArgs e)
@@ -74,6 +86,26 @@ namespace AmeisenNavigation.Tester
             _filterDebounce?.Cancel();
             _navClient.Dispose();
             _mpq?.Dispose();
+        }
+
+        // --- Loading overlay ---
+
+        private void ShowLoading(string title, string status = "")
+        {
+            TxtLoadingTitle.Text = title;
+            TxtLoadingStatus.Text = status;
+            LoadingProgress.IsIndeterminate = true;
+            LoadingOverlay.Visibility = Visibility.Visible;
+        }
+
+        private void SetLoadingStatus(string status)
+        {
+            TxtLoadingStatus.Text = status;
+        }
+
+        private void HideLoading()
+        {
+            LoadingOverlay.Visibility = Visibility.Collapsed;
         }
 
         // --- Busy guard ---
@@ -110,11 +142,16 @@ namespace AmeisenNavigation.Tester
             _mpq?.Dispose();
             _tileCache?.ClearMemoryCache();
 
+            ShowLoading("Loading MPQ Archives...", "Scanning for archives");
             TxtDataDir.Text = "Loading MPQ archives...";
             TxtDataDir.Foreground = (Brush)FindResource("ForegroundDimBrush");
 
             var mpq = new MpqArchiveSet();
-            bool loaded = await Task.Run(() => mpq.Load(dir));
+            bool loaded = await Task.Run(() => mpq.Load(dir, (current, total, name) =>
+            {
+                Dispatcher.BeginInvoke(() =>
+                    SetLoadingStatus($"Opening archive {current}/{total}\n{name}"));
+            }));
 
             if (!loaded)
             {
@@ -129,10 +166,13 @@ namespace AmeisenNavigation.Tester
             TxtDataDir.Tag = dir;
             TxtDataDir.Foreground = (Brush)FindResource("ForegroundBrush");
 
+            SetLoadingStatus("Initializing tile cache...");
+
             _tileCache = new TileCache(_mpq, Dispatcher, () => MapCanvas.InvalidateVisual());
             MapCanvas.SetTileCache(_tileCache);
             UpdateMapCanvas();
 
+            HideLoading();
             SaveSettings(dir, _anpReader?.MeshesPath);
         }
 
@@ -179,6 +219,8 @@ namespace AmeisenNavigation.Tester
 
         private void LoadMeshesDir(string dir)
         {
+            SetLoadingStatus("Setting up navmesh overlay...");
+
             _anpReader = new AnpTileReader(Dispatcher, () => MapCanvas.InvalidateVisual());
             _anpReader.SetMeshesPath(dir);
             MapCanvas.SetAnpReader(_anpReader);
@@ -237,9 +279,33 @@ namespace AmeisenNavigation.Tester
             TxtStatusConnection.Text = TxtConnectionStatus.Text;
             TxtStatusConnection.Foreground = brush;
 
-            // Send filter config on first connect so server state matches UI
             if (connected && !wasConnected)
+            {
                 await ApplyFilterConfigAsync();
+                await TryAutoSetMeshesDirAsync();
+            }
+        }
+
+        /// <summary>
+        /// Fetch the server config and auto-set the navmesh overlay directory
+        /// if no meshes directory is loaded yet.
+        /// </summary>
+        private async Task TryAutoSetMeshesDirAsync()
+        {
+            if (_anpReader?.MeshesPath != null) return;
+
+            try
+            {
+                var config = await _navClient.GetConfigAsync();
+                if (config == null || string.IsNullOrWhiteSpace(config.MeshesPath)) return;
+
+                string meshDir = config.MeshesPath;
+                if (!Directory.Exists(meshDir)) return;
+
+                LoadMeshesDir(meshDir);
+                SaveSettings(TxtDataDir.Tag as string, meshDir);
+            }
+            catch { }
         }
 
         // --- Map ---
@@ -290,7 +356,7 @@ namespace AmeisenNavigation.Tester
 
             float currentZ = float.TryParse(zBox.Text, Inv, out float z) ? z : 200f;
             var probe = new Vector3(worldX, worldY, currentZ);
-            var snapped = await _navClient.MoveAlongSurfaceAsync(MapId, probe, probe);
+            var snapped = await _navClient.GetHeightAsync(MapId, probe);
 
             if (!snapped.IsZero)
                 zBox.Text = snapped.Z.ToString("F2", Inv);
@@ -362,7 +428,7 @@ namespace AmeisenNavigation.Tester
         }
 
         /// <summary>
-        /// Core pathfinding. Does NOT manage busy state — callers handle that.
+        /// Core pathfinding. Does NOT manage busy state - callers handle that.
         /// When fitToPath is false, the camera stays where it is (map clicks, cost re-runs).
         /// When the path is empty, nothing changes (no camera move, no path clear).
         /// </summary>
@@ -372,7 +438,13 @@ namespace AmeisenNavigation.Tester
 
             var start = TryParseStartPoint();
             var end = TryParseEndPoint();
-            if (start == null || end == null) return;
+
+            if (start == null || end == null)
+            {
+                TxtStatusPath.Text = "Invalid coordinates";
+                TxtStatusPath.Foreground = DisconnectedBrush;
+                return;
+            }
 
             var flags = PathFlags.None;
             if (rbPathFlagsChaikin.IsChecked == true) flags |= PathFlags.SmoothChaikin;
@@ -391,9 +463,18 @@ namespace AmeisenNavigation.Tester
 
             if (path.Count == 0)
             {
-                TxtStatusConnection.Text = "No path found";
+                TxtStatusPath.Text = "No path found";
+                TxtStatusPath.Foreground = DisconnectedBrush;
+                lblPointCount.Text = "Points: 0";
+                lblDistance.Text = "0 m";
+                lblTime.Text = $"{elapsed.TotalMilliseconds:F2} ms";
+                PointList.ItemsSource = null;
+                MapCanvas.SetPath([]);
+                MapCanvas.InvalidateVisual();
                 return;
             }
+
+            TxtStatusPath.Text = "";
 
             MapCanvas.SetPath(path);
             MapCanvas.SetEndpoints(start, end);

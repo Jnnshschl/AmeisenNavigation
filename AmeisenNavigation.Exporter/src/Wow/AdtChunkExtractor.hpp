@@ -80,58 +80,71 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
 {
     if (const MCNK* mcnk = adt->Mcnk(x, y))
     {
+        bool liquidHandled = false;
+
         if (const MH2O* mh2o = adt->Mh2o())
         {
-            for (unsigned int k = 0; k < mh2o->liquid[y][x].used; k++)
+            // ── New MH2O liquid format (WotLK+) ──
+            // Check per-cell: only use MH2O if this cell has instances.
+            // Otherwise fall through to MCLQ (classic maps in WotLK+ clients
+            // may have an MH2O chunk header but no instances for some cells).
+            if (mh2o->liquid[y][x].used > 0)
             {
-                if (const AdtLiquid* liquid = mh2o->GetInstance(x, y, k))
+                liquidHandled = true;
+
+                for (unsigned int k = 0; k < mh2o->liquid[y][x].used; k++)
                 {
-                    TriAreaId liquidAreaId = LIQUID_WATER;
-                    auto it = liquidTypes.find(liquid->type);
-                    if (it != liquidTypes.end())
+                    if (const AdtLiquid* liquid = mh2o->GetInstance(x, y, k))
                     {
-                        switch (it->second)
+                        TriAreaId liquidAreaId = LIQUID_WATER;
+                        auto it = liquidTypes.find(liquid->type);
+                        if (it != liquidTypes.end())
                         {
-                            case LiquidType::OCEAN:
-                                liquidAreaId = LIQUID_OCEAN;
-                                break;
-                            case LiquidType::MAGMA:
-                                liquidAreaId = LIQUID_LAVA;
-                                break;
-                            case LiquidType::SLIME:
-                                liquidAreaId = LIQUID_SLIME;
-                                break;
-                            default:
-                                liquidAreaId = LIQUID_WATER;
-                                break;
-                        }
-                    }
-
-                    const unsigned char* renderMask = mh2o->GetRenderMask(liquid);
-                    const unsigned char* vertexData =
-                        reinterpret_cast<const unsigned char*>(mh2o->GetLiquidHeight(liquid));
-
-                    // Vertex data stride per format (from wowdev.wiki / TrinityCore):
-                    //   HeightDepth:     { float height; float depth; }     = 8 bytes
-                    //   HeightTexCoord:  { float height; int16 x; int16 y; } = 8 bytes
-                    //   Depth:           { float depth; }                    = 4 bytes (unused for height reads)
-                    int stride = 8;
-                    if (liquid->vertexFormat == AdtLiquidVertexFormat::Depth)
-                        stride = 4;
-
-                    for (unsigned char i = 0; i < liquid->height; i++)
-                    {
-                        for (unsigned char j = 0; j < liquid->width; j++)
-                        {
-                            bool isRendered = true;
-                            if (renderMask)
+                            switch (it->second)
                             {
-                                int bitIdx = i * liquid->width + j;
-                                isRendered = (renderMask[bitIdx / 8] >> (bitIdx % 8)) & 1;
+                                case LiquidType::OCEAN:
+                                    liquidAreaId = LIQUID_OCEAN;
+                                    break;
+                                case LiquidType::MAGMA:
+                                    liquidAreaId = LIQUID_LAVA;
+                                    break;
+                                case LiquidType::SLIME:
+                                    liquidAreaId = LIQUID_SLIME;
+                                    break;
+                                default:
+                                    liquidAreaId = LIQUID_WATER;
+                                    break;
                             }
+                        }
 
-                            if (isRendered)
+                        const unsigned char* renderMask = mh2o->GetRenderMask(liquid);
+                        const unsigned char* vertexData =
+                            reinterpret_cast<const unsigned char*>(mh2o->GetLiquidHeight(liquid));
+
+                        // Vertex data stride per format (from wowdev.wiki / TrinityCore):
+                        //   HeightDepth:     { float height; float depth; }     = 8 bytes
+                        //   HeightTexCoord:  { float height; int16 x; int16 y; } = 8 bytes
+                        //   Depth:           { float depth; }                    = 4 bytes (unused for height reads)
+                        int stride = 8;
+                        if (liquid->vertexFormat == AdtLiquidVertexFormat::Depth)
+                            stride = 4;
+
+                        for (unsigned char i = 0; i < liquid->height; i++)
+                        {
+                            for (unsigned char j = 0; j < liquid->width; j++)
                             {
+                                // Check render mask: non-rendered cells may have
+                                // invalid vertex data (garbage/NaN heights).
+                                bool isRendered = true;
+                                if (renderMask)
+                                {
+                                    int bitIdx = i * liquid->width + j;
+                                    isRendered = (renderMask[bitIdx / 8] >> (bitIdx % 8)) & 1;
+                                }
+
+                                if (!isRendered)
+                                    continue;
+
                                 float hNW = liquid->maxHeightLevel;
                                 float hNE = liquid->maxHeightLevel;
                                 float hSW = liquid->maxHeightLevel;
@@ -179,6 +192,74 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
                                     structure->triTypes.push_back(liquidAreaId);
                                 }
                             }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (!liquidHandled)
+        {
+            // MCNK liquid type flags: 0x04=river, 0x08=ocean, 0x10=magma, 0x20=slime.
+            // If none are set, this chunk has no MCLQ liquid. The offsMclq/sizeMclq
+            // fields may still contain stale values pointing to garbage data from
+            // old format conversions — reading them would create floating water quads.
+            constexpr unsigned int MCNK_LIQUID_FLAGS = 0x04 | 0x08 | 0x10 | 0x20;
+
+            if ((mcnk->flags & MCNK_LIQUID_FLAGS) && mcnk->Mclq())
+            {
+                const MCLQ* mclq = mcnk->Mclq();
+
+                // ── Old MCLQ liquid format (pre-WotLK fallback) ──
+                // Also used when MH2O chunk exists but has no instances for this cell
+                // (common for classic maps in WotLK+ clients).
+                // Determine liquid type from MCNK flags.
+                TriAreaId liquidAreaId = LIQUID_WATER;
+                if (mcnk->flags & 0x08)
+                    liquidAreaId = LIQUID_OCEAN;
+                else if (mcnk->flags & 0x10)
+                    liquidAreaId = LIQUID_LAVA;
+                else if (mcnk->flags & 0x20)
+                    liquidAreaId = LIQUID_SLIME;
+
+                for (int i = 0; i < 8; i++)
+                {
+                    for (int j = 0; j < 8; j++)
+                    {
+                        // Tile flag 0x0F means "don't render this liquid cell"
+                        if ((mclq->tiles[i * 8 + j] & 0x0F) == 0x0F)
+                            continue;
+
+                        // 9×9 vertex grid — quad (i,j) uses corners [i][j], [i][j+1], [i+1][j], [i+1][j+1]
+                        float hNW = mclq->verts[(i    ) * 9 + j    ].height;
+                        float hNE = mclq->verts[(i    ) * 9 + j + 1].height;
+                        float hSW = mclq->verts[(i + 1) * 9 + j    ].height;
+                        float hSE = mclq->verts[(i + 1) * 9 + j + 1].height;
+
+                        float wowX = mcnk->x - (i * UNITSIZE);
+                        float wowY = mcnk->y - (j * UNITSIZE);
+                        Vector3 nw{wowX, wowY, 0.0f};
+                        Vector3 se{wowX - UNITSIZE, wowY - UNITSIZE, 0.0f};
+                        waterMap->AddRect(nw, se, hNW, hNE, hSW, hSE, liquidAreaId);
+
+                        if (structure)
+                        {
+                            Vector3 vNW = Vector3{wowX, wowY, hNW}.ToRDCoords();
+                            Vector3 vNE = Vector3{wowX, wowY - UNITSIZE, hNE}.ToRDCoords();
+                            Vector3 vSW = Vector3{wowX - UNITSIZE, wowY, hSW}.ToRDCoords();
+                            Vector3 vSE = Vector3{wowX - UNITSIZE, wowY - UNITSIZE, hSE}.ToRDCoords();
+
+                            std::lock_guard<std::mutex> lock(structure->mutex);
+                            const size_t base = structure->verts.size();
+                            structure->verts.push_back(vNW);
+                            structure->verts.push_back(vNE);
+                            structure->verts.push_back(vSW);
+                            structure->verts.push_back(vSE);
+
+                            structure->tris.emplace_back(Tri{base + 2, base + 1, base});
+                            structure->tris.emplace_back(Tri{base + 2, base + 3, base + 1});
+                            structure->triTypes.push_back(liquidAreaId);
+                            structure->triTypes.push_back(liquidAreaId);
                         }
                     }
                 }
@@ -319,29 +400,32 @@ inline void ExtractWmoGeometry(Adt* adt, CachedFileReader& reader, Structure* st
                                 const auto dataPtr = reinterpret_cast<const MLIQVert*>(mliq + 1);
                                 const auto flags = reinterpret_cast<const unsigned char*>(dataPtr + vertCount);
 
-                                for (unsigned int y = 0; y < mliq->height; ++y)
                                 {
-                                    for (unsigned int x = 0; x < mliq->width; ++x)
+                                    std::lock_guard<std::mutex> lock(structure->mutex);
+
+                                    for (unsigned int y = 0; y < mliq->height; ++y)
                                     {
-                                        std::lock_guard<std::mutex> lock(structure->mutex);
-                                        const size_t vertsIndex = structure->verts.size();
-
-                                        AddWmoLiquidVert(mliq, dataPtr, y, x, structure->verts, tranform);
-                                        AddWmoLiquidVert(mliq, dataPtr, y, x + 1, structure->verts, tranform);
-                                        AddWmoLiquidVert(mliq, dataPtr, y + 1, x, structure->verts, tranform);
-                                        AddWmoLiquidVert(mliq, dataPtr, y + 1, x + 1, structure->verts, tranform);
-
-                                        unsigned char f = flags[y * mliq->width + x];
-
-                                        if (f != 0x0F)
+                                        for (unsigned int x = 0; x < mliq->width; ++x)
                                         {
-                                            structure->tris.emplace_back(
-                                                Tri{vertsIndex + 2, vertsIndex, vertsIndex + 1});
-                                            structure->tris.emplace_back(
-                                                Tri{vertsIndex + 1, vertsIndex + 3, vertsIndex + 2});
+                                            unsigned char f = flags[y * mliq->width + x];
 
-                                            structure->triTypes.emplace_back(wmoLiquidType);
-                                            structure->triTypes.emplace_back(wmoLiquidType);
+                                            if (f != 0x0F)
+                                            {
+                                                const size_t vertsIndex = structure->verts.size();
+
+                                                AddWmoLiquidVert(mliq, dataPtr, y, x, structure->verts, tranform);
+                                                AddWmoLiquidVert(mliq, dataPtr, y, x + 1, structure->verts, tranform);
+                                                AddWmoLiquidVert(mliq, dataPtr, y + 1, x, structure->verts, tranform);
+                                                AddWmoLiquidVert(mliq, dataPtr, y + 1, x + 1, structure->verts, tranform);
+
+                                                structure->tris.emplace_back(
+                                                    Tri{vertsIndex + 2, vertsIndex, vertsIndex + 1});
+                                                structure->tris.emplace_back(
+                                                    Tri{vertsIndex + 1, vertsIndex + 3, vertsIndex + 2});
+
+                                                structure->triTypes.emplace_back(wmoLiquidType);
+                                                structure->triTypes.emplace_back(wmoLiquidType);
+                                            }
                                         }
                                     }
                                 }
@@ -442,7 +526,7 @@ inline void ExtractFactionCoverage(Adt* adt, unsigned int x, unsigned int y, Fac
 
     auto it = areaFactions.find(mcnk->areaid);
     if (it == areaFactions.end() || it->second == 0)
-        return; // Unknown or contested/sanctuary — no faction marking
+        return; // Unknown or contested/sanctuary - no faction marking
 
     // Each MCNK chunk covers CHUNKSIZE × CHUNKSIZE in world space.
     // mcnk->x/y is the NW corner; extends negatively.

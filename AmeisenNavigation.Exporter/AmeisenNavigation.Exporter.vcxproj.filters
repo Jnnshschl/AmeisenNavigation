@@ -77,8 +77,54 @@
     <ClInclude Include="src\Processors\AdtTileProcessor.hpp">
       <Filter>Headerdateien</Filter>
     </ClInclude>
+    <ClInclude Include="src\Utils\Logger.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="resource.h">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Processors\AreaMarker.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Processors\BmpRenderer.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\Bmp.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\CityMap.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\FactionMap.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\RoadMap.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Utils\WaterMap.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wow\AdtChunkExtractor.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wow\AdtStructs.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
+    <ClInclude Include="src\Wow\RoadDetector.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\Utils\xxhash\LICENSE" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="icon.ico">
+      <Filter>Ressourcendateien</Filter>
+    </Image>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="AmeisenNavigation.Exporter.rc">
+      <Filter>Ressourcendateien</Filter>
+    </ResourceCompile>
   </ItemGroup>
 </Project>

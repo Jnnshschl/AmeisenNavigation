@@ -60,7 +60,7 @@ AnTcpError AnTcpServer::Run() noexcept
     while (!ShouldExit)
     {
         // accept client and get socket info from it, the socket info contains the ip address
-        // and port used to connect o the server
+        // and port used to connect to the server
         SOCKADDR_IN clientInfo{ 0 };
         int sockAddrSize = static_cast<int>(sizeof(SOCKADDR_IN));
         SOCKET clientSocket = accept(ListenSocket, reinterpret_cast<sockaddr*>(&clientInfo), &sockAddrSize);
@@ -71,18 +71,16 @@ AnTcpError AnTcpServer::Run() noexcept
             continue;
         }
 
+        // Disable Nagle's algorithm for lower latency on small packets
+        int flag = 1;
+        setsockopt(clientSocket, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&flag), sizeof(flag));
+
         // cleanup old disconnected clients and add the new
         ClientCleanup();
-        Clients.push_back(new ClientHandler(clientSocket, clientInfo, ShouldExit, &Callbacks, &OnClientConnected, &OnClientDisconnected));
+        Clients.push_back(std::make_unique<ClientHandler>(clientSocket, clientInfo, ShouldExit, &Callbacks, OnClientConnected, OnClientDisconnected));
     }
 
-    for (ClientHandler* clientHandler : Clients)
-    {
-        if (clientHandler)
-        {
-            delete clientHandler;
-        }
-    }
+    Clients.clear();
 
     SocketCleanup();
     WSACleanup();
@@ -93,7 +91,7 @@ void ClientHandler::Listen() noexcept
 {
     if (OnClientConnected)
     {
-        (*OnClientConnected)(this);
+        OnClientConnected(this);
     }
 
     // the total packet size and data ptr offset
@@ -105,60 +103,45 @@ void ClientHandler::Listen() noexcept
 
     while (!ShouldExit)
     {
-        auto packetBytesMissing = packetSize - packetOffset;
-        // how many bytes to receive at most, if packet is beeing built it's the remaining packets size 
-        // otherwise the size of the AnTcpSizeType which tells us how big the packet will be
-        auto maxReceiveSize = packetBytesMissing > 0 ? packetBytesMissing : sizeof(AnTcpSizeType);
+        // Calculate how many bytes we need: either finish reading the size header,
+        // or fill the remaining payload.
+        const AnTcpSizeType totalNeeded = (packetSize == 0)
+            ? static_cast<AnTcpSizeType>(sizeof(AnTcpSizeType))
+            : static_cast<AnTcpSizeType>(sizeof(AnTcpSizeType)) + packetSize;
+        const auto maxReceiveSize = totalNeeded - packetOffset;
 
-        auto receivedPacketBytes = recv(Socket, packet + packetOffset, maxReceiveSize, 0);
-        packetOffset += receivedPacketBytes;
+        auto receivedBytes = recv(Socket, packet + packetOffset, maxReceiveSize, 0);
 
-        // if we received 0 or -1 bytes, we're going to disconnect the client
-        if (receivedPacketBytes <= 0)
-        {
+        if (receivedBytes <= 0)
             break;
+
+        packetOffset += static_cast<AnTcpSizeType>(receivedBytes);
+
+        DEBUG_ONLY(std::cout << "[" << Id << "] " << "Received " << std::to_string(receivedBytes) + " bytes" << std::endl);
+
+        // Parse size header once we have enough bytes
+        if (packetSize == 0 && packetOffset >= static_cast<AnTcpSizeType>(sizeof(AnTcpSizeType)))
+        {
+            packetSize = *reinterpret_cast<AnTcpSizeType*>(packet);
+
+            if (packetSize <= 0 || packetSize > ANTCP_MAX_PACKET_SIZE)
+            {
+                DEBUG_ONLY(std::cout << "[" << Id << "] " << "Packet size invalid (" << std::to_string(packetSize)
+                    << "), disconnecting client..." << std::endl);
+                break;
+            }
+
+            DEBUG_ONLY(std::cout << "[" << Id << "] " << "New Packet: " << std::to_string(packetSize) + " bytes" << std::endl);
         }
 
-        DEBUG_ONLY(std::cout << "[" << Id << "] " << "Received " << std::to_string(receivedPacketBytes) + " bytes" << std::endl);
-
-        if (packetSize == 0)
+        // Check if packet is complete
+        if (packetSize > 0 && packetOffset >= static_cast<AnTcpSizeType>(sizeof(AnTcpSizeType)) + packetSize)
         {
-            // wait until the transmission of the AnTcpSizeType is completed to determine packet size
-            if (packetOffset >= sizeof(AnTcpSizeType))
-            {
-                packetSize = *reinterpret_cast<AnTcpSizeType*>(packet);
+            if (!ProcessPacket(packet + sizeof(AnTcpSizeType), packetSize))
+                break;
 
-                if (packetSize > ANTCP_MAX_PACKET_SIZE)
-                {
-                    // packet is too big, this may be a wrong/malicious payload
-                    DEBUG_ONLY(std::cout << "[" << Id << "] " << "Packet too big (" << std::to_string(packetSize)
-                        << "/" << ANTCP_MAX_PACKET_SIZE << "), disconnecting client..." << std::endl);
-                    break;
-                }
-
-                DEBUG_ONLY(std::cout << "[" << Id << "] " << "New Packet: " << std::to_string(packetSize) + " bytes" << std::endl);
-            }
-        }
-        else
-        {
-            // we know the packet's size, wait for it to be complete
-            if (packetBytesMissing == 0)
-            {
-                if (!ProcessPacket(packet + sizeof(AnTcpSizeType), packetSize))
-                {
-                    // processing the packet failed, disconnect client
-                    break;
-                }
-
-                // reset packet buffer
-                packetSize = 0;
-                packetOffset = 0;
-            }
-            else
-            {
-                DEBUG_ONLY(std::cout << "[" << Id << "] " << "Packet Chunk: " << std::to_string(receivedPacketBytes) << " bytes ("
-                    << std::to_string(packetOffset) << "/" << std::to_string(packetSize) << ")" << std::endl);
-            }
+            packetSize = 0;
+            packetOffset = 0;
         }
     }
 

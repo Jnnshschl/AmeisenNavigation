@@ -35,7 +35,7 @@ enum TriAreaId : unsigned char
     ALLIANCE_DOODAD,
     HORDE_DOODAD,
 
-    // ── Liquid types (higher priority — wins over terrain in span merge) ──
+    // ── Liquid types (higher priority - wins over terrain in span merge) ──
 
     LIQUID_WATER,
     ALLIANCE_LIQUID_WATER,

@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "../INavSource.hpp"
+#include "../../Utils/Logger.hpp"
 #include "MmapFormat.hpp"
 #include "MmapTileHeader.hpp"
 
@@ -14,6 +15,7 @@ class MmapNavSource : public INavSource
 {
 	std::filesystem::path MmapFolder;
 	MmapFormat Format;
+	std::mutex MapInsertMutex; // protects NavMeshMap structural modifications (insert/find)
 	std::unordered_map<size_t, std::pair<std::mutex, dtNavMesh*>> NavMeshMap;
 
 	std::map<MmapFormat, std::pair<std::string_view, std::string_view>> MmapFormatPatterns
@@ -51,14 +53,26 @@ public:
 
 	virtual dtNavMesh* Get(size_t mapId) noexcept override
 	{
-		LoadMmaps(mapId);
-		auto it = NavMeshMap.find(mapId);
-		return it != NavMeshMap.end() ? it->second.second : nullptr;
+		try
+		{
+			LoadMmaps(mapId);
+			const std::lock_guard<std::mutex> insertLock(MapInsertMutex);
+			auto it = NavMeshMap.find(mapId);
+			return it != NavMeshMap.end() ? it->second.second : nullptr;
+		}
+		catch (...) { return nullptr; }
 	}
 
 private:
 	bool LoadMmaps(size_t mapId) noexcept
 	{
+		try {
+		// Ensure the map entry exists under the insert mutex before locking the per-map mutex.
+		{
+			const std::lock_guard<std::mutex> insertLock(MapInsertMutex);
+			NavMeshMap[mapId]; // default-constructs entry if absent
+		}
+
 		const std::lock_guard<std::mutex> lock(NavMeshMap[mapId].first);
 
 		if (NavMeshMap[mapId].second) { return true; }
@@ -100,11 +114,13 @@ private:
 			return false;
 		}
 
+        constexpr int TILE_GRID_SIZE = 64;
+
 #pragma omp parallel for schedule(dynamic)
-		for (int i = 0; i < 64 * 64; ++i)
+		for (int i = 0; i < TILE_GRID_SIZE * TILE_GRID_SIZE; ++i)
 		{
-			const auto x = i / 64;
-			const auto y = i % 64;
+			const auto x = i / TILE_GRID_SIZE;
+			const auto y = i % TILE_GRID_SIZE;
 
 			std::filesystem::path mmapTileFile(MmapFolder);
 			mmapTileFile.append(std::vformat(filenameFormat.second, std::make_format_args(mid, x, y)));
@@ -139,7 +155,7 @@ private:
 			mmapTileStream.read(static_cast<char*>(mmapTileData), mmapTileHeader.size);
 			mmapTileStream.close();
 
-#pragma omp critical
+#pragma omp critical(addMmapTile)
 			{
 				dtStatus addTileStatus = NavMeshMap[mapId].second->addTile
 				(
@@ -158,25 +174,27 @@ private:
 		}
 
 		return true;
+		} catch (const std::exception& e) { LogE("LoadMmaps failed: ", e.what()); return false; }
+		  catch (...) { LogE("LoadMmaps failed: unknown exception"); return false; }
 	}
 
-	/// <summary>
-	/// Used to detect the mmap file format.
-	/// </summary>
-	/// <returns>Mmap format detected or MMAP_FORMAT::UNKNOWN</returns>
 	inline MmapFormat TryDetectMmapFormat() noexcept
 	{
-		int zero = 0;
-		int twentyseven = 27;
-		auto args = std::make_format_args(zero, twentyseven, twentyseven);
-
-		for (const auto& [format, pattern] : MmapFormatPatterns)
+		try
 		{
-			if (std::filesystem::exists(MmapFolder / std::vformat(pattern.second, args)))
+			int zero = 0;
+			int twentyseven = 27;
+			auto args = std::make_format_args(zero, twentyseven, twentyseven);
+
+			for (const auto& [format, pattern] : MmapFormatPatterns)
 			{
-				return format;
+				if (std::filesystem::exists(MmapFolder / std::vformat(pattern.second, args)))
+				{
+					return format;
+				}
 			}
 		}
+		catch (...) {}
 
 		return MmapFormat::UNKNOWN;
 	}

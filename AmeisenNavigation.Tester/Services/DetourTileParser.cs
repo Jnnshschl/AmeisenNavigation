@@ -9,7 +9,7 @@ namespace AmeisenNavigation.Tester.Services
     /// <summary>
     /// Pre-built frozen geometry for one area within a navmesh tile.
     /// Stored in pixel coordinates (WowCoordinateConverter.WorldToPixel space)
-    /// so rendering only needs a zoom+pan transform — no per-vertex math.
+    /// so rendering only needs a zoom+pan transform - no per-vertex math.
     /// </summary>
     public readonly struct AreaGeometryEntry
     {

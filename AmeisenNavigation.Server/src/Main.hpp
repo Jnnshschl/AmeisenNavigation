@@ -10,24 +10,24 @@ constexpr auto AMEISENNAV_VERSION = "1.8.4.0";
 
 int __stdcall SigIntHandler(unsigned long signal);
 
-void OnClientConnect(ClientHandler* handler) noexcept;
-void OnClientDisconnect(ClientHandler* handler) noexcept;
+void OnClientConnect(ClientHandler* handler);
+void OnClientDisconnect(ClientHandler* handler);
 
-void PathCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void RandomPathCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void MoveAlongSurfaceCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void CastRayCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void GenericPathCallback(ClientHandler* handler, char type, const void* data, int size, PathType pathType) noexcept;
+void PathCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void RandomPathCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void MoveAlongSurfaceCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void CastRayCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void GenericPathCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size, PathType pathType);
 
-void RandomPointCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-void RandomPointAroundCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
+void RandomPointCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void RandomPointAroundCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
 
-void ExplorePolyCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
-
-void ConfigureFilterCallback(ClientHandler* handler, char type, const void* data, int size) noexcept;
+void ConfigureFilterCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void GetHeightCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+void GetConfigCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
 
 inline void HandlePathFlagsAndSendData(ClientHandler* handler, int mapId, int flags, Path& path, Path& smoothPath,
-                                       char type, PathType pathType) noexcept
+                                       AnTcpMessageType type, PathType pathType)
 {
     Path* pathToSend = &path;
     Path* altPath = &smoothPath;
@@ -63,7 +63,6 @@ inline void HandlePathFlagsAndSendData(ClientHandler* handler, int mapId, int fl
         shouldValidate = true;
     }
 
-    // validate random paths
     if (shouldValidate && pathToSend->pointCount > 0)
     {
         if ((flags & static_cast<int>(PathRequestFlags::VALIDATE_CPOP)))

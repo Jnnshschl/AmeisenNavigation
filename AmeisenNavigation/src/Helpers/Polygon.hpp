@@ -43,17 +43,7 @@ constexpr inline bool CheckMinDistance(const Vector3& p, const Vector3* points, 
     return true;
 }
 
-/// <summary>
-/// Generate randomized nodes using the Bridson's Poisson Disk Sampling algorithm that cover the polygons area.
-/// </summary>
-/// <param name="vertices">Float vertices of the polygon.</param>
-/// <param name="vertexCount">Count of floats in the vertices buffer.</param>
-/// <param name="pointBuffer">Buffer where the points will be stored.</param>
-/// <param name="pointCount">Size of the point buffer.</param>
-/// <param name="tempBuffer">Temporary Buffer.</param>
-/// <param name="maxNodeCount">Max Node Count.</param>
-/// <param name="minDistance">Minimum distance between nodes</param>
-/// <param name="numCandidates"></param>
+/// Generate evenly-spaced sample points inside a polygon using Bridson's Poisson Disk Sampling.
 static void BridsonsPoissonDiskSampling(const Vector3* vertices, int vertexCount, Vector3* pointBuffer, int* pointCount,
                                         Vector3* tempBuffer, int maxNodeCount, float minDistance,
                                         int numCandidates = 30) noexcept

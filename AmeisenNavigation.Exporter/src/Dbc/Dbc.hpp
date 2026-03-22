@@ -17,6 +17,13 @@ class Dbc
     unsigned int Size;
 
 public:
+    /// Returns true if the DBC header is valid (magic = "WDBC" and size is sufficient).
+    inline bool IsValid() const noexcept
+    {
+        return Data && Size >= sizeof(DbcHeader)
+            && Data[0] == 'W' && Data[1] == 'D' && Data[2] == 'B' && Data[3] == 'C';
+    }
+
     inline DbcHeader* GetHeader() const noexcept { return reinterpret_cast<DbcHeader*>(Data); }
     constexpr inline unsigned char* GetData() const noexcept { return Data + sizeof(DbcHeader); }
 

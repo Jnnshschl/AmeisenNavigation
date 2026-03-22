@@ -49,6 +49,16 @@ namespace AmeisenNavigation.Tester.Services
             return Task.Run(() => _nav.MoveAlongSurface(mapId, start, end));
         }
 
+        public Task<Vector3> GetHeightAsync(int mapId, Vector3 position)
+        {
+            return Task.Run(() => _nav.GetHeight(mapId, position));
+        }
+
+        public Task<ServerConfig?> GetConfigAsync()
+        {
+            return Task.Run(() => _nav.GetConfig());
+        }
+
         public Task<bool> ApplyFilterAsync(byte state, float ground, float road, float water, float badLiquid, float allyMult, float hordeMult)
         {
             return Task.Run(() =>

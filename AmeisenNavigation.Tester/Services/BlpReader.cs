@@ -35,16 +35,16 @@ namespace AmeisenNavigation.Tester.Services
 
             // BLP2 header
             // 0x00: magic (4)
-            // 0x04: type (4) — 1 = BLP2
-            // 0x08: encoding (1) — 1=uncompressed, 2=DXT
-            // 0x09: alphaDepth (1) — 0,1,4,8
-            // 0x0A: alphaEncoding (1) — 0=DXT1, 1=DXT3, 7=DXT5
+            // 0x04: type (4) - 1 = BLP2
+            // 0x08: encoding (1) - 1=uncompressed, 2=DXT
+            // 0x09: alphaDepth (1) - 0,1,4,8
+            // 0x0A: alphaEncoding (1) - 0=DXT1, 1=DXT3, 7=DXT5
             // 0x0B: hasMips (1)
             // 0x0C: width (4)
             // 0x10: height (4)
             // 0x14: mipOffsets[16] (64)
             // 0x54: mipSizes[16] (64)
-            // 0x94: palette[256] (1024) — only for encoding=1
+            // 0x94: palette[256] (1024) - only for encoding=1
 
             byte encoding = span[0x08];
             byte alphaDepth = span[0x09];

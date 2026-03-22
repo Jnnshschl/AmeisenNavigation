@@ -51,27 +51,63 @@ inline void MarkWaterAreas(rcCompactHeightfield* chf, const WaterMap* waterMap, 
         int maxCZ = std::min(chf->height - 1, static_cast<int>(floorf((rect.maxZ - chf->bmin[2]) / chf->cs)));
 
         // Use max water height of the rect's 4 corners + tolerance.
-        // The tolerance accounts for cell height quantization (ch ~ 0.2) and ensures
-        // spans at the water surface are reliably caught.
-        float maxWaterH = std::max({rect.heights[0], rect.heights[1], rect.heights[2], rect.heights[3]}) + 2.0f;
+        // Tolerance accounts for cell height quantization (ch ~ 0.2) and ensures
+        // spans at the water surface are reliably caught. 0.5m ≈ 2-3 height cells
+        // is sufficient; larger values risk marking shoreline terrain as water.
+        float maxWaterH = std::max({rect.heights[0], rect.heights[1], rect.heights[2], rect.heights[3]}) + 0.5f;
 
         for (int z = minCZ; z <= maxCZ; ++z)
         {
             for (int x = minCX; x <= maxCX; ++x)
             {
                 const rcCompactCell& c = chf->cells[x + z * chf->width];
-                for (int i = static_cast<int>(c.index), ni = static_cast<int>(c.index + c.count); i < ni; ++i)
+                const int spanStart = static_cast<int>(c.index);
+                const int spanEnd = static_cast<int>(c.index + c.count);
+
+                for (int i = spanStart; i < spanEnd; ++i)
                 {
                     // Skip spans already correctly marked as liquid
                     unsigned char currentArea = chf->areas[i];
                     if (currentArea >= LIQUID_WATER && currentArea <= HORDE_LIQUID_SLIME)
                         continue;
 
+                    // Never overwrite structural geometry (bridges, docks, WMO buildings,
+                    // doodads) with water. These are solid surfaces that should remain
+                    // navigable as ground even when below the water surface height.
+                    if (currentArea >= WMO && currentArea <= HORDE_DOODAD)
+                        continue;
+
                     float spanTop = chf->bmin[1] + chf->spans[i].y * chf->ch;
                     if (spanTop <= maxWaterH)
                     {
-                        chf->areas[i] = rect.type;
-                        dbgMarked++;
+                        // Bridge check: if a higher span in this column has structural
+                        // geometry (WMO/DOODAD) close above us, this is underwater
+                        // terrain below a bridge — still mark as water so agents can
+                        // swim under bridges. But if the span itself IS at the bridge
+                        // height (within walkable climb), skip it to prevent water
+                        // from overwriting the bridge surface.
+                        bool isBridgeSurface = false;
+                        for (int j = i + 1; j < spanEnd; ++j)
+                        {
+                            unsigned char aboveArea = chf->areas[j];
+                            if (aboveArea >= WMO && aboveArea <= HORDE_DOODAD)
+                            {
+                                float aboveTop = chf->bmin[1] + chf->spans[j].y * chf->ch;
+                                // If a bridge is directly above within walkable height,
+                                // this span is part of the bridge structure, not water
+                                if (aboveTop - spanTop <= chf->ch * 3.0f)
+                                {
+                                    isBridgeSurface = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if (!isBridgeSurface)
+                        {
+                            chf->areas[i] = rect.type;
+                            dbgMarked++;
+                        }
                     }
                 }
             }
@@ -88,7 +124,7 @@ inline void MarkWaterAreas(rcCompactHeightfield* chf, const WaterMap* waterMap, 
 /// Mark walkable terrain spans that fall within road rectangles as TERRAIN_ROAD.
 /// Uses direct rect-to-cell mapping for efficiency: iterates road rects and directly
 /// computes which compact heightfield cells they cover.
-/// Only overwrites TERRAIN_GROUND or RC_WALKABLE_AREA — never overwrites water/lava.
+/// Only overwrites TERRAIN_GROUND or RC_WALKABLE_AREA - never overwrites water/lava.
 inline void MarkRoadAreas(rcCompactHeightfield* chf, const RoadMap* roadMap) noexcept
 {
     if (!roadMap || roadMap->rects.empty())
@@ -128,7 +164,7 @@ inline void MarkRoadAreas(rcCompactHeightfield* chf, const RoadMap* roadMap) noe
 }
 
 /// Mark walkable terrain spans that fall within city rectangles as TERRAIN_CITY.
-/// Uses direct rect-to-cell mapping. Only upgrades TERRAIN_GROUND or RC_WALKABLE_AREA —
+/// Uses direct rect-to-cell mapping. Only upgrades TERRAIN_GROUND or RC_WALKABLE_AREA -
 /// never overwrites roads, water, WMO, or doodad areas.
 ///
 /// Must be called AFTER MarkRoadAreas so that roads within cities remain TERRAIN_ROAD.

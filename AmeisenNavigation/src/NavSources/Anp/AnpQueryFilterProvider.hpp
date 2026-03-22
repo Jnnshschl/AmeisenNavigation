@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 
 #include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
@@ -20,7 +21,7 @@
 /// </summary>
 class AnpQueryFilterProvider : public IQueryFilterProvider
 {
-    std::unordered_map<ClientState, dtQueryFilter*> Filters;
+    std::unordered_map<ClientState, std::unique_ptr<dtQueryFilter>> Filters;
 
     /// Set costs for all 27 area IDs on a filter.
     /// allyMult/hordeMult: multiplier applied to Alliance/Horde faction areas.
@@ -57,7 +58,7 @@ class AnpQueryFilterProvider : public IQueryFilterProvider
         f->setAreaCost(ALLIANCE_LIQUID_OCEAN, water * allyMult);
         f->setAreaCost(HORDE_LIQUID_OCEAN, water * hordeMult);
 
-        // Bad liquid (lava/slime) — always expensive regardless of faction
+        // Bad liquid (lava/slime) - always expensive regardless of faction
         f->setAreaCost(LIQUID_LAVA, badLiquid);
         f->setAreaCost(ALLIANCE_LIQUID_LAVA, badLiquid);
         f->setAreaCost(HORDE_LIQUID_LAVA, badLiquid);
@@ -69,13 +70,13 @@ class AnpQueryFilterProvider : public IQueryFilterProvider
 
 public:
     AnpQueryFilterProvider(float waterCost = 1.6f, float badLiquidCost = 4.0f, float roadCost = 0.75f,
-                           float factionDangerCost = 3.0f) noexcept
+                           float factionDangerCost = 3.0f)
         : Filters{}
     {
-        Filters[ClientState::NORMAL] = new dtQueryFilter();
-        Filters[ClientState::NORMAL_ALLIANCE] = new dtQueryFilter();
-        Filters[ClientState::NORMAL_HORDE] = new dtQueryFilter();
-        Filters[ClientState::DEAD] = new dtQueryFilter();
+        Filters[ClientState::NORMAL] = std::make_unique<dtQueryFilter>();
+        Filters[ClientState::NORMAL_ALLIANCE] = std::make_unique<dtQueryFilter>();
+        Filters[ClientState::NORMAL_HORDE] = std::make_unique<dtQueryFilter>();
+        Filters[ClientState::DEAD] = std::make_unique<dtQueryFilter>();
 
         char includeFlags = static_cast<char>(TriFlag::NAV_LAVA_SLIME) | static_cast<char>(TriFlag::NAV_WATER) |
                             static_cast<char>(TriFlag::NAV_GROUND) | static_cast<char>(TriFlag::NAV_ROAD) |
@@ -83,36 +84,34 @@ public:
 
         char excludeFlags = static_cast<char>(TriFlag::NAV_EMPTY);
 
-        // NORMAL — no faction bias, all areas at base cost
+        // NORMAL - no faction bias, all areas at base cost
         Filters[ClientState::NORMAL]->setIncludeFlags(includeFlags);
         Filters[ClientState::NORMAL]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::NORMAL], 1.0f, roadCost, waterCost, badLiquidCost, 1.0f, 1.0f);
+        SetAllAreaCosts(Filters[ClientState::NORMAL].get(), 1.0f, roadCost, waterCost, badLiquidCost, 1.0f, 1.0f);
 
-        // NORMAL_ALLIANCE — Alliance bot: Horde areas are dangerous (hordeMult = factionDangerCost)
+        // NORMAL_ALLIANCE - Alliance bot: Horde areas are dangerous (hordeMult = factionDangerCost)
         Filters[ClientState::NORMAL_ALLIANCE]->setIncludeFlags(includeFlags);
         Filters[ClientState::NORMAL_ALLIANCE]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::NORMAL_ALLIANCE], 1.0f, roadCost, waterCost, badLiquidCost,
+        SetAllAreaCosts(Filters[ClientState::NORMAL_ALLIANCE].get(), 1.0f, roadCost, waterCost, badLiquidCost,
                         1.0f, factionDangerCost);
 
-        // NORMAL_HORDE — Horde bot: Alliance areas are dangerous (allyMult = factionDangerCost)
+        // NORMAL_HORDE - Horde bot: Alliance areas are dangerous (allyMult = factionDangerCost)
         Filters[ClientState::NORMAL_HORDE]->setIncludeFlags(includeFlags);
         Filters[ClientState::NORMAL_HORDE]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::NORMAL_HORDE], 1.0f, roadCost, waterCost, badLiquidCost,
+        SetAllAreaCosts(Filters[ClientState::NORMAL_HORDE].get(), 1.0f, roadCost, waterCost, badLiquidCost,
                         factionDangerCost, 1.0f);
 
-        // DEAD — ghost mode, all areas cost 1.0 (free movement)
+        // DEAD - ghost mode, all areas cost 1.0 (free movement)
         Filters[ClientState::DEAD]->setIncludeFlags(includeFlags);
         Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::DEAD], 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        SetAllAreaCosts(Filters[ClientState::DEAD].get(), 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
     }
 
-    ~AnpQueryFilterProvider() noexcept
+    ~AnpQueryFilterProvider() = default;
+
+    virtual dtQueryFilter* Get(ClientState state) const noexcept override
     {
-        for (auto& [state, f] : Filters)
-        {
-            delete f;
-        }
+        auto it = Filters.find(state);
+        return it != Filters.end() ? it->second.get() : nullptr;
     }
-
-    virtual dtQueryFilter* Get(ClientState state) const noexcept override { return Filters.at(state); }
 };

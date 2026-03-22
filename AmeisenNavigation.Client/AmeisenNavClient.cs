@@ -2,6 +2,7 @@ using AnTCP.Client;
 using System;
 using System.IO;
 using System.Net.Sockets;
+using System.Text;
 using System.Threading;
 
 namespace AmeisenNavigation.Client
@@ -34,6 +35,8 @@ namespace AmeisenNavigation.Client
             RandomPath,
             ExplorePoly,
             ConfigureFilter,
+            GetHeight,
+            GetConfig,
         }
 
         private readonly AnTcpClient _client;
@@ -196,6 +199,52 @@ namespace AmeisenNavigation.Client
                     () => _client.Send((byte)MessageType.RandomPointAround, request).As<Vector3>(),
                     default
                 );
+            }
+        }
+
+        /// <summary>
+        /// Get the navmesh terrain height at a position. Returns the position
+        /// snapped to the navmesh surface, or a zero vector if the position is off-mesh.
+        /// </summary>
+        public Vector3 GetHeight(int mapId, Vector3 position)
+        {
+            lock (_lock)
+            {
+                var request = new GetHeightData { MapId = mapId, Position = position };
+                return SendWithReconnect(
+                    () => _client.Send((byte)MessageType.GetHeight, request).As<Vector3>(),
+                    default
+                );
+            }
+        }
+
+        // ── Server config ────────────────────────────────────────────────
+
+        /// <summary>
+        /// Request the server's configuration. Returns null on failure.
+        /// </summary>
+        public ServerConfig? GetConfig()
+        {
+            lock (_lock)
+            {
+                return SendWithReconnect<ServerConfig?>(() =>
+                {
+                    var response = _client.SendBytes((byte)MessageType.GetConfig, ReadOnlySpan<byte>.Empty);
+                    var data = response.Data;
+
+                    // Header: mmapFormat(4) + useAnpFileFormat(4) + pathLength(4)
+                    if (data.Length < 12) return null;
+
+                    int mmapFormat = BitConverter.ToInt32(data.Slice(0, 4));
+                    bool useAnp = BitConverter.ToInt32(data.Slice(4, 4)) != 0;
+                    int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
+
+                    string meshesPath = "";
+                    if (pathLen > 0 && data.Length >= 12 + pathLen)
+                        meshesPath = System.Text.Encoding.UTF8.GetString(data.Slice(12, pathLen));
+
+                    return new ServerConfig(mmapFormat, useAnp, meshesPath);
+                }, null);
             }
         }
 
@@ -403,11 +452,8 @@ namespace AmeisenNavigation.Client
                         _wasConnected = true;
                         Connected?.Invoke();
 
-                        // Re-apply filter on reconnect so the server knows our faction/costs
-                        if (IsFilterDirty || true) // always re-apply after reconnect
-                        {
-                            try { ApplyFilterInternal(); } catch { }
-                        }
+                        // Always re-apply filter on reconnect so the server knows our faction/costs
+                        try { ApplyFilterInternal(); } catch { }
 
                         return true;
                     }

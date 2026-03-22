@@ -1,5 +1,6 @@
 #pragma once
 
+#include <memory>
 #include <unordered_map>
 
 #include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
@@ -16,16 +17,16 @@
 /// </summary>
 class MmapQueryFilterProvider : public IQueryFilterProvider
 {
-    std::unordered_map<ClientState, dtQueryFilter*> Filters;
+    std::unordered_map<ClientState, std::unique_ptr<dtQueryFilter>> Filters;
 
 public:
-    MmapQueryFilterProvider(MmapFormat format, float waterCost = 1.3f, float badLiquidCost = 4.0f) noexcept
+    MmapQueryFilterProvider(MmapFormat format, float waterCost = 1.3f, float badLiquidCost = 4.0f)
         : Filters{}
     {
-        Filters[ClientState::NORMAL] = new dtQueryFilter();
-        Filters[ClientState::NORMAL_ALLIANCE] = new dtQueryFilter();
-        Filters[ClientState::NORMAL_HORDE] = new dtQueryFilter();
-        Filters[ClientState::DEAD] = new dtQueryFilter();
+        Filters[ClientState::NORMAL] = std::make_unique<dtQueryFilter>();
+        Filters[ClientState::NORMAL_ALLIANCE] = std::make_unique<dtQueryFilter>();
+        Filters[ClientState::NORMAL_HORDE] = std::make_unique<dtQueryFilter>();
+        Filters[ClientState::DEAD] = std::make_unique<dtQueryFilter>();
 
         switch (format)
         {
@@ -46,7 +47,7 @@ public:
         }
     }
 
-    inline void Tc335aConfig(float waterCost, float badLiquidCost) noexcept
+    inline void Tc335aConfig(float waterCost, float badLiquidCost)
     {
         char includeFlags = static_cast<char>(NavArea335a::GROUND)
             | static_cast<char>(NavArea335a::WATER)
@@ -74,7 +75,7 @@ public:
         Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
     }
 
-    inline void Sf548Config(float waterCost, float badLiquidCost) noexcept
+    inline void Sf548Config(float waterCost, float badLiquidCost)
     {
         char includeFlags = static_cast<char>(NavArea548::GROUND)
             | static_cast<char>(NavArea548::WATER)
@@ -105,16 +106,11 @@ public:
         Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
     }
 
-    ~MmapQueryFilterProvider() noexcept
-    {
-        for (auto& [state, f] : Filters)
-        {
-            delete f;
-        }
-    }
+    ~MmapQueryFilterProvider() = default;
 
     virtual dtQueryFilter* Get(ClientState state) const noexcept override
     {
-        return Filters.at(state);
+        auto it = Filters.find(state);
+        return it != Filters.end() ? it->second.get() : nullptr;
     }
 };

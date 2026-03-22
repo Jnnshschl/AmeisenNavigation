@@ -20,9 +20,9 @@ struct Structure
     float bbMin[3]{0.0f};
     float bbMax[3]{0.0f};
 
-    inline auto Verts() noexcept { return reinterpret_cast<float*>(&verts[0]); }
-    inline auto Tris() noexcept { return reinterpret_cast<int*>(&tris[0]); }
-    inline auto AreaIds() noexcept { return reinterpret_cast<unsigned char*>(&triTypes[0]); }
+    inline auto Verts() noexcept { return reinterpret_cast<float*>(verts.data()); }
+    inline auto Tris() noexcept { return reinterpret_cast<int*>(tris.data()); }
+    inline auto AreaIds() noexcept { return reinterpret_cast<unsigned char*>(triTypes.data()); }
 
     inline void AddVert(const Vector3& vert) noexcept { verts.emplace_back(vert); }
     inline void AddTri(const Tri& tri, const TriAreaId& t) noexcept
@@ -33,7 +33,7 @@ struct Structure
 
     inline void Append(const Structure& other) noexcept
     {
-        int triOffset = verts.size();
+        const int triOffset = static_cast<int>(verts.size());
         verts.append_range(other.verts);
 
         for (size_t i = 0; i < other.tris.size(); ++i)
@@ -62,16 +62,17 @@ struct Structure
         std::vector<Vector3> filteredVertices;
         std::vector<int> vertexIndexMap(verts.size(), -1);
 
-        for (size_t i = 0, newIndex = 0; i < verts.size(); ++i)
+        for (size_t i = 0; i < verts.size(); ++i)
         {
             if (isVertexUsed[i])
             {
-                const auto& insertionResult = uniqueVerticesMap.insert({verts[i], newIndex});
+                const int idx = static_cast<int>(filteredVertices.size());
+                const auto& insertionResult = uniqueVerticesMap.insert({verts[i], idx});
 
                 if (insertionResult.second)
                 {
                     filteredVertices.emplace_back(verts[i]);
-                    vertexIndexMap[i] = newIndex++;
+                    vertexIndexMap[i] = idx;
                 }
                 else
                 {
@@ -120,8 +121,8 @@ struct Structure
             if (vertex.x >= bmin[0] && vertex.x <= bmax[0] && vertex.y >= bmin[1] && vertex.y <= bmax[1] &&
                 vertex.z >= bmin[2] && vertex.z <= bmax[2])
             {
+                vertexIndexMapping[i] = static_cast<int>(filteredVertices.size());
                 filteredVertices.push_back(vertex);
-                vertexIndexMapping[i] = filteredVertices.size() - 1;
             }
         }
 

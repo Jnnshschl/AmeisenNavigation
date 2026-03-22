@@ -14,7 +14,7 @@ namespace AmeisenNavigation.Tester.Services
         public bool IsLoaded => _handles.Count > 0;
         public int ArchiveCount => _handles.Count;
 
-        public bool Load(string wowDataDir)
+        public bool Load(string wowDataDir, Action<int, int, string>? progress = null)
         {
             Dispose();
 
@@ -22,8 +22,11 @@ namespace AmeisenNavigation.Tester.Services
                 .OrderByDescending(f => f, StringComparer.OrdinalIgnoreCase)
                 .ToList();
 
-            foreach (var mpqPath in mpqFiles)
+            for (int i = 0; i < mpqFiles.Count; i++)
             {
+                var mpqPath = mpqFiles[i];
+                progress?.Invoke(i + 1, mpqFiles.Count, Path.GetFileName(mpqPath));
+
                 if (StormLib.SFileOpenArchive(mpqPath, 0, StormLib.MPQ_OPEN_READ_ONLY, out var handle))
                 {
                     _handles.Add(handle);

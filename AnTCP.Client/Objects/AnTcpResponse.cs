@@ -15,7 +15,7 @@ namespace AnTCP.Client.Objects
 
         /// <summary>
         /// Raw response data (excluding the type byte).
-        /// Backed by a reusable buffer — only valid until the next Send call.
+        /// Backed by a reusable buffer - only valid until the next Send call.
         /// </summary>
         public Span<byte> Data => _data;
 

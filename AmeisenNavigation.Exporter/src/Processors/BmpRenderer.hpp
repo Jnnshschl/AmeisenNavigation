@@ -17,7 +17,7 @@
 
 /// Map an area ID to an RGB color for BMP debug output.
 /// Neutral areas get the base color, Alliance areas get a blue tint,
-/// Horde areas get a red tint — while keeping the terrain type distinguishable.
+/// Horde areas get a red tint - while keeping the terrain type distinguishable.
 inline void GetAreaColor(unsigned char area, uint8_t& r, uint8_t& g, uint8_t& b) noexcept
 {
     r = 0;
@@ -53,13 +53,13 @@ inline void GetAreaColor(unsigned char area, uint8_t& r, uint8_t& g, uint8_t& b)
     }
 
     // Apply faction tint
-    if (faction == 1) // Alliance — shift toward blue, reduce red
+    if (faction == 1) // Alliance - shift toward blue, reduce red
     {
         r = static_cast<uint8_t>(r * 0.4f);
         g = static_cast<uint8_t>(g * 0.6f);
         b = static_cast<uint8_t>(std::min(255.0f, b * 0.6f + 130.0f));
     }
-    else if (faction == 2) // Horde — shift toward red, reduce blue
+    else if (faction == 2) // Horde - shift toward red, reduce blue
     {
         r = static_cast<uint8_t>(std::min(255.0f, r * 0.6f + 130.0f));
         g = static_cast<uint8_t>(g * 0.5f);
