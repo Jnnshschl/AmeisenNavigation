@@ -341,7 +341,15 @@ inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSiz
             return result;
         }
 
-        std::vector<mz_uint> tileEntries;
+        // Archive entry and the grid cell its name ("XX_YY") says the tile belongs to.
+        struct TileEntry
+        {
+            mz_uint index;
+            int x;
+            int y;
+        };
+
+        std::vector<TileEntry> tileEntries;
         const mz_uint fileCount = mz_zip_reader_get_num_files(&zip);
         tileEntries.reserve(fileCount);
         uint64_t declaredBytes = 0;
@@ -360,7 +368,7 @@ inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSiz
                 && stat.m_uncomp_size <= MAX_TILE_DATA_SIZE
                 && tileEntries.size() < static_cast<size_t>(params.maxTiles))
             {
-                tileEntries.push_back(i);
+                tileEntries.push_back({i, x, y});
                 declaredBytes += stat.m_uncomp_size;
             }
             else if (ParseTileEntryName(entryName, x, y))
@@ -389,15 +397,29 @@ inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSiz
         for (int i = 0; i < static_cast<int>(tileEntries.size()); ++i)
         {
             size_t size = 0;
-            void* data = mz_zip_reader_extract_to_heap(&zip, tileEntries[static_cast<size_t>(i)], &size, 0);
+            void* data =
+                mz_zip_reader_extract_to_heap(&zip, tileEntries[static_cast<size_t>(i)].index, &size, 0);
             extracted[static_cast<size_t>(i)] = {data, size};
         }
 
-        for (auto& [data, size] : extracted)
+        for (size_t i = 0; i < extracted.size(); ++i)
         {
+            // No structured binding: Clang can't capture those in lambdas when OpenMP is enabled.
+            void* data = extracted[i].data;
+            const size_t size = extracted[i].size;
+
+            // A tile has to sit in the cell its entry name says, otherwise it would occupy another tile's cell
+            // (that one then fails with DT_ALREADY_OCCUPIED) or be linked to the wrong neighbours.
+            const auto inOwnCell = [&]() {
+                dtMeshHeader header;
+                std::memcpy(&header, data, sizeof(header));
+                return header.x == tileEntries[i].x && header.y == tileEntries[i].y;
+            };
+
             // miniz allocates with malloc, Detour's default allocator frees with free: DT_TILE_FREE_DATA is
             // compatible. Copy into a dtAlloc buffer anyway so custom Detour allocators keep working.
-            if (!data || !ValidateTileData(static_cast<const unsigned char*>(data), size) || size > INT32_MAX)
+            if (!data || !ValidateTileData(static_cast<const unsigned char*>(data), size) || size > INT32_MAX
+                || !inOwnCell())
             {
                 result.tilesRejected++;
                 mz_free(data);

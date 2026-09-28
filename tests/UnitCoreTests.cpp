@@ -3,8 +3,11 @@
 #include <atomic>
 #include <filesystem>
 #include <fstream>
+#include <limits>
 #include <thread>
 #include <vector>
+
+#include <DetourNavMeshBuilder.h>
 
 #include "AmeisenNavigation.hpp"
 #include "Helpers/Polygon.hpp"
@@ -400,4 +403,100 @@ TEST_CASE(Polygon_SamplingRejectsHugeOrInvalidPolygons)
 
     CHECK(PolygonMath::HexGridSampling(huge, 1.0f, 1024).empty());
     CHECK(PolygonMath::HexGridSampling(nan, 1.0f, 1024).empty());
+}
+
+namespace {
+/// A real single-quad Detour tile at grid cell (x, y, layer), built like the exporter builds its tiles.
+std::vector<unsigned char> MakeQuadTile(int x, int y, int layer)
+{
+    constexpr unsigned short NONE = 0xffff;
+    const unsigned short verts[] = {0, 0, 0, 0, 0, 10, 10, 0, 10, 10, 0, 0};
+    const unsigned short polys[12] = {0, 1, 2, 3, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE};
+    const unsigned char areas[] = {TERRAIN_GROUND};
+    const unsigned short flags[] = {NAV_GROUND};
+
+    dtNavMeshCreateParams params{};
+    params.verts = verts;
+    params.vertCount = 4;
+    params.polys = polys;
+    params.polyAreas = areas;
+    params.polyFlags = flags;
+    params.polyCount = 1;
+    params.nvp = 6;
+    params.walkableHeight = 2.0f;
+    params.walkableRadius = 0.6f;
+    params.walkableClimb = 0.9f;
+    params.bmax[0] = 10.0f;
+    params.bmax[1] = 1.0f;
+    params.bmax[2] = 10.0f;
+    params.cs = 1.0f;
+    params.ch = 1.0f;
+    params.buildBvTree = true;
+    params.tileX = x;
+    params.tileY = y;
+    params.tileLayer = layer;
+
+    unsigned char* data = nullptr;
+    int size = 0;
+
+    if (!dtCreateNavMeshData(&params, &data, &size))
+    {
+        return {};
+    }
+
+    std::vector<unsigned char> tile(data, data + size);
+    dtFree(data);
+    return tile;
+}
+
+bool ValidTile(const std::vector<unsigned char>& tile)
+{
+    return !tile.empty() && ValidateTileData(tile.data(), tile.size());
+}
+} // namespace
+
+TEST_CASE(DetourUtils_TileCoordinateAndLayerBounds)
+{
+    REQUIRE(!MakeQuadTile(0, 0, 0).empty());
+    CHECK(ValidTile(MakeQuadTile(0, 0, 0)));
+    CHECK(ValidTile(MakeQuadTile(63, 63, 0)));
+
+    // Inclusive limits.
+    CHECK(ValidTile(MakeQuadTile(MAX_TILE_COORD, -MAX_TILE_COORD, 255)));
+    CHECK(ValidTile(MakeQuadTile(-MAX_TILE_COORD, MAX_TILE_COORD, 0)));
+
+    // One past them (addTile's neighbour math overflowed at INT_MIN/INT_MAX).
+    CHECK(!ValidTile(MakeQuadTile(MAX_TILE_COORD + 1, 0, 0)));
+    CHECK(!ValidTile(MakeQuadTile(-MAX_TILE_COORD - 1, 0, 0)));
+    CHECK(!ValidTile(MakeQuadTile(0, MAX_TILE_COORD + 1, 0)));
+    CHECK(!ValidTile(MakeQuadTile(0, -MAX_TILE_COORD - 1, 0)));
+    CHECK(!ValidTile(MakeQuadTile(std::numeric_limits<int>::min(), 0, 0)));
+    CHECK(!ValidTile(MakeQuadTile(0, 0, 256)));
+    CHECK(!ValidTile(MakeQuadTile(0, 0, -1)));
+}
+
+TEST_CASE(Anp_TilesOutsideTheirCellAreRejected)
+{
+    dtNavMeshParams params{};
+    params.tileWidth = 10.0f;
+    params.tileHeight = 10.0f;
+    params.maxTiles = 16;
+    params.maxPolys = 1 << 16;
+
+    const auto dir = TempDir("anp_cells");
+    Anp::AnpWriter writer(77, params);
+
+    // Correct: tile (1, 2) stored as entry "01_02". Wrong: tile (3, 3) stored as entry "00_00".
+    const auto good = MakeQuadTile(1, 2, 0);
+    const auto misplaced = MakeQuadTile(3, 3, 0);
+    REQUIRE(writer.AddTile(1, 2, good.data(), static_cast<int>(good.size())));
+    REQUIRE(writer.AddTile(0, 0, misplaced.data(), static_cast<int>(misplaced.size())));
+    REQUIRE(writer.Save(dir));
+
+    const auto loaded = Anp::Load(dir / Anp::FileName(77));
+    REQUIRE(loaded.navMesh);
+    CHECK_EQ(loaded.tilesLoaded, 1);
+    CHECK_EQ(loaded.tilesRejected, 1);
+    CHECK(loaded.navMesh->getTileAt(1, 2, 0) != nullptr);
+    CHECK(loaded.navMesh->getTileAt(3, 3, 0) == nullptr);
 }

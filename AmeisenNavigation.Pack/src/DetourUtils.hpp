@@ -38,6 +38,10 @@ using DetourDataPtr = std::unique_ptr<unsigned char, DetourDataDeleter>;
 /// array of maxTiles tiles, an absurd value from a corrupt file would exhaust the memory.
 constexpr int MAX_NAVMESH_TILES = 1 << 16;
 
+/// Tile grid coordinates accepted from a file (a WoW map uses 0..63). dtNavMesh::addTile computes the neighbours
+/// (x +- 1, y +- 1), coordinates near INT_MIN/INT_MAX overflowed there (found by fuzzing).
+constexpr int MAX_TILE_COORD = 1 << 16;
+
 /// Largest serialized tile accepted from a file (real tiles are a few MB at most).
 constexpr size_t MAX_TILE_DATA_SIZE = 256u * 1024u * 1024u;
 
@@ -72,9 +76,8 @@ inline bool ValidateTileData(const unsigned char* data, size_t size) noexcept
         return false;
     }
 
-    // Tile coordinates: addTile computes the neighbours' coordinates (x +- 1, found by fuzzing: INT_MIN - 1).
-    if (hdr.x < -MAX_NAVMESH_TILES || hdr.x > MAX_NAVMESH_TILES || hdr.y < -MAX_NAVMESH_TILES
-        || hdr.y > MAX_NAVMESH_TILES || hdr.layer < 0 || hdr.layer > 255)
+    if (hdr.x < -MAX_TILE_COORD || hdr.x > MAX_TILE_COORD || hdr.y < -MAX_TILE_COORD || hdr.y > MAX_TILE_COORD
+        || hdr.layer < 0 || hdr.layer > 255)
     {
         return false;
     }
