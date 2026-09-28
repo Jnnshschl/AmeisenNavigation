@@ -72,6 +72,13 @@ inline bool ValidateTileData(const unsigned char* data, size_t size) noexcept
         return false;
     }
 
+    // Tile coordinates: addTile computes the neighbours' coordinates (x +- 1, found by fuzzing: INT_MIN - 1).
+    if (hdr.x < -MAX_NAVMESH_TILES || hdr.x > MAX_NAVMESH_TILES || hdr.y < -MAX_NAVMESH_TILES
+        || hdr.y > MAX_NAVMESH_TILES || hdr.layer < 0 || hdr.layer > 255)
+    {
+        return false;
+    }
+
     // addTile writes links[maxLinkCount - 1], a tile needs at least one polygon and one link slot. Polygon and
     // vertex indices are 16 bit in dtPoly/dtOffMeshConnection.
     if (hdr.polyCount <= 0 || hdr.polyCount > 0xffff || hdr.vertCount <= 0 || hdr.vertCount > 0xffff

@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cmath>
 #include <cstring>
+#include <limits>
 #include <thread>
 #include <vector>
 
@@ -658,6 +659,9 @@ TEST_CASE(Pipeline_TileValidationRejectsCorruption)
     CHECK(withHeader([](dtMeshHeader& h) { h.bvQuantFactor = 1e12f; }));
     CHECK(withHeader([](dtMeshHeader& h) { h.offMeshBase = h.polyCount + 1; }));
     CHECK(withHeader([](dtMeshHeader& h) { h.detailMeshCount = 0; }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.x = std::numeric_limits<int>::min(); }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.y = std::numeric_limits<int>::max(); }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.layer = -1; }));
 
     // Polygons: vertex index, self neighbour, out of range neighbour, vertex count, type.
     CHECK(withPoly(0, [&](dtPoly& p) { p.verts[0] = static_cast<unsigned short>(header.vertCount); }));
