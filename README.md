@@ -62,6 +62,9 @@ docker run -d -p 47110:47110 -v /srv/meshes:/meshes:ro ameisennav
 | `fRandomPathMaxDistance` | `1.0` | Max offset of randomized path corners |
 | `iCatmullRomSplinePoints` / `fCatmullRomSplineAlpha` | `4` / `0.5` | Catmull-Rom samples per segment / parametrization |
 | `iBezierCurvePoints` | `8` | Bezier samples per curve |
+| `iMaxClients` | `1024` | Simultaneous connections (one thread each), further ones are refused, `0` = unlimited |
+| `iClientIdleTimeoutSec` | `0` | Disconnect clients that send nothing for this long, `0` = never (dead peers are detected by TCP keepalive after ~2 min anyway) |
+| `iStatsIntervalSec` | `300` | Log request counts, rates and latencies per request type this often, `0` = off |
 | `bDebugLogging` | `0` | Log every request (with timings) |
 
 Invalid values are reported and replaced by defaults, `#`/`;` start comments. Every key can be overridden by an
@@ -166,6 +169,38 @@ sudo install -Dm644 config.cfg /etc/ameisennav/config.cfg
 sudo systemctl daemon-reload && sudo systemctl enable --now ameisennav
 ```
 
+## Robustness and security 🛡️
+
+The server is meant to run next to untrusted bot processes and loads mesh files it didn't create:
+
+- **Requests**: positions must be finite and within +-100000 yards, radii <= 5000, explore polygons <= 10000 yards
+  and 256 points, map ids 0..65535, area costs 0 < cost <= 1e6. Malformed requests get a zero/empty answer and are
+  only logged at debug level. Every request gets exactly one response.
+- **Resources**: `dtNavMeshQuery` objects (A* node pools, ~2.7 MB each) are pooled per map and leased per request,
+  memory follows the number of concurrently running requests, not clients x maps. `iMaxClients` caps threads,
+  TCP keepalive frees threads of vanished peers.
+- **Mesh files**: every Detour tile (ANP and MMAP) is validated before Detour sees it: sizes, every vertex/polygon/
+  neighbour/detail/BV tree/off-mesh index, finite coordinates, BV quantization range. Navmesh parameters, tile
+  sizes and the total decompressed size of an `.anp` are bounded. Broken tiles are skipped and counted.
+- **Exporter input**: corrupt client files can't produce out of bounds reads, endless loops or NaN geometry for
+  Recast (non-finite/absurd triangles and area rects are dropped).
+- **Verification**: unit, end-to-end (tile pipeline, TCP server, full exports of synthetic client data) and C# client
+  integration tests run with GCC, Clang, MSVC, ASan+UBSan (incl. float-cast-overflow) and ThreadSanitizer.
+  libFuzzer targets cover tile validation + Detour queries, `.anp` loading, the exporter's ADT/WMO/M2/WDT/DBC
+  parsers and the request handlers; inputs that ever crashed are kept in `tests/fuzz/regressions`. Fuzzing found
+  (and this repo fixes) a null dereference in Detour's `closestPointOnDetailEdges` for tiles without detail edge
+  flags, an endless `raycast` on inconsistent neighbour links, UB in miniz and an unbounded MH2O instance loop.
+- **Binaries** are built with stack protector, `_FORTIFY_SOURCE=3`, stack clash protection, CET (IBT/SHSTK), PIE and
+  full RELRO (`/guard:cf` + `/CETCOMPAT` with MSVC), the Docker image runs as an unprivileged user and the systemd
+  unit in a sandbox.
+
+```bash
+# Fuzzing (Clang)
+CC=clang CXX=clang++ cmake -S . -B build-fuzz -DANAV_BUILD_FUZZERS=ON -DANAV_BUILD_TESTS=OFF -DANAV_ENABLE_OPENMP=OFF
+cmake --build build-fuzz
+tests/fuzz/run_fuzzers.sh build-fuzz 300   # seconds per target
+```
+
 ## Building 🛠️
 
 Requirements: a C++20 compiler (MSVC 2022+, GCC 13+, Clang 17+), CMake 3.21+. The .NET projects need the .NET 10 SDK.
@@ -187,6 +222,8 @@ from `dep/` with MSVC and fetches StormLib from GitHub everywhere else (`-DANAV_
 | `ANAV_ENABLE_OPENMP` / `ANAV_ENABLE_LTO` | `ON` | Parallel loading/building, link time optimization |
 | `ANAV_SANITIZE` | `OFF` | AddressSanitizer + UndefinedBehaviorSanitizer (GCC/Clang) |
 | `ANAV_WARNINGS_AS_ERRORS` | `OFF` | `-Werror` / `/WX` for project code |
+| `ANAV_HARDENING` | `ON` | Stack protector, FORTIFY_SOURCE, stack clash protection, CET, PIE, full RELRO / CFG |
+| `ANAV_BUILD_FUZZERS` | `OFF` | libFuzzer targets (Clang only, instruments everything) |
 
 `anav_benchmark [adtsPerAxis] [queries]` builds a synthetic map at production resolution and measures build and
 query throughput.
@@ -202,7 +239,7 @@ query throughput.
 | `AmeisenNavigation.Exporter/` | MPQ/ADT/WMO/M2 parsing and the tile build pipeline |
 | `AmeisenNavigation.Client/` | C# client library |
 | `AmeisenNavigation.Tester/` | WPF tool to visualize maps, navmeshes and paths |
-| `tests/` | Unit and end-to-end tests: a synthetic world through the real tile pipeline and TCP server, full exports of synthetic client data (MPQ, DBC, WDT, ADT, WMO, M2), C# client integration |
+| `tests/` | Unit and end-to-end tests: a synthetic world through the real tile pipeline and TCP server, full exports of synthetic client data (MPQ, DBC, WDT, ADT, WMO, M2), C# client integration, fuzzers (`tests/fuzz`) |
 | `deploy/` | Docker entrypoint and compose file, systemd unit |
 
 ## Credits 🙌
