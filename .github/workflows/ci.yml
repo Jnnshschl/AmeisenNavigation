@@ -67,7 +67,7 @@ jobs:
       - name: Configure
         run: >
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DANAV_SANITIZE=ON
-          -DANAV_BUILD_EXPORTER=OFF -DANAV_ENABLE_LTO=OFF -DANAV_WARNINGS_AS_ERRORS=ON
+          -DANAV_ENABLE_LTO=OFF -DANAV_WARNINGS_AS_ERRORS=ON
 
       - name: Build
         run: cmake --build build

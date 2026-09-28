@@ -20,3 +20,13 @@ set_tests_properties(e2e PROPERTIES TIMEOUT 600)
 # Benchmark (manual): anav_benchmark [adtsPerAxis] [pathQueries]
 add_executable(anav_benchmark Benchmark.cpp)
 target_link_libraries(anav_benchmark PRIVATE anav_core anav_exporter_core anav_options)
+
+# End-to-end exporter: synthetic client data (MPQ, DBC, WDT, ADT, WMO, M2) -> full export -> navigation queries
+if(TARGET anav_exporter_lib)
+    add_executable(anav_exporter_tests
+        TestMain.cpp
+        E2EExporterTests.cpp)
+    target_link_libraries(anav_exporter_tests PRIVATE anav_server_lib anav_exporter_lib anav_options)
+    add_test(NAME exporter COMMAND anav_exporter_tests)
+    set_tests_properties(exporter PROPERTIES TIMEOUT 600)
+endif()

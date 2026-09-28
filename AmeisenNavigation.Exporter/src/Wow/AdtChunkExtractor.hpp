@@ -20,6 +20,7 @@
 #include "Adt.hpp"
 #include "LiquidType.hpp"
 #include "M2.hpp"
+#include "Wdt.hpp"
 #include "Wmo.hpp"
 #include "WmoGroup.hpp"
 
@@ -48,6 +49,12 @@ public:
     {
         std::lock_guard lock(Mutex);
         Ids.clear();
+    }
+
+    size_t Size()
+    {
+        std::lock_guard lock(Mutex);
+        return Ids.size();
     }
 };
 
@@ -188,14 +195,14 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
             const unsigned char* renderMask = mh2o->GetRenderMask(liquid);
             const auto* vertexData = static_cast<const unsigned char*>(mh2o->GetLiquidHeight(liquid));
 
-            // Vertex data stride per format (wowdev.wiki / TrinityCore):
-            //   HeightDepth:     { float height; float depth; }      = 8 bytes
-            //   HeightTexCoord:  { float height; int16 x; int16 y; } = 8 bytes
-            //   Depth:           { float depth; }                     = 4 bytes (no heights)
-            const int stride = liquid->vertexFormat == AdtLiquidVertexFormat::Depth ? 4 : 8;
+            // Vertex data layout (wowdev.wiki, TrinityCore map extractor): arrays, not interleaved structs.
+            //   HeightDepth:     float height[(w+1)*(h+1)]; uint8 depth[(w+1)*(h+1)];
+            //   HeightTexCoord:  float height[(w+1)*(h+1)]; { int16 u, v }[(w+1)*(h+1)];
+            //   Depth:           uint8 depth[(w+1)*(h+1)];  (no heights, the surface is flat at the max level)
+            // The heights are always a contiguous float array at the start of the vertex data.
             const size_t vertexCount = static_cast<size_t>(liquid->width + 1) * (liquid->height + 1);
             const bool hasHeights = liquid->vertexFormat != AdtLiquidVertexFormat::Depth
-                                    && inMh2o(vertexData, vertexCount * static_cast<size_t>(stride));
+                                    && inMh2o(vertexData, vertexCount * sizeof(float));
             const size_t maskBytes = (static_cast<size_t>(liquid->width) * liquid->height + 7) / 8;
 
             if (renderMask && !inMh2o(renderMask, maskBytes))
@@ -227,7 +234,8 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
                     {
                         const auto getH = [&](int dx, int dy) {
                             float h = 0.0f;
-                            std::memcpy(&h, vertexData + (dy * (liquid->width + 1) + dx) * stride, sizeof(float));
+                            std::memcpy(&h, vertexData + (dy * (liquid->width + 1) + dx) * sizeof(float),
+                                        sizeof(float));
                             return std::isfinite(h) ? h : liquid->maxHeightLevel;
                         };
 
@@ -369,7 +377,221 @@ inline void AddM2Collision(const M2* m2, const Matrix4x4& transform, Structure* 
         area);
 }
 
-/// Extract WMO geometry (solid + liquid + doodads of the placement's doodad set) from all MODF placements.
+/// Extract one WMO placement (solid + liquid + doodads of the placement's doodad set).
+inline void ExtractWmoPlacement(const MODF::Entry& entry, const char* wmoRootFilename, CachedFileReader& reader,
+                                Structure* structure, const std::unordered_map<unsigned int, LiquidType>& liquidTypes)
+{
+    const Wmo* wmo = reader.GetFileContent<Wmo>(wmoRootFilename);
+
+    if (!wmo || !wmo->IsValid())
+    {
+        return;
+    }
+
+    const MOHD* mohd = wmo->Mohd();
+
+    Matrix4x4 transform;
+    transform.SetRotation({entry.rz, entry.rx, entry.ry + 180.0f});
+
+    if (entry.x != 0.0f || entry.y != 0.0f || entry.z != 0.0f)
+    {
+        transform.SetTranslation({-(entry.z - WORLDSIZE), -(entry.x - WORLDSIZE), entry.y});
+    }
+
+    const std::string_view rootName(wmoRootFilename);
+    const auto rootStem = rootName.substr(0, rootName.find_last_of('.'));
+
+    for (unsigned int w = 0; w < mohd->groupCount && w < 512; w++)
+    {
+        const auto wmoGroupName = std::format("{}_{:03}.wmo", rootStem, w);
+        const WmoGroup* wmoGroup = reader.GetFileContent<WmoGroup>(wmoGroupName.c_str());
+
+        if (!wmoGroup)
+        {
+            continue;
+        }
+
+        // Solid geometry
+        const MOVT* movt = wmoGroup->Movt();
+        const MOVI* movi = wmoGroup->Movi();
+        const MOPY* mopy = wmoGroup->Mopy();
+
+        if (movt && movi && mopy)
+        {
+            std::vector<Vector3> verts;
+            verts.reserve(movt->Count());
+
+            for (unsigned int d = 0; d < movt->Count(); ++d)
+            {
+                verts.push_back(transform.Transform(movt->verts[d]).ToRDCoords());
+            }
+
+            const unsigned int triCount = std::min(movi->Count() / 3, mopy->Count());
+
+            AppendMesh(
+                structure, verts, triCount,
+                [&](unsigned int t, unsigned int& a, unsigned int& b, unsigned int& c) {
+                    // Skip non-collidable render-only polygons (F_DETAIL/F_NOCOLLIDE style materials).
+                    if ((mopy->data[t].flags & 0x04) != 0 && mopy->data[t].materials != 0xFF)
+                    {
+                        return false;
+                    }
+
+                    a = movi->tris[t * 3];
+                    b = movi->tris[t * 3 + 1];
+                    c = movi->tris[t * 3 + 2];
+                    return true;
+                },
+                WMO);
+        }
+
+        // WMO liquid
+        if (const MLIQ* mliq = wmoGroup->Mliq(); mliq && wmoGroup->LiquidInBounds(mliq))
+        {
+            TriAreaId wmoLiquidType = LIQUID_WATER;
+            const MOGP* mogp = wmoGroup->Mogp();
+
+            if (mogp && mogp->groupLiquid > 0)
+            {
+                if ((mohd->flags & 0x04) != 0) // "use liquid type dbc id"
+                {
+                    if (const auto it = liquidTypes.find(mogp->groupLiquid); it != liquidTypes.end())
+                    {
+                        wmoLiquidType = LiquidTypeToArea(it->second);
+                    }
+                }
+                else
+                {
+                    switch (mogp->groupLiquid)
+                    {
+                        case 2: wmoLiquidType = LIQUID_OCEAN; break;
+                        case 3: wmoLiquidType = LIQUID_LAVA; break;
+                        case 4: wmoLiquidType = LIQUID_SLIME; break;
+                        default: wmoLiquidType = LIQUID_WATER; break;
+                    }
+                }
+            }
+
+            const auto vertCount = mliq->countYVertices * mliq->countXVertices;
+            const auto* dataPtr = reinterpret_cast<const MLIQVert*>(mliq + 1);
+            const auto* flags = reinterpret_cast<const unsigned char*>(dataPtr + vertCount);
+
+            std::lock_guard<std::mutex> lock(structure->mutex);
+
+            for (unsigned int y = 0; y < mliq->height; ++y)
+            {
+                for (unsigned int x = 0; x < mliq->width; ++x)
+                {
+                    if (flags[y * mliq->width + x] == 0x0F)
+                    {
+                        continue;
+                    }
+
+                    const size_t vertsIndex = structure->verts.size();
+                    structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y, x, transform));
+                    structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y, x + 1, transform));
+                    structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y + 1, x, transform));
+                    structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y + 1, x + 1, transform));
+
+                    structure->tris.emplace_back(Tri{vertsIndex + 2, vertsIndex, vertsIndex + 1});
+                    structure->tris.emplace_back(Tri{vertsIndex + 1, vertsIndex + 3, vertsIndex + 2});
+                    structure->triTypes.push_back(wmoLiquidType);
+                    structure->triTypes.push_back(wmoLiquidType);
+                }
+            }
+        }
+    }
+
+    // WMO doodads: set 0 is always present, plus the placement's doodad set.
+    const MODD* modd = wmo->Modd();
+    const MODN* modn = wmo->Modn();
+
+    if (!modd || !modn || modd->size == 0)
+    {
+        return;
+    }
+
+    const unsigned int definitionCount = modd->size / sizeof(MODD::Definition);
+    std::vector<std::pair<unsigned int, unsigned int>> ranges; // [start, end)
+
+    if (const MODS* mods = wmo->Mods())
+    {
+        const unsigned int setCount = mods->size / sizeof(mods->set[0]);
+
+        const auto addSet = [&](unsigned int set) {
+            if (set < setCount)
+            {
+                const auto start = std::min(mods->set[set].startIndex, definitionCount);
+                const auto end = std::min(start + mods->set[set].count, definitionCount);
+                ranges.emplace_back(start, end);
+            }
+        };
+
+        addSet(0);
+
+        if (entry.doodadSet != 0)
+        {
+            addSet(entry.doodadSet);
+        }
+    }
+    else
+    {
+        ranges.emplace_back(0u, definitionCount);
+    }
+
+    for (const auto& [start, end] : ranges)
+    {
+        for (unsigned int m = start; m < end; m++)
+        {
+            const auto& definition = modd->defs[m];
+
+            // nameIndex is 24 bits, the upper 8 bits are flags.
+            const unsigned int nameIndex = definition.nameIndex & 0x00FFFFFF;
+
+            if (nameIndex >= modn->size)
+            {
+                continue;
+            }
+
+            const std::string_view doodadPath(modn->names + nameIndex,
+                                              strnlen(modn->names + nameIndex, modn->size - nameIndex));
+            const auto m2Name = std::format("{}.m2", doodadPath.substr(0, doodadPath.find_last_of('.')));
+
+            if (const M2* m2 = reader.GetFileContent<M2>(m2Name.c_str()))
+            {
+                Matrix4x4 doodadTransform;
+                doodadTransform.SetScale({definition.scale, definition.scale, definition.scale});
+                doodadTransform.SetRotation({0.0f, 180.0f, 0.0f});
+                doodadTransform.SetRotation(-definition.qy, definition.qz, -definition.qx, definition.qw);
+                doodadTransform.SetTranslation(definition.position);
+                doodadTransform.Multiply(transform);
+
+                AddM2Collision(m2, doodadTransform, structure, WMO);
+            }
+        }
+    }
+}
+
+/// Extract the global WMO of a WMO-only map (dungeons, raids). Returns false if the map has none.
+/// The WDT placement lives in a coordinate space shifted by 32 tiles compared to ADT placements
+/// (see TrinityCore's vmap extractor), shift it so the ADT placement transform applies.
+inline bool ExtractGlobalWmo(const Wdt* wdt, CachedFileReader& reader, Structure* structure,
+                             const std::unordered_map<unsigned int, LiquidType>& liquidTypes)
+{
+    if (!wdt || !wdt->HasGlobalWmo())
+    {
+        return false;
+    }
+
+    MODF::Entry entry = *wdt->GlobalWmoPlacement();
+    entry.x += WORLDSIZE;
+    entry.z += WORLDSIZE;
+
+    ExtractWmoPlacement(entry, wdt->GlobalWmoName(), reader, structure, liquidTypes);
+    return true;
+}
+
+/// Extract WMO geometry from all MODF placements of an ADT (each uniqueId only once per map).
 inline void ExtractWmoGeometry(Adt* adt, CachedFileReader& reader, Structure* structure,
                                const std::unordered_map<unsigned int, LiquidType>& liquidTypes,
                                PlacementSet* placements = nullptr)
@@ -390,201 +612,9 @@ inline void ExtractWmoGeometry(Adt* adt, CachedFileReader& reader, Structure* st
             continue; // already extracted from a neighbour ADT
         }
 
-        const char* wmoRootFilename = adt->GetFilename(adt->Mwmo(), adt->Mwid(), entry.id);
-
-        if (!wmoRootFilename)
+        if (const char* wmoRootFilename = adt->GetFilename(adt->Mwmo(), adt->Mwid(), entry.id))
         {
-            continue;
-        }
-
-        const Wmo* wmo = reader.GetFileContent<Wmo>(wmoRootFilename);
-
-        if (!wmo || !wmo->IsValid())
-        {
-            continue;
-        }
-
-        const MOHD* mohd = wmo->Mohd();
-
-        Matrix4x4 transform;
-        transform.SetRotation({entry.rz, entry.rx, entry.ry + 180.0f});
-
-        if (entry.x != 0.0f || entry.y != 0.0f || entry.z != 0.0f)
-        {
-            transform.SetTranslation({-(entry.z - WORLDSIZE), -(entry.x - WORLDSIZE), entry.y});
-        }
-
-        const std::string_view rootName(wmoRootFilename);
-        const auto rootStem = rootName.substr(0, rootName.find_last_of('.'));
-
-        for (unsigned int w = 0; w < mohd->groupCount && w < 512; w++)
-        {
-            const auto wmoGroupName = std::format("{}_{:03}.wmo", rootStem, w);
-            const WmoGroup* wmoGroup = reader.GetFileContent<WmoGroup>(wmoGroupName.c_str());
-
-            if (!wmoGroup)
-            {
-                continue;
-            }
-
-            // Solid geometry
-            const MOVT* movt = wmoGroup->Movt();
-            const MOVI* movi = wmoGroup->Movi();
-            const MOPY* mopy = wmoGroup->Mopy();
-
-            if (movt && movi && mopy)
-            {
-                std::vector<Vector3> verts;
-                verts.reserve(movt->Count());
-
-                for (unsigned int d = 0; d < movt->Count(); ++d)
-                {
-                    verts.push_back(transform.Transform(movt->verts[d]).ToRDCoords());
-                }
-
-                const unsigned int triCount = std::min(movi->Count() / 3, mopy->Count());
-
-                AppendMesh(
-                    structure, verts, triCount,
-                    [&](unsigned int t, unsigned int& a, unsigned int& b, unsigned int& c) {
-                        // Skip non-collidable render-only polygons (F_DETAIL/F_NOCOLLIDE style materials).
-                        if ((mopy->data[t].flags & 0x04) != 0 && mopy->data[t].materials != 0xFF)
-                        {
-                            return false;
-                        }
-
-                        a = movi->tris[t * 3];
-                        b = movi->tris[t * 3 + 1];
-                        c = movi->tris[t * 3 + 2];
-                        return true;
-                    },
-                    WMO);
-            }
-
-            // WMO liquid
-            if (const MLIQ* mliq = wmoGroup->Mliq(); mliq && wmoGroup->LiquidInBounds(mliq))
-            {
-                TriAreaId wmoLiquidType = LIQUID_WATER;
-                const MOGP* mogp = wmoGroup->Mogp();
-
-                if (mogp && mogp->groupLiquid > 0)
-                {
-                    if ((mohd->flags & 0x04) != 0) // "use liquid type dbc id"
-                    {
-                        if (const auto it = liquidTypes.find(mogp->groupLiquid); it != liquidTypes.end())
-                        {
-                            wmoLiquidType = LiquidTypeToArea(it->second);
-                        }
-                    }
-                    else
-                    {
-                        switch (mogp->groupLiquid)
-                        {
-                            case 2: wmoLiquidType = LIQUID_OCEAN; break;
-                            case 3: wmoLiquidType = LIQUID_LAVA; break;
-                            case 4: wmoLiquidType = LIQUID_SLIME; break;
-                            default: wmoLiquidType = LIQUID_WATER; break;
-                        }
-                    }
-                }
-
-                const auto vertCount = mliq->countYVertices * mliq->countXVertices;
-                const auto* dataPtr = reinterpret_cast<const MLIQVert*>(mliq + 1);
-                const auto* flags = reinterpret_cast<const unsigned char*>(dataPtr + vertCount);
-
-                std::lock_guard<std::mutex> lock(structure->mutex);
-
-                for (unsigned int y = 0; y < mliq->height; ++y)
-                {
-                    for (unsigned int x = 0; x < mliq->width; ++x)
-                    {
-                        if (flags[y * mliq->width + x] == 0x0F)
-                        {
-                            continue;
-                        }
-
-                        const size_t vertsIndex = structure->verts.size();
-                        structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y, x, transform));
-                        structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y, x + 1, transform));
-                        structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y + 1, x, transform));
-                        structure->verts.push_back(WmoLiquidVert(mliq, dataPtr, y + 1, x + 1, transform));
-
-                        structure->tris.emplace_back(Tri{vertsIndex + 2, vertsIndex, vertsIndex + 1});
-                        structure->tris.emplace_back(Tri{vertsIndex + 1, vertsIndex + 3, vertsIndex + 2});
-                        structure->triTypes.push_back(wmoLiquidType);
-                        structure->triTypes.push_back(wmoLiquidType);
-                    }
-                }
-            }
-        }
-
-        // WMO doodads: set 0 is always present, plus the placement's doodad set.
-        const MODD* modd = wmo->Modd();
-        const MODN* modn = wmo->Modn();
-
-        if (!modd || !modn || modd->size == 0)
-        {
-            continue;
-        }
-
-        const unsigned int definitionCount = modd->size / sizeof(MODD::Definition);
-        std::vector<std::pair<unsigned int, unsigned int>> ranges; // [start, end)
-
-        if (const MODS* mods = wmo->Mods())
-        {
-            const unsigned int setCount = mods->size / sizeof(mods->set[0]);
-
-            const auto addSet = [&](unsigned int set) {
-                if (set < setCount)
-                {
-                    const auto start = std::min(mods->set[set].startIndex, definitionCount);
-                    const auto end = std::min(start + mods->set[set].count, definitionCount);
-                    ranges.emplace_back(start, end);
-                }
-            };
-
-            addSet(0);
-
-            if (entry.doodadSet != 0)
-            {
-                addSet(entry.doodadSet);
-            }
-        }
-        else
-        {
-            ranges.emplace_back(0u, definitionCount);
-        }
-
-        for (const auto& [start, end] : ranges)
-        {
-            for (unsigned int m = start; m < end; m++)
-            {
-                const auto& definition = modd->defs[m];
-
-                // nameIndex is 24 bits, the upper 8 bits are flags.
-                const unsigned int nameIndex = definition.nameIndex & 0x00FFFFFF;
-
-                if (nameIndex >= modn->size)
-                {
-                    continue;
-                }
-
-                const std::string_view doodadPath(modn->names + nameIndex,
-                                                  strnlen(modn->names + nameIndex, modn->size - nameIndex));
-                const auto m2Name = std::format("{}.m2", doodadPath.substr(0, doodadPath.find_last_of('.')));
-
-                if (const M2* m2 = reader.GetFileContent<M2>(m2Name.c_str()))
-                {
-                    Matrix4x4 doodadTransform;
-                    doodadTransform.SetScale({definition.scale, definition.scale, definition.scale});
-                    doodadTransform.SetRotation({0.0f, 180.0f, 0.0f});
-                    doodadTransform.SetRotation(-definition.qy, definition.qz, -definition.qx, definition.qw);
-                    doodadTransform.SetTranslation(definition.position);
-                    doodadTransform.Multiply(transform);
-
-                    AddM2Collision(m2, doodadTransform, structure, WMO);
-                }
-            }
+            ExtractWmoPlacement(entry, wmoRootFilename, reader, structure, liquidTypes);
         }
     }
 }

@@ -85,7 +85,11 @@ target_include_directories(anav_recast SYSTEM PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Recast/Include
     ${CMAKE_CURRENT_SOURCE_DIR}/recastnavigation/Detour/Include)
 if(ANAV_SANITIZE AND NOT MSVC)
-    target_compile_options(anav_recast PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer)
+    # Detour's tile layout (header, verts, polys, links, ... packed with dtAlign4) is part of the ANP/MMAP file
+    # format. With 64 bit poly refs the dtLink array is only 4 byte aligned for half of the tiles, which x86 and
+    # ARMv8 handle natively. Changing the layout would break every existing navmesh, so don't flag it.
+    target_compile_options(anav_recast PRIVATE -fsanitize=address,undefined -fno-sanitize=alignment
+        -fno-omit-frame-pointer)
 endif()
 
 # ── AmeisenNavigation.Pack (ANP file format: miniz + tile container) ──
@@ -180,12 +184,16 @@ if(ANAV_BUILD_EXPORTER)
         set(ANAV_STORMLIB_TARGET storm)
     endif()
 
+    # Export driver (MPQ reading, map extraction, tile building) as a library so tests can run full exports.
+    add_library(anav_exporter_lib STATIC ${CMAKE_CURRENT_SOURCE_DIR}/AmeisenNavigation.Exporter/src/Exporter.cpp)
+    target_link_libraries(anav_exporter_lib PUBLIC anav_exporter_core ${ANAV_STORMLIB_TARGET} PRIVATE anav_options)
+
     add_executable(AmeisenNavigation.Exporter ${CMAKE_CURRENT_SOURCE_DIR}/AmeisenNavigation.Exporter/src/Main.cpp)
     if(WIN32)
         target_sources(AmeisenNavigation.Exporter PRIVATE
             ${CMAKE_CURRENT_SOURCE_DIR}/AmeisenNavigation.Exporter/AmeisenNavigation.Exporter.rc)
     endif()
-    target_link_libraries(AmeisenNavigation.Exporter PRIVATE anav_exporter_core ${ANAV_STORMLIB_TARGET} anav_options)
+    target_link_libraries(AmeisenNavigation.Exporter PRIVATE anav_exporter_lib anav_options)
     install(TARGETS AmeisenNavigation.Exporter RUNTIME DESTINATION bin)
 endif()
 

@@ -9,8 +9,10 @@
 
 #include "../../../AmeisenNavigation/src/Utils/Logger.hpp"
 
-#define XXH_STATIC_LINKING_ONLY
-#define XXH_IMPLEMENTATION
+// Header-only use of xxhash: every function becomes static inline, safe to include from multiple TUs.
+#ifndef XXH_INLINE_ALL
+#define XXH_INLINE_ALL
+#endif
 #include "../Utils/xxhash/xxhash.h"
 
 #include "MpqManager.hpp"
