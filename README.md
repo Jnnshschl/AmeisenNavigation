@@ -169,6 +169,17 @@ sudo install -Dm644 config.cfg /etc/ameisennav/config.cfg
 sudo systemctl daemon-reload && sudo systemctl enable --now ameisennav
 ```
 
+## Performance ⚡
+
+`anav_benchmark 2 20000` (synthetic 2x2 ADT map at production resolution, 4 vCPU cloud VM, GCC 13 Release):
+
+| | |
+| --- | --- |
+| Navmesh build | 0.62 s per ADT tile (32x32 sub-tiles, parallel) |
+| Load `.anp` (4 tiles) | 49 ms |
+| Path queries, 1 thread | 3,400 paths/s (~290 us for paths across ADTs) |
+| Path queries, 4 threads | 13,000 paths/s (linear scaling, queries are pooled per map) |
+
 ## Robustness and security 🛡️
 
 The server is meant to run next to untrusted bot processes and loads mesh files it didn't create:
