@@ -422,6 +422,54 @@ TEST_CASE(Navigation_ExplorePolygonSkipsUnreachableWaypoints)
     }
 }
 
+TEST_CASE(Navigation_ExplorePolygonMixedReachability)
+{
+    EnsureClient();
+
+    // Ground around the deck island, outline at deck height: deck samples snap onto the (unreachable) deck, the
+    // others to the ground. After the first failed search the remaining deck waypoints are pruned via the closed
+    // list, the ground must still be covered completely.
+    const float y = TestWorld::PLATFORM_Y;
+    const Vector3 area[] = {Wow(-520.0f, y, -520.0f), Wow(-340.0f, y, -520.0f), Wow(-340.0f, y, -340.0f),
+                            Wow(-520.0f, y, -340.0f)};
+    constexpr float spacing = 15.0f;
+
+    Path path(256);
+    ExploreResult result;
+    REQUIRE(Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, Wow(-510.0f, 0.0f, -510.0f), area, spacing, path,
+                                        &result));
+    CHECK(!result.truncated);
+    CHECK(result.reached > 20);
+    CHECK(result.reached < result.waypoints); // the deck waypoints
+
+    for (const auto& p : path)
+    {
+        CHECK_NEAR(p.z, 0.0f, 0.6);
+    }
+
+    // Ground away from the deck (RD [-450, -400]) is covered.
+    for (float rdX = -515.0f; rdX < -340.0f; rdX += 10.0f)
+    {
+        for (float rdZ = -515.0f; rdZ < -340.0f; rdZ += 10.0f)
+        {
+            if (rdX > -460.0f && rdX < -390.0f && rdZ > -460.0f && rdZ < -390.0f)
+            {
+                continue;
+            }
+
+            const Vector3 probe = Wow(rdX, 0.0f, rdZ);
+            float nearest = 1e9f;
+
+            for (const auto& p : path)
+            {
+                nearest = std::min(nearest, std::hypot(p.x - probe.x, p.y - probe.y));
+            }
+
+            CHECK(nearest <= spacing);
+        }
+    }
+}
+
 TEST_CASE(Navigation_ExplorePolygonLimits)
 {
     EnsureClient();

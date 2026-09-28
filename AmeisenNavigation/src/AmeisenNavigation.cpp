@@ -3,6 +3,8 @@
 #include <cfloat>
 #include <cmath>
 
+#include <DetourNode.h>
+
 #ifdef _WIN32
 #include <excpt.h>
 #include <windows.h>
@@ -545,7 +547,9 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     const float snapExtents[3]{spacing * 0.5f, HEIGHT_QUERY_EXTENTS[1], spacing * 0.5f};
     const float minDistance = spacing * 0.25f;
     std::vector<Vector3> waypoints;
+    std::vector<dtPolyRef> waypointPolys;
     waypoints.reserve(samples.size());
+    waypointPolys.reserve(samples.size());
 
     for (const Vector3& sample : samples)
     {
@@ -566,6 +570,7 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
         }
 
         waypoints.push_back(wow);
+        waypointPolys.push_back(snapped.poly);
     }
 
     res.waypoints = static_cast<int>(waypoints.size());
@@ -579,16 +584,44 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     // path buffers may be the output.
     Path segment(Settings.maxPointPath);
     Vector3 current = startPosition;
+    const std::vector<int> order = Tour::Order(startPosition, waypoints);
+    std::vector<bool> unreachable(waypoints.size(), false);
 
-    for (const int index : Tour::Order(startPosition, waypoints))
+    for (size_t o = 0; o < order.size(); ++o)
     {
-        const Vector3& target = waypoints[static_cast<size_t>(index)];
+        const auto index = static_cast<size_t>(order[o]);
+
+        if (unreachable[index])
+        {
+            continue;
+        }
+
+        const Vector3& target = waypoints[index];
         bool partial = false;
 
-        if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, current, target, segment, nullptr, &partial)
-            || partial)
+        if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, current, target, segment, nullptr, &partial))
         {
-            continue; // unreachable from here (other island, blocked by the filter, ...)
+            continue;
+        }
+
+        if (partial)
+        {
+            // If the search neither found the target nor ran out of nodes, A* closed every polygon reachable
+            // from here, which (links are symmetric) is the component the whole route lives in. Waypoints
+            // outside of it can't be reached from anywhere on the route: skip them without searching again.
+            const dtNodePool* pool = ctx.query->getNodePool();
+
+            if (pool && pool->getNodeCount() < pool->getMaxNodes()
+                && !ctx.query->isInClosedList(waypointPolys[index]))
+            {
+                for (size_t k = o + 1; k < order.size(); ++k)
+                {
+                    const auto other = static_cast<size_t>(order[k]);
+                    unreachable[other] = unreachable[other] || !ctx.query->isInClosedList(waypointPolys[other]);
+                }
+            }
+
+            continue; // other island, blocked by the filter, ...
         }
 
         segment.ToWowCoords();
