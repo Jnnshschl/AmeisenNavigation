@@ -15,6 +15,7 @@ option(ANAV_ENABLE_OPENMP   "Use OpenMP for parallel tile loading/building"     
 option(ANAV_WARNINGS_AS_ERRORS "Treat compiler warnings in project code as errors"   OFF)
 option(ANAV_SANITIZE        "Build with address + undefined behavior sanitizers"     OFF)
 
+option(ANAV_USE_BUNDLED_STORMLIB "MSVC: link the prebuilt StormLib from dep/ instead of building it" ON)
 set(ANAV_STORMLIB_TAG "v9.31" CACHE STRING "StormLib git tag used when fetching it")
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
@@ -143,7 +144,8 @@ if(ANAV_BUILD_EXPORTER)
     set(ANAV_STORMLIB_TARGET "")
     set(ANAV_BUNDLED_STORMLIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/dep/StormLib)
 
-    if(MSVC AND EXISTS ${ANAV_BUNDLED_STORMLIB_DIR}/lib/x64/StormLibRUS.lib AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    if(ANAV_USE_BUNDLED_STORMLIB AND MSVC AND EXISTS ${ANAV_BUNDLED_STORMLIB_DIR}/lib/x64/StormLibRUS.lib
+       AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         # Prebuilt static StormLib shipped in dep/ (Unicode, static CRT not required).
         add_library(anav_stormlib STATIC IMPORTED)
         set_target_properties(anav_stormlib PROPERTIES
@@ -160,6 +162,7 @@ if(ANAV_BUILD_EXPORTER)
         set(STORM_SKIP_INSTALL ON CACHE BOOL "" FORCE)
         set(STORM_BUILD_TESTS OFF CACHE BOOL "" FORCE)
         set(STORM_USE_BUNDLED_LIBRARIES ON CACHE BOOL "" FORCE)
+        set(STORM_UNICODE ON CACHE BOOL "" FORCE)
         FetchContent_Declare(stormlib
             GIT_REPOSITORY https://github.com/ladislav-zezula/StormLib.git
             GIT_TAG ${ANAV_STORMLIB_TAG}
@@ -170,6 +173,10 @@ if(ANAV_BUILD_EXPORTER)
         FetchContent_MakeAvailable(stormlib)
         set(BUILD_SHARED_LIBS ${ANAV_SAVED_BUILD_SHARED_LIBS})
         target_include_directories(storm INTERFACE $<BUILD_INTERFACE:${stormlib_SOURCE_DIR}/src>)
+        if(WIN32)
+            # StormLib is built as Unicode (STORM_UNICODE), its TCHAR API must be seen as wchar_t by users too.
+            target_compile_definitions(storm INTERFACE UNICODE _UNICODE)
+        endif()
         set(ANAV_STORMLIB_TARGET storm)
     endif()
 

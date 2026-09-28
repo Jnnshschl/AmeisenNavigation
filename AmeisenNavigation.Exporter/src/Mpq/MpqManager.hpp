@@ -9,8 +9,9 @@
 
 #include "../../../AmeisenNavigation/src/Utils/Logger.hpp"
 
-#ifndef STORMLIB_NO_AUTO_LINK
-#define STORMLIB_NO_AUTO_LINK
+// Link StormLib explicitly (build system) instead of through StormLib.h's #pragma comment(lib).
+#ifndef __STORMLIB_NO_STATIC_LINK__
+#define __STORMLIB_NO_STATIC_LINK__
 #endif
 #include <StormLib.h>
 
@@ -67,7 +68,14 @@ public:
         {
             HANDLE mpq = nullptr;
 
-            if (SFileOpenArchive(archive.c_str(), 0, MPQ_OPEN_READ_ONLY, &mpq))
+            // TCHAR is wchar_t for Unicode builds of StormLib (Windows), char otherwise.
+#if defined(_WIN32) && defined(_UNICODE)
+            const std::wstring archiveName = archive.wstring();
+#else
+            const std::string archiveName = archive.string();
+#endif
+
+            if (SFileOpenArchive(archiveName.c_str(), 0, MPQ_OPEN_READ_ONLY, &mpq))
             {
                 Mpqs.push_back(mpq);
                 LogD("Opened MPQ: ", archive.string());

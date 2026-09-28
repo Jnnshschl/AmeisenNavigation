@@ -1,0 +1,144 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (${{ matrix.compiler }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - compiler: gcc
+            cc: gcc
+            cxx: g++
+          - compiler: clang
+            cc: clang
+            cxx: clang++
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build libomp-dev
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DANAV_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Upload binaries
+        if: matrix.compiler == 'gcc'
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmeisenNavigation-linux-x64
+          path: |
+            build/bin/AmeisenNavigation.Server
+            build/bin/AmeisenNavigation.Exporter
+
+  sanitizers:
+    name: Linux (ASan + UBSan)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DANAV_SANITIZE=ON
+          -DANAV_BUILD_EXPORTER=OFF -DANAV_ENABLE_LTO=OFF -DANAV_WARNINGS_AS_ERRORS=ON
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: ctest --test-dir build --output-on-failure
+
+  windows:
+    name: Windows (MSVC)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure
+        # StormLib is built from source here, the prebuilt dep/ library may come from a newer toolset.
+        run: cmake -S . -B build -A x64 -DANAV_USE_BUNDLED_STORMLIB=OFF
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: AmeisenNavigation-windows-x64
+          path: |
+            build/bin/Release/AmeisenNavigation.Server.exe
+            build/bin/Release/AmeisenNavigation.Exporter.exe
+
+  dotnet:
+    name: .NET client and tester
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Build client libraries
+        run: dotnet build AmeisenNavigation.Client/AmeisenNavigation.Client.csproj -c Release -warnaserror
+
+      - name: Build tester
+        run: dotnet build AmeisenNavigation.Tester/AmeisenNavigation.Tester.csproj -c Release
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, sanitizers, windows, dotnet]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Package
+        run: |
+          cd artifacts
+          chmod +x AmeisenNavigation-linux-x64/*
+          tar -czf AmeisenNavigation-linux-x64.tar.gz -C AmeisenNavigation-linux-x64 .
+          (cd AmeisenNavigation-windows-x64 && zip -r ../AmeisenNavigation-windows-x64.zip .)
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/AmeisenNavigation-linux-x64.tar.gz
+            artifacts/AmeisenNavigation-windows-x64.zip
+          generate_release_notes: true
