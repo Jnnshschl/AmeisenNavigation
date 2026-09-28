@@ -22,6 +22,7 @@
 #include "NavSources/INavSource.hpp"
 #include "NavSources/Mmap/MmapNavSource.hpp"
 #include "NavSources/Mmap/MmapQueryFilterProvider.hpp"
+#include "NavSources/NavMeshQueryPool.hpp"
 #include "Smoothing/BezierCurve.hpp"
 #include "Smoothing/CatmullRomSpline.hpp"
 #include "Smoothing/ChaikinCurve.hpp"
@@ -88,6 +89,7 @@ struct AmeisenNavigationSettings
     float waterCost = 1.6f;     // water and ocean
     float badLiquidCost = 4.0f; // lava and slime
     float roadCost = 0.75f;     // ANP roads (< 1 prefers roads)
+    size_t maxIdleQueriesPerMap = 0; // dtNavMeshQuery objects kept per map between requests, 0 = automatic
 };
 
 /// Details of an ExplorePolygon run.
@@ -119,6 +121,10 @@ class AmeisenNavigation
     mutable std::shared_mutex ClientsMutex;
     std::unordered_map<size_t, std::shared_ptr<AmeisenNavClient>> Clients;
 
+    // Query pools per map, created with the first request for a map and never removed (navmeshes aren't either).
+    mutable std::shared_mutex QueryPoolsMutex;
+    std::unordered_map<int, std::unique_ptr<NavMeshQueryPool>> QueryPools;
+
 public:
     explicit AmeisenNavigation(const AmeisenNavigationSettings& settings);
 
@@ -137,6 +143,9 @@ public:
 
     /// Load a map's navmesh now instead of on the first request. Returns false if it doesn't exist.
     bool PreloadMap(int mapId) noexcept;
+
+    /// dtNavMeshQuery objects created for a map so far (follows the peak number of concurrent requests).
+    size_t GetQueryCount(int mapId) const;
 
     /// Find a path from start to end. Returns true on success, populates path (WoW coordinates).
     /// If the end isn't reachable the path leads as close as possible and *partial is set to true.
@@ -182,9 +191,11 @@ public:
     void SmoothPathBezier(const Path& input, Path& output, int points) const noexcept;
 
 private:
+    /// Everything a request needs. Holds the leased query, keep it alive while the query is used.
     struct QueryContext
     {
         std::shared_ptr<AmeisenNavClient> client;
+        NavMeshQueryPool::Lease lease;
         dtNavMeshQuery* query = nullptr;
         const dtQueryFilter* filter = nullptr;
 
@@ -192,6 +203,9 @@ private:
     };
 
     QueryContext GetQueryContext(size_t clientId, int mapId);
+
+    /// The map's query pool, nullptr if the map has no navmesh.
+    NavMeshQueryPool* GetQueryPool(int mapId);
 
     /// Every position that reaches Detour goes through here or is checked with IsValidPosition first.
     static bool FindNearestPoly(const dtNavMeshQuery* query, const dtQueryFilter* filter, const Vector3& rdPosition,

@@ -13,6 +13,9 @@
 #include "../Utils/Path.hpp"
 #include "ClientState.hpp"
 
+/// Upper bound for area costs: big enough to effectively forbid an area, small enough that path costs stay finite.
+constexpr float MAX_AREA_COST = 1e6f;
+
 /// Area cost override sent by a client.
 struct AreaCost
 {
@@ -20,7 +23,8 @@ struct AreaCost
     float cost;
 };
 
-/// Per-connection navigation state: query objects per map, the active query filter and reusable buffers.
+/// Per-connection navigation state: the active query filter and reusable buffers. dtNavMeshQuery objects are
+/// not per client, requests lease them from the map's NavMeshQueryPool.
 ///
 /// A client is not thread-safe, it must only be used by one thread at a time (the server processes each
 /// connection's requests sequentially on that connection's thread).
@@ -32,9 +36,6 @@ class AmeisenNavClient
 
     // Per-client area cost overrides, empty = use the provider's default filter.
     std::optional<dtQueryFilter> CustomFilter;
-
-    // One dtNavMeshQuery per map (a query is bound to one navmesh).
-    std::unordered_map<int, NavMeshQueryPtr> NavMeshQueries;
 
     // Reusable buffers for path calculation.
     int PolyPathBufferSize;
@@ -51,7 +52,6 @@ public:
           State(ClientState::NORMAL),
           FilterProvider(filterProvider),
           CustomFilter(),
-          NavMeshQueries(),
           PolyPathBufferSize(std::max(polyPathBufferSize, 1)),
           StraightPathRefsSize(std::max(pointPathBufferSize, 1)),
           PolyPathBuffer(std::make_unique<dtPolyRef[]>(static_cast<size_t>(PolyPathBufferSize))),
@@ -73,14 +73,6 @@ public:
     {
         return CustomFilter ? &*CustomFilter : FilterProvider->Get(State);
     }
-
-    dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept
-    {
-        const auto it = NavMeshQueries.find(mapId);
-        return it != NavMeshQueries.end() ? it->second.get() : nullptr;
-    }
-
-    void SetNavmeshQuery(int mapId, NavMeshQueryPtr query) { NavMeshQueries[mapId] = std::move(query); }
 
     int GetPolyPathBufferSize() const noexcept { return PolyPathBufferSize; }
     dtPolyRef* GetPolyPathBuffer() noexcept { return PolyPathBuffer.get(); }
@@ -113,7 +105,7 @@ public:
         {
             // dtQueryFilter stores DT_MAX_AREAS costs, anything else would write out of bounds.
             // Non-positive/infinite costs would break the A* search.
-            if (areaId >= DT_MAX_AREAS || !std::isfinite(cost) || cost <= 0.0f)
+            if (areaId >= DT_MAX_AREAS || !std::isfinite(cost) || cost <= 0.0f || cost > MAX_AREA_COST)
             {
                 return false;
             }

@@ -719,39 +719,62 @@ AmeisenNavigation::QueryContext AmeisenNavigation::GetQueryContext(size_t client
         return {};
     }
 
-    // Fast path: the client already has a query for this map.
-    if ((ctx.query = ctx.client->GetNavmeshQuery(mapId)))
-    {
-        return ctx;
-    }
+    NavMeshQueryPool* pool = GetQueryPool(mapId);
 
-    dtNavMesh* navMesh = NavSource->Get(mapId);
-
-    if (!navMesh)
+    if (!pool)
     {
         LogD("[", clientId, "] No navmesh available for map ", mapId); // the nav source warned once
         return {};
     }
 
-    NavMeshQueryPtr query(dtAllocNavMeshQuery());
+    ctx.lease = pool->Acquire();
 
-    if (!query)
+    if (!ctx.lease)
     {
-        LogE("[", clientId, "] Failed to allocate dtNavMeshQuery for map ", mapId);
+        LogE("[", clientId, "] Failed to create a dtNavMeshQuery for map ", mapId);
         return {};
     }
 
-    const dtStatus status = query->init(navMesh, Settings.maxSearchNodes);
-
-    if (dtStatusFailed(status))
-    {
-        LogE("[", clientId, "] Failed to init dtNavMeshQuery for map ", mapId, ": 0x", std::format("{:08X}", status));
-        return {};
-    }
-
-    ctx.query = query.get();
-    ctx.client->SetNavmeshQuery(mapId, std::move(query));
+    ctx.query = ctx.lease.Get();
     return ctx;
+}
+
+NavMeshQueryPool* AmeisenNavigation::GetQueryPool(int mapId)
+{
+    {
+        std::shared_lock lock(QueryPoolsMutex);
+        const auto it = QueryPools.find(mapId);
+
+        if (it != QueryPools.end())
+        {
+            return it->second.get();
+        }
+    }
+
+    // Load outside the pool lock, loading a big map mustn't block requests for other maps.
+    const dtNavMesh* navMesh = NavSource->Get(mapId);
+
+    if (!navMesh)
+    {
+        return nullptr;
+    }
+
+    std::unique_lock lock(QueryPoolsMutex);
+    auto& pool = QueryPools[mapId];
+
+    if (!pool)
+    {
+        pool = std::make_unique<NavMeshQueryPool>(navMesh, Settings.maxSearchNodes, Settings.maxIdleQueriesPerMap);
+    }
+
+    return pool.get();
+}
+
+size_t AmeisenNavigation::GetQueryCount(int mapId) const
+{
+    std::shared_lock lock(QueryPoolsMutex);
+    const auto it = QueryPools.find(mapId);
+    return it != QueryPools.end() ? it->second->GetCreatedCount() : 0;
 }
 
 bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQueryFilter* filter,

@@ -1,6 +1,9 @@
 #include "TestFramework.hpp"
 
+#include <atomic>
 #include <cmath>
+#include <thread>
+#include <vector>
 
 #include "AmeisenNavigation.hpp"
 #include "TestWorld.hpp"
@@ -543,4 +546,55 @@ TEST_CASE(Navigation_RejectsInvalidCoordinatesAndMaps)
 
     // Still fine afterwards.
     CHECK(Navigation().GetPath(CLIENT, TestWorld::MAP_ID, valid, Wow(-200.0f, 0.0f, -300.0f), path));
+}
+
+TEST_CASE(Navigation_QueriesArePooledAcrossClients)
+{
+    // Own engine so the counts only include this test.
+    AmeisenNavigationSettings settings;
+    settings.meshFolder = TestWorld::Get().meshDir;
+    settings.useAnp = true;
+    settings.maxPointPath = 64;
+    AmeisenNavigation nav(settings);
+
+    const Vector3 start = Wow(-700.0f, 0.0f, -300.0f);
+    const Vector3 end = Wow(-200.0f, 0.0f, -300.0f);
+
+    // 50 clients one after another share a single query (used to be one ~2.7 MB node pool per client and map).
+    for (size_t c = 100; c < 150; ++c)
+    {
+        REQUIRE(nav.NewClient(c));
+        Path path(64);
+        REQUIRE(nav.GetPath(c, TestWorld::MAP_ID, start, end, path));
+    }
+
+    CHECK_EQ(nav.GetQueryCount(TestWorld::MAP_ID), size_t{1});
+    CHECK_EQ(nav.GetQueryCount(4242), size_t{0});
+
+    // Concurrent requests get their own queries, at most one per concurrently running request.
+    constexpr int threads = 8;
+    std::atomic<int> failures{0};
+    std::vector<std::thread> workers;
+
+    for (int t = 0; t < threads; ++t)
+    {
+        workers.emplace_back([&, t] {
+            const size_t client = 1000 + static_cast<size_t>(t);
+            nav.NewClient(client);
+            Path path(64);
+
+            for (int i = 0; i < 25; ++i)
+            {
+                failures += nav.GetPath(client, TestWorld::MAP_ID, start, end, path) ? 0 : 1;
+            }
+        });
+    }
+
+    for (auto& worker : workers)
+    {
+        worker.join();
+    }
+
+    CHECK_EQ(failures.load(), 0);
+    CHECK(nav.GetQueryCount(TestWorld::MAP_ID) <= static_cast<size_t>(threads) + 1);
 }
