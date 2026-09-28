@@ -1,16 +1,17 @@
 #pragma once
 
 #include <algorithm>
+#include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-
 #include "Tri.hpp"
 #include "Vector3.hpp"
 
-
+/// Triangle soup (RD coordinates) with one area id per triangle. Used for per-ADT extraction and the merged map.
 struct Structure
 {
     std::mutex mutex;
@@ -34,7 +35,9 @@ struct Structure
     inline void Append(const Structure& other) noexcept
     {
         const int triOffset = static_cast<int>(verts.size());
-        verts.append_range(other.verts);
+        verts.insert(verts.end(), other.verts.begin(), other.verts.end());
+        tris.reserve(tris.size() + other.tris.size());
+        triTypes.reserve(triTypes.size() + other.triTypes.size());
 
         for (size_t i = 0; i < other.tris.size(); ++i)
         {
@@ -150,10 +153,8 @@ struct Structure
 
     inline void ExportDebugObjFile(const char* filePath) noexcept
     {
-        std::fstream objFstream;
-        objFstream << std::fixed << std::showpoint;
-        objFstream << std::setprecision(8);
-        objFstream.open(filePath, std::fstream::out);
+        std::ofstream objFstream(filePath);
+        objFstream << std::fixed << std::showpoint << std::setprecision(8);
 
         for (const auto& v3 : verts)
         {
@@ -166,5 +167,29 @@ struct Structure
         }
 
         objFstream.close();
+    }
+
+    /// Recompute bbMin/bbMax from the vertices.
+    inline void ComputeBounds() noexcept
+    {
+        if (verts.empty())
+        {
+            return;
+        }
+
+        for (int i = 0; i < 3; ++i)
+        {
+            bbMin[i] = verts[0].pos[i];
+            bbMax[i] = verts[0].pos[i];
+        }
+
+        for (const auto& v : verts)
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                bbMin[i] = std::min(bbMin[i], v.pos[i]);
+                bbMax[i] = std::max(bbMax[i], v.pos[i]);
+            }
+        }
     }
 };

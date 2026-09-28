@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstdint>
+
+#include "../Utils/Vector3.hpp"
 #include "Mver.hpp"
 #include "../Utils/Misc.hpp"
 
@@ -110,4 +113,19 @@ public:
     inline const MONR* Monr() const noexcept { return GetSubChunk(Data, Size, MONR); }
     inline const MOPY* Mopy() const noexcept { return GetSubChunk(Data, Size, MOPY); }
     inline const MLIQ* Mliq() const noexcept { return GetSubChunk(Data, Size, MLIQ); }
+
+    /// True if the MLIQ vertex grid and flag array fit into the chunk and the grid covers width x height quads.
+    inline bool LiquidInBounds(const MLIQ* mliq) const noexcept
+    {
+        if (!mliq || mliq->width >= mliq->countXVertices || mliq->height >= mliq->countYVertices)
+        {
+            return false;
+        }
+
+        const uint64_t required = sizeof(MLIQ)
+                                  + static_cast<uint64_t>(mliq->countXVertices) * mliq->countYVertices * sizeof(MLIQVert)
+                                  + static_cast<uint64_t>(mliq->width) * mliq->height;
+        const uint64_t available = Size - static_cast<uint64_t>(reinterpret_cast<const unsigned char*>(mliq) - Data);
+        return required <= 8ull + mliq->size && required <= available;
+    }
 };

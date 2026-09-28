@@ -1,63 +1,52 @@
 #pragma once
 
-#include <format>
-#include <memory>
-#include <mutex>
-#include <shared_mutex>
+#include <chrono>
+#include <filesystem>
 
+#include "../../../../AmeisenNavigation.Pack/src/Anp.hpp"
+#include "../../Utils/Logger.hpp"
 #include "../INavSource.hpp"
 
-#include "../../AmeisenNavigation.Pack/src/Anp.hpp"
-
+/// Loads ANP navmeshes ("{mapId:03}.anp") exported by AmeisenNavigation.Exporter.
 class AnpNavSource : public INavSource
 {
-    const std::filesystem::path MmapFolder;
-    std::unordered_map<size_t, std::unique_ptr<Anp>> NavMeshMap;
-    mutable std::shared_mutex MapMutex;
+    const std::filesystem::path MeshFolder;
+    NavMeshCache Cache;
 
 public:
-    AnpNavSource(const char* mmapFolder) : MmapFolder(mmapFolder), NavMeshMap{} {}
+    explicit AnpNavSource(const std::filesystem::path& meshFolder) : MeshFolder(meshFolder) {}
 
-    ~AnpNavSource() = default;
-
-    virtual dtNavMesh* Get(size_t mapId) noexcept override
+    dtNavMesh* Get(int mapId) noexcept override
     {
-        try
-        {
-            // Fast path: shared lock for cache hits (concurrent reads)
+        return Cache.GetOrLoad(mapId, [this](int id) -> NavMeshPtr {
+            const auto anpPath = MeshFolder / Anp::FileName(id);
+
+            if (!std::filesystem::exists(anpPath))
             {
-                std::shared_lock readLock(MapMutex);
-                auto it = NavMeshMap.find(mapId);
-                if (it != NavMeshMap.end() && it->second)
-                    return it->second->GetNavmesh();
-            }
-
-            // Slow path: exclusive lock for loading
-            std::unique_lock writeLock(MapMutex);
-
-            // Double-check after acquiring exclusive lock
-            auto it = NavMeshMap.find(mapId);
-            if (it != NavMeshMap.end() && it->second)
-                return it->second->GetNavmesh();
-
-            // Check for nullptr sentinel (already tried and failed)
-            if (it != NavMeshMap.end())
+                LogW("No navmesh for map ", id, " (missing ", anpPath.string(), ")");
                 return nullptr;
-
-            std::filesystem::path anpPath = MmapFolder;
-            anpPath.append(std::format("{:03}.anp", mapId));
-
-            if (std::filesystem::exists(anpPath))
-            {
-                NavMeshMap[mapId] = std::make_unique<Anp>(anpPath.string().c_str());
-                auto& anp = NavMeshMap[mapId];
-                return anp ? anp->GetNavmesh() : nullptr;
             }
 
-            // Insert nullptr sentinel so we don't retry missing files
-            NavMeshMap[mapId] = nullptr;
-            return nullptr;
-        }
-        catch (...) { return nullptr; }
+            const auto start = std::chrono::steady_clock::now();
+            auto result = Anp::Load(anpPath);
+
+            if (!result.navMesh)
+            {
+                return nullptr;
+            }
+
+            if (result.mapId != id)
+            {
+                LogW(anpPath.string(), " contains mapId ", result.mapId, ", expected ", id);
+            }
+
+            const auto ms =
+                std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+            LogI("Loaded map ", id, ": ", result.tilesLoaded, " tiles", result.tilesRejected ? " (" : "",
+                 result.tilesRejected ? std::to_string(result.tilesRejected) + " rejected)" : std::string(), " in ",
+                 ms, "ms");
+
+            return std::move(result.navMesh);
+        });
     }
 };

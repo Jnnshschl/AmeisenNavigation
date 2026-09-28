@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstring>
+
 #include "Mver.hpp"
 
 constexpr auto WDT_MAP_SIZE = 64;
@@ -31,6 +33,13 @@ class Wdt
     unsigned int Size;
 
 public:
+    /// MVER + MPHD + MAIN present.
+    inline bool IsValid() const noexcept
+    {
+        return Data && Size >= sizeof(MVER) + sizeof(MPHD) + sizeof(MAIN)
+               && std::memcmp(Data + sizeof(MVER) + sizeof(MPHD), "NIAM", 4) == 0;
+    }
+
     inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
     inline const MPHD* Mphd() const noexcept { return reinterpret_cast<MPHD*>(Data + sizeof(MVER)); };
     inline const MAIN* Main() const noexcept { return reinterpret_cast<MAIN*>(Data + sizeof(MVER) + sizeof(MPHD)); };

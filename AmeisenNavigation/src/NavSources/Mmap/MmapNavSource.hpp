@@ -1,201 +1,247 @@
 #pragma once
 
+#include <array>
+#include <chrono>
+#include <cstring>
 #include <filesystem>
+#include <format>
 #include <fstream>
-#include <map>
-#include <mutex>
-#include <unordered_map>
+#include <regex>
+#include <string>
+#include <vector>
 
-#include "../INavSource.hpp"
 #include "../../Utils/Logger.hpp"
+#include "../INavSource.hpp"
 #include "MmapFormat.hpp"
 #include "MmapTileHeader.hpp"
 
+/// Loads TrinityCore/SkyFire style MMAPs (one .mmap with dtNavMeshParams + one .mmtile per tile).
 class MmapNavSource : public INavSource
 {
-	std::filesystem::path MmapFolder;
-	MmapFormat Format;
-	std::mutex MapInsertMutex; // protects NavMeshMap structural modifications (insert/find)
-	std::unordered_map<size_t, std::pair<std::mutex, dtNavMesh*>> NavMeshMap;
-
-	std::map<MmapFormat, std::pair<std::string_view, std::string_view>> MmapFormatPatterns
-	{
-		{ MmapFormat::TC335A, std::make_pair("{:03}.mmap", "{:03}{:02}{:02}.mmtile") },
-		{ MmapFormat::SF548, std::make_pair("{:04}.mmap", "{:04}_{:02}_{:02}.mmtile") },
-	};
-
 public:
-	MmapNavSource(const char* mmapFolder, MmapFormat format = MmapFormat::UNKNOWN)
-		: MmapFolder(mmapFolder),
-		Format(format),
-		NavMeshMap{}
-	{
-		if (format == MmapFormat::UNKNOWN)
-		{
-			Format = TryDetectMmapFormat();
-		}
-	}
-
-	~MmapNavSource()
-	{
-		for (auto& [id, mtxNavMesh] : NavMeshMap)
-		{
-			const std::lock_guard lock(mtxNavMesh.first);
-
-			if (mtxNavMesh.second)
-			{
-				dtFreeNavMesh(mtxNavMesh.second);
-			}
-		}
-	}
-
-	constexpr inline MmapFormat GetFormat() const noexcept { return Format; }
-
-	virtual dtNavMesh* Get(size_t mapId) noexcept override
-	{
-		try
-		{
-			LoadMmaps(mapId);
-			const std::lock_guard<std::mutex> insertLock(MapInsertMutex);
-			auto it = NavMeshMap.find(mapId);
-			return it != NavMeshMap.end() ? it->second.second : nullptr;
-		}
-		catch (...) { return nullptr; }
-	}
+    struct Patterns
+    {
+        std::string mmap;   // std::format pattern, arg 0 = mapId
+        std::string mmtile; // std::format pattern, args: mapId, x, y
+    };
 
 private:
-	bool LoadMmaps(size_t mapId) noexcept
-	{
-		try {
-		// Ensure the map entry exists under the insert mutex before locking the per-map mutex.
-		{
-			const std::lock_guard<std::mutex> insertLock(MapInsertMutex);
-			NavMeshMap[mapId]; // default-constructs entry if absent
-		}
+    static constexpr int TILE_GRID_SIZE = 64;
 
-		const std::lock_guard<std::mutex> lock(NavMeshMap[mapId].first);
+    /// Tile data allocated with dtAlloc, ownership moves into the navmesh (DT_TILE_FREE_DATA).
+    struct TileBlob
+    {
+        unsigned char* data = nullptr;
+        int size = 0;
+    };
 
-		if (NavMeshMap[mapId].second) { return true; }
+    std::filesystem::path MmapFolder;
+    MmapFormat Format;
+    Patterns FilePatterns;
+    NavMeshCache Cache;
 
-		if (!MmapFormatPatterns.contains(Format))
-			return false;
+public:
+    explicit MmapNavSource(const std::filesystem::path& mmapFolder, MmapFormat format = MmapFormat::UNKNOWN,
+                           const Patterns& customPatterns = {})
+        : MmapFolder(mmapFolder),
+          Format(format == MmapFormat::UNKNOWN ? DetectFormat(mmapFolder) : format)
+    {
+        if (Format == MmapFormat::CUSTOM)
+        {
+            FilePatterns = customPatterns;
+        }
+        else if (const auto* patterns = GetPatterns(Format))
+        {
+            FilePatterns = *patterns;
+        }
 
-		const auto& filenameFormat = MmapFormatPatterns.at(Format);
+        if (Format == MmapFormat::UNKNOWN)
+        {
+            LogW("Could not detect the MMAP format in \"", mmapFolder.string(), "\", no maps will be available");
+        }
+    }
 
-		std::filesystem::path mmapFile(MmapFolder);
-		const int mid = static_cast<int>(mapId);
-		std::string filename = std::vformat(filenameFormat.first, std::make_format_args(mid));
-		mmapFile.append(filename);
+    MmapFormat GetFormat() const noexcept { return Format; }
 
-		if (!std::filesystem::exists(mmapFile))
-		{
-			return false;
-		}
+    static const Patterns* GetPatterns(MmapFormat format) noexcept
+    {
+        static const Patterns tc335a{"{:03}.mmap", "{:03}{:02}{:02}.mmtile"};
+        static const Patterns sf548{"{:04}.mmap", "{:04}_{:02}_{:02}.mmtile"};
 
-		std::ifstream mmapStream;
-		mmapStream.open(mmapFile, std::ifstream::binary);
+        switch (format)
+        {
+            case MmapFormat::TC335A: return &tc335a;
+            case MmapFormat::SF548: return &sf548;
+            default: return nullptr;
+        }
+    }
 
-		dtNavMeshParams params{};
-		mmapStream.read(reinterpret_cast<char*>(&params), sizeof(dtNavMeshParams));
-		mmapStream.close();
+    /// Detect the naming scheme by looking at the .mmtile files in the folder.
+    static MmapFormat DetectFormat(const std::filesystem::path& folder) noexcept
+    {
+        try
+        {
+            static const std::regex tc335a(R"(^\d{7}\.mmtile$)", std::regex::icase);
+            static const std::regex sf548(R"(^\d{4}_\d{2}_\d{2}\.mmtile$)", std::regex::icase);
 
-		NavMeshMap[mapId].second = dtAllocNavMesh();
+            std::error_code ec;
 
-		if (!NavMeshMap[mapId].second)
-		{
-			return false;
-		}
+            for (const auto& entry : std::filesystem::directory_iterator(folder, ec))
+            {
+                const auto name = entry.path().filename().string();
 
-		dtStatus initStatus = NavMeshMap[mapId].second->init(&params);
+                if (std::regex_match(name, tc335a))
+                {
+                    return MmapFormat::TC335A;
+                }
 
-		if (dtStatusFailed(initStatus))
-		{
-			dtFreeNavMesh(NavMeshMap[mapId].second);
-			return false;
-		}
+                if (std::regex_match(name, sf548))
+                {
+                    return MmapFormat::SF548;
+                }
+            }
+        }
+        catch (...)
+        {
+        }
 
-        constexpr int TILE_GRID_SIZE = 64;
+        return MmapFormat::UNKNOWN;
+    }
 
-#pragma omp parallel for schedule(dynamic)
-		for (int i = 0; i < TILE_GRID_SIZE * TILE_GRID_SIZE; ++i)
-		{
-			const auto x = i / TILE_GRID_SIZE;
-			const auto y = i % TILE_GRID_SIZE;
+    dtNavMesh* Get(int mapId) noexcept override
+    {
+        return Cache.GetOrLoad(mapId, [this](int id) { return Load(id); });
+    }
 
-			std::filesystem::path mmapTileFile(MmapFolder);
-			mmapTileFile.append(std::vformat(filenameFormat.second, std::make_format_args(mid, x, y)));
+private:
+    NavMeshPtr Load(int mapId) const
+    {
+        if (FilePatterns.mmap.empty() || FilePatterns.mmtile.empty())
+        {
+            return nullptr;
+        }
 
-			if (!std::filesystem::exists(mmapTileFile))
-			{
-				continue;
-			}
+        const auto start = std::chrono::steady_clock::now();
+        const auto mmapFile = MmapFolder / std::vformat(FilePatterns.mmap, std::make_format_args(mapId));
 
+        dtNavMeshParams params{};
 
-			std::ifstream mmapTileStream;
-			mmapTileStream.open(mmapTileFile, std::ifstream::binary);
+        {
+            std::ifstream stream(mmapFile, std::ios::binary);
 
-			MmapTileHeader mmapTileHeader{};
-			mmapTileStream.read(reinterpret_cast<char*>(&mmapTileHeader), sizeof(MmapTileHeader));
+            if (!stream.is_open())
+            {
+                LogW("No navmesh for map ", mapId, " (missing ", mmapFile.string(), ")");
+                return nullptr;
+            }
 
-			if (mmapTileHeader.mmapMagic != MMAP_MAGIC)
-			{
-				continue;
-			}
+            if (!stream.read(reinterpret_cast<char*>(&params), sizeof(params)))
+            {
+                LogE("Truncated mmap file: ", mmapFile.string());
+                return nullptr;
+            }
+        }
 
-			if (mmapTileHeader.mmapVersion < MMAP_VERSION)
-			{
-				continue;
-			}
+        NavMeshPtr navMesh(dtAllocNavMesh());
 
-			void* mmapTileData = malloc(mmapTileHeader.size);
-			if (!mmapTileData)
-			{
-				continue;
-			}
-			mmapTileStream.read(static_cast<char*>(mmapTileData), mmapTileHeader.size);
-			mmapTileStream.close();
+        if (!navMesh || dtStatusFailed(navMesh->init(&params)))
+        {
+            LogE("Failed to init navmesh for map ", mapId, " from ", mmapFile.string());
+            return nullptr;
+        }
 
-#pragma omp critical(addMmapTile)
-			{
-				dtStatus addTileStatus = NavMeshMap[mapId].second->addTile
-				(
-					static_cast<unsigned char*>(mmapTileData),
-					mmapTileHeader.size,
-					DT_TILE_FREE_DATA,
-					0,
-					nullptr
-				);
+        std::vector<TileBlob> tiles(TILE_GRID_SIZE * TILE_GRID_SIZE);
+        const std::string tilePattern = FilePatterns.mmtile;
 
-				if (dtStatusFailed(addTileStatus))
-				{
-					free(mmapTileData);
-				}
-			}
-		}
+        // File I/O is the bottleneck, read tiles in parallel and add them sequentially afterwards.
+#pragma omp parallel for schedule(dynamic, 16)
+        for (int i = 0; i < TILE_GRID_SIZE * TILE_GRID_SIZE; ++i)
+        {
+            const int x = i / TILE_GRID_SIZE;
+            const int y = i % TILE_GRID_SIZE;
 
-		return true;
-		} catch (const std::exception& e) { LogE("LoadMmaps failed: ", e.what()); return false; }
-		  catch (...) { LogE("LoadMmaps failed: unknown exception"); return false; }
-	}
+            try
+            {
+                const auto tileFile =
+                    MmapFolder / std::vformat(tilePattern, std::make_format_args(mapId, x, y));
+                tiles[static_cast<size_t>(i)] = ReadTile(tileFile);
+            }
+            catch (...)
+            {
+            }
+        }
 
-	inline MmapFormat TryDetectMmapFormat() noexcept
-	{
-		try
-		{
-			int zero = 0;
-			int twentyseven = 27;
-			auto args = std::make_format_args(zero, twentyseven, twentyseven);
+        int loaded = 0;
+        int rejected = 0;
 
-			for (const auto& [format, pattern] : MmapFormatPatterns)
-			{
-				if (std::filesystem::exists(MmapFolder / std::vformat(pattern.second, args)))
-				{
-					return format;
-				}
-			}
-		}
-		catch (...) {}
+        for (auto& [data, size] : tiles)
+        {
+            if (!data)
+            {
+                continue;
+            }
 
-		return MmapFormat::UNKNOWN;
-	}
+            if (dtStatusSucceed(navMesh->addTile(data, size, DT_TILE_FREE_DATA, 0, nullptr)))
+            {
+                loaded++;
+            }
+            else
+            {
+                rejected++;
+                dtFree(data);
+            }
+        }
+
+        const auto ms =
+            std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - start).count();
+        LogI("Loaded map ", mapId, ": ", loaded, " tiles", rejected ? std::format(" ({} rejected)", rejected) : "",
+             " in ", ms, "ms");
+
+        return navMesh;
+    }
+
+    static TileBlob ReadTile(const std::filesystem::path& tileFile) noexcept
+    {
+        std::ifstream stream(tileFile, std::ios::binary | std::ios::ate);
+
+        if (!stream.is_open())
+        {
+            return {};
+        }
+
+        const auto fileSize = static_cast<std::streamoff>(stream.tellg());
+        stream.seekg(0);
+
+        MmapTileHeader header{};
+
+        if (fileSize < static_cast<std::streamoff>(sizeof(header))
+            || !stream.read(reinterpret_cast<char*>(&header), sizeof(header)))
+        {
+            return {};
+        }
+
+        if (header.mmapMagic != MMAP_MAGIC || header.dtVersion != static_cast<uint32_t>(DT_NAVMESH_VERSION)
+            || header.mmapVersion < MMAP_VERSION || header.size == 0
+            || static_cast<std::streamoff>(header.size) > fileSize - static_cast<std::streamoff>(sizeof(header)))
+        {
+            LogW("Skipping invalid mmtile: ", tileFile.string());
+            return {};
+        }
+
+        auto* data = static_cast<unsigned char*>(dtAlloc(header.size, DT_ALLOC_PERM));
+
+        if (!data)
+        {
+            return {};
+        }
+
+        if (!stream.read(reinterpret_cast<char*>(data), header.size) || !ValidateTileData(data, header.size))
+        {
+            LogW("Skipping corrupt mmtile: ", tileFile.string());
+            dtFree(data);
+            return {};
+        }
+
+        return {data, static_cast<int>(header.size)};
+    }
 };

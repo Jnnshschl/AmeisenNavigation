@@ -1,10 +1,13 @@
 #pragma once
 
+#include <cstring>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <string>
 #include <unordered_map>
 
-#include <Utils/Logger.hpp>
+#include "../../../AmeisenNavigation/src/Utils/Logger.hpp"
 
 #define XXH_STATIC_LINKING_ONLY
 #define XXH_IMPLEMENTATION
@@ -12,75 +15,117 @@
 
 #include "MpqManager.hpp"
 
-/// Matches the binary layout of file wrapper classes (Dbc, Wdt, Adt, Wmo, M2, etc.)
-/// which all start with: unsigned char* Data; unsigned int Size;
-/// This struct is what GetFileContent<T> actually returns a pointer to.
+/// Matches the binary layout of the file wrapper classes (Dbc, Wdt, Adt, Wmo, M2, ...) which all start with:
+///   unsigned char* Data; unsigned int Size;
+/// GetFileContent<T> returns a pointer to such an entry reinterpreted as T*.
 struct CachedFileEntry
 {
     unsigned char* Data;
     unsigned int Size;
 };
 
-class CachedFileReader
+/// A file read without caching (e.g. ADTs, each is only needed once). Keeps the buffer alive.
+struct UncachedFile
 {
-    MpqManager* Mpq;
-    std::shared_mutex CacheMutex;
-    std::unordered_map<XXH64_hash_t, CachedFileEntry> Cache;
+    MpqFile file;
+    CachedFileEntry entry{nullptr, 0};
 
-public:
-    explicit CachedFileReader(MpqManager* mpqManager) noexcept
-        : Mpq(mpqManager),
-        CacheMutex(),
-        Cache()
-    {}
-
-    /// Returns a pointer to a cached file entry, reinterpreted as T*.
-    /// T must have layout-compatible first two members: unsigned char* Data; unsigned int Size;
-    /// (e.g., Dbc, Wdt, Adt, Wmo, M2).
-    template<typename T>
-    inline T* GetFileContent(const char* filename) noexcept
+    template <typename T>
+    T* As() noexcept
     {
-        const auto hash = XXH3_64bits(filename, strlen(filename));
-
-        // Fast path: shared lock for cache hits (concurrent reads)
-        {
-            std::shared_lock readLock(CacheMutex);
-            auto it = Cache.find(hash);
-            if (it != Cache.end())
-            {
-                return it->second.Data && it->second.Size > 0 ? reinterpret_cast<T*>(&it->second) : nullptr;
-            }
-        }
-
-        // Slow path: exclusive lock for cache misses
-        std::unique_lock writeLock(CacheMutex);
-
-        // Double-check after acquiring exclusive lock
-        auto it = Cache.find(hash);
-        if (it != Cache.end())
-        {
-            return it->second.Data && it->second.Size > 0 ? reinterpret_cast<T*>(&it->second) : nullptr;
-        }
-
-        unsigned int size = 0;
-        if (unsigned char* ptr = Mpq->GetFileContent(filename, size))
-        {
-            Cache[hash] = CachedFileEntry{ptr, size};
-        }
-        else
-        {
-            LogW("Failed to load MPQ file: ", filename);
-            Cache[hash] = CachedFileEntry{nullptr, 0};
-        }
-
-        auto& entry = Cache[hash];
         return entry.Data && entry.Size > 0 ? reinterpret_cast<T*>(&entry) : nullptr;
     }
+};
 
-    inline void Clear() noexcept
+/// Thread-safe MPQ file cache. Files shared by many ADTs (WMOs, M2s, DBCs) are read once and kept until Clear().
+class CachedFileReader
+{
+    struct Slot
     {
-        // Don't delete the buffers here - MpqManager owns the memory
-        // (it tracks all allocations and frees them in its destructor).
+        std::unique_ptr<unsigned char[]> buffer;
+        CachedFileEntry entry{nullptr, 0};
+    };
+
+    MpqManager* Mpq;
+    std::shared_mutex CacheMutex;
+    std::mutex MpqMutex; // StormLib handles are not thread-safe
+    std::unordered_map<XXH64_hash_t, std::unique_ptr<Slot>> Cache;
+
+public:
+    explicit CachedFileReader(MpqManager* mpqManager) noexcept : Mpq(mpqManager) {}
+
+    /// Returns the cached file reinterpreted as T* (T must start with `unsigned char* Data; unsigned int Size;`),
+    /// or nullptr if the file doesn't exist. Pointers stay valid until Clear().
+    template <typename T>
+    T* GetFileContent(const char* filename) noexcept
+    {
+        try
+        {
+            const auto hash = XXH3_64bits(filename, std::strlen(filename));
+
+            {
+                std::shared_lock readLock(CacheMutex);
+                const auto it = Cache.find(hash);
+
+                if (it != Cache.end())
+                {
+                    return AsType<T>(*it->second);
+                }
+            }
+
+            // Read outside the cache lock so cache hits of other threads aren't blocked by MPQ I/O.
+            auto slot = std::make_unique<Slot>();
+
+            {
+                MpqFile file = ReadFromMpq(filename);
+
+                if (file)
+                {
+                    slot->entry = {file.data.get(), file.size};
+                    slot->buffer = std::move(file.data);
+                }
+                else
+                {
+                    LogD("File not found in MPQs: ", filename);
+                }
+            }
+
+            std::unique_lock writeLock(CacheMutex);
+            const auto [it, inserted] = Cache.try_emplace(hash, std::move(slot));
+            return AsType<T>(*it->second);
+        }
+        catch (...)
+        {
+            return nullptr;
+        }
+    }
+
+    /// Read a file without caching it.
+    UncachedFile ReadUncached(const char* filename) noexcept
+    {
+        UncachedFile result;
+        result.file = ReadFromMpq(filename);
+        result.entry = {result.file.data.get(), result.file.size};
+        return result;
+    }
+
+    /// Free all cached files. Pointers returned by GetFileContent become invalid.
+    void Clear() noexcept
+    {
+        std::unique_lock writeLock(CacheMutex);
         Cache.clear();
+    }
+
+private:
+    template <typename T>
+    static T* AsType(Slot& slot) noexcept
+    {
+        return slot.entry.Data && slot.entry.Size > 0 ? reinterpret_cast<T*>(&slot.entry) : nullptr;
+    }
+
+    MpqFile ReadFromMpq(const char* filename) noexcept
+    {
+        std::lock_guard lock(MpqMutex);
+        return Mpq->ReadFile(filename);
     }
 };

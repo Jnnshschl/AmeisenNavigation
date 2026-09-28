@@ -1,5 +1,8 @@
 #pragma once
 
+#include <cstring>
+
+#include "../Utils/Vector3.hpp"
 #include "Mver.hpp"
 #include "../Utils/Misc.hpp"
 
@@ -71,6 +74,12 @@ struct Wmo
     unsigned int Size;
 
 public:
+    /// MVER + MOHD header present.
+    inline bool IsValid() const noexcept
+    {
+        return Data && Size >= sizeof(MVER) + sizeof(MOHD) && std::memcmp(Data + sizeof(MVER), "DHOM", 4) == 0;
+    }
+
     inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
     inline const MOHD* Mohd() const noexcept { return reinterpret_cast<MOHD*>(Data + sizeof(MVER)); };
     inline const MODS* Mods() const noexcept { return GetSubChunk(Data, Size, MODS); }

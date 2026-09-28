@@ -148,6 +148,8 @@
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClInclude Include="src\Anp.hpp" />
+    <ClInclude Include="src\AnpFormat.hpp" />
+    <ClInclude Include="src\DetourUtils.hpp" />
     <ClInclude Include="src\miniz\miniz.h" />
   </ItemGroup>
   <ItemGroup>

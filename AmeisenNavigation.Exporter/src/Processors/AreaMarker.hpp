@@ -4,7 +4,7 @@
 #include <cmath>
 #include <cstdint>
 
-#include "../../../recastnavigation/Recast/Include/Recast.h"
+#include <Recast.h>
 
 #include "../Utils/CityMap.hpp"
 #include "../Utils/FactionMap.hpp"
@@ -14,250 +14,170 @@
 
 // ─────────────────────────────────────────────
 // Area marking functions for compact heightfields.
-// Each function marks spans with specific area IDs
-// based on spatial queries against data maps.
+// Each function marks spans with specific area IDs based on spatial queries against the data maps.
+// Only the rects overlapping the heightfield are visited (spatial index), so the cost per sub-tile
+// is independent of the map size.
 // ─────────────────────────────────────────────
 
-/// Mark spans that fall within water rectangles with the appropriate liquid area ID.
-/// Uses direct rect-to-cell mapping: iterates water rects and directly computes which
-/// compact heightfield cells they cover. This is more robust than per-cell WaterMap
-/// queries because it eliminates all spatial index / lookup failure modes.
-///
-/// Must be called AFTER rcErodeWalkableArea/rcMedianFilterWalkableArea to restore
-/// water areas that were cleared by erosion or median filter at boundaries.
-inline void MarkWaterAreas(rcCompactHeightfield* chf, const WaterMap* waterMap, int stX, int stY, bool debug,
-                           rcContext* ctx) noexcept
+namespace AreaMarkerDetail {
+/// Cell range of the heightfield covered by an RD rect (clamped to the heightfield).
+struct CellRange
 {
-    if (!waterMap || waterMap->rects.empty())
-        return;
+    int minX, maxX, minZ, maxZ;
 
-    int dbgRectOverlap = 0, dbgMarked = 0;
+    bool Empty() const noexcept { return minX > maxX || minZ > maxZ; }
+};
+
+inline CellRange ToCellRange(const rcCompactHeightfield* chf, const RdRect& rect) noexcept
+{
+    return {std::max(0, static_cast<int>(std::floor((rect.minX - chf->bmin[0]) / chf->cs))),
+            std::min(chf->width - 1, static_cast<int>(std::floor((rect.maxX - chf->bmin[0]) / chf->cs))),
+            std::max(0, static_cast<int>(std::floor((rect.minZ - chf->bmin[2]) / chf->cs))),
+            std::min(chf->height - 1, static_cast<int>(std::floor((rect.maxZ - chf->bmin[2]) / chf->cs)))};
+}
+
+/// Visit every rect of the map overlapping the heightfield.
+template <typename Map, typename Fn>
+void ForEachOverlappingRect(const rcCompactHeightfield* chf, const Map* map, Fn&& fn)
+{
+    if (!map || map->rects.empty())
+    {
+        return;
+    }
 
     const float hfMaxX = chf->bmin[0] + chf->width * chf->cs;
     const float hfMaxZ = chf->bmin[2] + chf->height * chf->cs;
+    map->Query(chf->bmin[0], chf->bmin[2], hfMaxX, hfMaxZ, std::forward<Fn>(fn));
+}
 
-    for (const auto& rect : waterMap->rects)
+/// Visit every span index of the cells covered by the rect.
+template <typename Fn>
+void ForEachSpan(const rcCompactHeightfield* chf, const RdRect& rect, Fn&& fn)
+{
+    const CellRange range = ToCellRange(chf, rect);
+
+    if (range.Empty())
     {
-        // Skip rects that don't overlap with this sub-tile's heightfield
-        if (rect.maxX < chf->bmin[0] || rect.minX > hfMaxX || rect.maxZ < chf->bmin[2] || rect.minZ > hfMaxZ)
-            continue;
+        return;
+    }
 
-        dbgRectOverlap++;
-
-        // Compute cell range covered by this rect (direct mapping, no spatial index)
-        int minCX = std::max(0, static_cast<int>(floorf((rect.minX - chf->bmin[0]) / chf->cs)));
-        int maxCX = std::min(chf->width - 1, static_cast<int>(floorf((rect.maxX - chf->bmin[0]) / chf->cs)));
-        int minCZ = std::max(0, static_cast<int>(floorf((rect.minZ - chf->bmin[2]) / chf->cs)));
-        int maxCZ = std::min(chf->height - 1, static_cast<int>(floorf((rect.maxZ - chf->bmin[2]) / chf->cs)));
-
-        // Use max water height of the rect's 4 corners + tolerance.
-        // Tolerance accounts for cell height quantization (ch ~ 0.2) and ensures
-        // spans at the water surface are reliably caught. 0.5m ≈ 2-3 height cells
-        // is sufficient; larger values risk marking shoreline terrain as water.
-        float maxWaterH = std::max({rect.heights[0], rect.heights[1], rect.heights[2], rect.heights[3]}) + 0.5f;
-
-        for (int z = minCZ; z <= maxCZ; ++z)
+    for (int z = range.minZ; z <= range.maxZ; ++z)
+    {
+        for (int x = range.minX; x <= range.maxX; ++x)
         {
-            for (int x = minCX; x <= maxCX; ++x)
+            const rcCompactCell& c = chf->cells[x + z * chf->width];
+
+            for (int i = static_cast<int>(c.index), end = static_cast<int>(c.index + c.count); i < end; ++i)
             {
-                const rcCompactCell& c = chf->cells[x + z * chf->width];
-                const int spanStart = static_cast<int>(c.index);
-                const int spanEnd = static_cast<int>(c.index + c.count);
-
-                for (int i = spanStart; i < spanEnd; ++i)
-                {
-                    // Skip spans already correctly marked as liquid
-                    unsigned char currentArea = chf->areas[i];
-                    if (currentArea >= LIQUID_WATER && currentArea <= HORDE_LIQUID_SLIME)
-                        continue;
-
-                    // Never overwrite structural geometry (bridges, docks, WMO buildings,
-                    // doodads) with water. These are solid surfaces that should remain
-                    // navigable as ground even when below the water surface height.
-                    if (currentArea >= WMO && currentArea <= HORDE_DOODAD)
-                        continue;
-
-                    float spanTop = chf->bmin[1] + chf->spans[i].y * chf->ch;
-                    if (spanTop <= maxWaterH)
-                    {
-                        // Bridge check: if a higher span in this column has structural
-                        // geometry (WMO/DOODAD) close above us, this is underwater
-                        // terrain below a bridge — still mark as water so agents can
-                        // swim under bridges. But if the span itself IS at the bridge
-                        // height (within walkable climb), skip it to prevent water
-                        // from overwriting the bridge surface.
-                        bool isBridgeSurface = false;
-                        for (int j = i + 1; j < spanEnd; ++j)
-                        {
-                            unsigned char aboveArea = chf->areas[j];
-                            if (aboveArea >= WMO && aboveArea <= HORDE_DOODAD)
-                            {
-                                float aboveTop = chf->bmin[1] + chf->spans[j].y * chf->ch;
-                                // If a bridge is directly above within walkable height,
-                                // this span is part of the bridge structure, not water
-                                if (aboveTop - spanTop <= chf->ch * 3.0f)
-                                {
-                                    isBridgeSurface = true;
-                                    break;
-                                }
-                            }
-                        }
-
-                        if (!isBridgeSurface)
-                        {
-                            chf->areas[i] = rect.type;
-                            dbgMarked++;
-                        }
-                    }
-                }
+                fn(i, end);
             }
         }
     }
+}
+} // namespace AreaMarkerDetail
 
-    if (debug && ctx && (dbgMarked > 0 || (stX == 0 && stY == 0)))
-    {
-        ctx->log(RC_LOG_PROGRESS, "Water ST(%d,%d): rectsOverlapping=%d spansMarked=%d", stX, stY, dbgRectOverlap,
-                 dbgMarked);
-    }
+/// Mark spans that lie below the surface of water rects with the rect's liquid area id.
+///
+/// Must be called AFTER rcErodeWalkableArea/rcMedianFilterWalkableArea to restore water areas that were cleared by
+/// erosion or the median filter at shores. Returns the number of marked spans.
+inline int MarkWaterAreas(rcCompactHeightfield* chf, const WaterMap* waterMap) noexcept
+{
+    int marked = 0;
+
+    AreaMarkerDetail::ForEachOverlappingRect(chf, waterMap, [&](const WaterRect& rect) {
+        // Use the max water height of the rect's 4 corners + tolerance. The tolerance accounts for cell height
+        // quantization (ch ~ 0.2) so spans at the water surface are reliably caught, larger values would mark
+        // shoreline terrain as water.
+        const float maxWaterH = rect.MaxHeight() + 0.5f;
+
+        AreaMarkerDetail::ForEachSpan(chf, rect, [&](int i, int spanEnd) {
+            const unsigned char currentArea = chf->areas[i];
+
+            // Skip spans already marked as liquid and never overwrite structural geometry (bridges, docks,
+            // WMO buildings, doodads) with water, those stay walkable ground even below the water level.
+            if (IsLiquidArea(currentArea) || IsStructureArea(currentArea))
+            {
+                return;
+            }
+
+            const float spanTop = chf->bmin[1] + chf->spans[i].y * chf->ch;
+
+            if (spanTop > maxWaterH)
+            {
+                return;
+            }
+
+            // Bridge check: if structural geometry sits directly above this span (within 3 cells), the span is
+            // part of the bridge/dock surface and must not become water. Terrain further below still becomes
+            // water so agents can swim under bridges.
+            for (int j = i + 1; j < spanEnd; ++j)
+            {
+                if (IsStructureArea(chf->areas[j]))
+                {
+                    const float aboveTop = chf->bmin[1] + chf->spans[j].y * chf->ch;
+
+                    if (aboveTop - spanTop <= chf->ch * 3.0f)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            chf->areas[i] = rect.type;
+            marked++;
+        });
+    });
+
+    return marked;
 }
 
-/// Mark walkable terrain spans that fall within road rectangles as TERRAIN_ROAD.
-/// Uses direct rect-to-cell mapping for efficiency: iterates road rects and directly
-/// computes which compact heightfield cells they cover.
-/// Only overwrites TERRAIN_GROUND or RC_WALKABLE_AREA - never overwrites water/lava.
+/// Mark walkable terrain spans inside road rects as TERRAIN_ROAD.
+/// Only overwrites TERRAIN_GROUND or RC_WALKABLE_AREA, never water/lava/structures.
 inline void MarkRoadAreas(rcCompactHeightfield* chf, const RoadMap* roadMap) noexcept
 {
-    if (!roadMap || roadMap->rects.empty())
-        return;
+    AreaMarkerDetail::ForEachOverlappingRect(chf, roadMap, [&](const RdRect& rect) {
+        AreaMarkerDetail::ForEachSpan(chf, rect, [&](int i, int) {
+            const unsigned char area = chf->areas[i];
 
-    const float hfMaxX = chf->bmin[0] + chf->width * chf->cs;
-    const float hfMaxZ = chf->bmin[2] + chf->height * chf->cs;
-
-    for (const auto& rect : roadMap->rects)
-    {
-        // Skip rects that don't overlap with this sub-tile's heightfield
-        if (rect.maxX < chf->bmin[0] || rect.minX > hfMaxX || rect.maxZ < chf->bmin[2] || rect.minZ > hfMaxZ)
-            continue;
-
-        // Compute cell range covered by this rect
-        int minCX = std::max(0, static_cast<int>(floorf((rect.minX - chf->bmin[0]) / chf->cs)));
-        int maxCX = std::min(chf->width - 1, static_cast<int>(floorf((rect.maxX - chf->bmin[0]) / chf->cs)));
-        int minCZ = std::max(0, static_cast<int>(floorf((rect.minZ - chf->bmin[2]) / chf->cs)));
-        int maxCZ = std::min(chf->height - 1, static_cast<int>(floorf((rect.maxZ - chf->bmin[2]) / chf->cs)));
-
-        for (int z = minCZ; z <= maxCZ; ++z)
-        {
-            for (int x = minCX; x <= maxCX; ++x)
+            if (area == RC_WALKABLE_AREA || area == TERRAIN_GROUND)
             {
-                const rcCompactCell& c = chf->cells[x + z * chf->width];
-                for (int i = static_cast<int>(c.index), ni = static_cast<int>(c.index + c.count); i < ni; ++i)
-                {
-                    unsigned char area = chf->areas[i];
-                    if (area == RC_WALKABLE_AREA || area == TERRAIN_GROUND)
-                    {
-                        chf->areas[i] = TERRAIN_ROAD;
-                    }
-                }
+                chf->areas[i] = TERRAIN_ROAD;
             }
-        }
-    }
+        });
+    });
 }
 
-/// Mark walkable terrain spans that fall within city rectangles as TERRAIN_CITY.
-/// Uses direct rect-to-cell mapping. Only upgrades TERRAIN_GROUND or RC_WALKABLE_AREA -
-/// never overwrites roads, water, WMO, or doodad areas.
+/// Mark walkable terrain spans inside city rects as TERRAIN_CITY.
+/// Only upgrades TERRAIN_GROUND or RC_WALKABLE_AREA, never roads, water, WMO or doodads.
 ///
-/// Must be called AFTER MarkRoadAreas so that roads within cities remain TERRAIN_ROAD.
-/// Must be called BEFORE MarkFactionAreas so that TERRAIN_CITY gets its faction variant.
+/// Must be called AFTER MarkRoadAreas so that roads within cities remain TERRAIN_ROAD, and BEFORE
+/// MarkFactionAreas so that TERRAIN_CITY gets its faction variant.
 inline void MarkCityAreas(rcCompactHeightfield* chf, const CityMap* cityMap) noexcept
 {
-    if (!cityMap || cityMap->rects.empty())
-        return;
+    AreaMarkerDetail::ForEachOverlappingRect(chf, cityMap, [&](const RdRect& rect) {
+        AreaMarkerDetail::ForEachSpan(chf, rect, [&](int i, int) {
+            const unsigned char area = chf->areas[i];
 
-    const float hfMaxX = chf->bmin[0] + chf->width * chf->cs;
-    const float hfMaxZ = chf->bmin[2] + chf->height * chf->cs;
-
-    for (const auto& rect : cityMap->rects)
-    {
-        // Skip rects that don't overlap with this sub-tile's heightfield
-        if (rect.maxX < chf->bmin[0] || rect.minX > hfMaxX || rect.maxZ < chf->bmin[2] || rect.minZ > hfMaxZ)
-            continue;
-
-        // Compute cell range covered by this rect
-        int minCX = std::max(0, static_cast<int>(floorf((rect.minX - chf->bmin[0]) / chf->cs)));
-        int maxCX = std::min(chf->width - 1, static_cast<int>(floorf((rect.maxX - chf->bmin[0]) / chf->cs)));
-        int minCZ = std::max(0, static_cast<int>(floorf((rect.minZ - chf->bmin[2]) / chf->cs)));
-        int maxCZ = std::min(chf->height - 1, static_cast<int>(floorf((rect.maxZ - chf->bmin[2]) / chf->cs)));
-
-        for (int z = minCZ; z <= maxCZ; ++z)
-        {
-            for (int x = minCX; x <= maxCX; ++x)
+            if (area == RC_WALKABLE_AREA || area == TERRAIN_GROUND)
             {
-                const rcCompactCell& c = chf->cells[x + z * chf->width];
-                for (int i = static_cast<int>(c.index), ni = static_cast<int>(c.index + c.count); i < ni; ++i)
-                {
-                    unsigned char area = chf->areas[i];
-                    if (area == RC_WALKABLE_AREA || area == TERRAIN_GROUND)
-                    {
-                        chf->areas[i] = TERRAIN_CITY;
-                    }
-                }
+                chf->areas[i] = TERRAIN_CITY;
             }
-        }
-    }
+        });
+    });
 }
 
-/// Mark walkable spans in faction-controlled areas with faction-specific area IDs.
-/// Upgrades neutral base area IDs to their Alliance (+1) or Horde (+2) variant.
-///
-/// TriAreaId values follow a repeating pattern of 3: base, Alliance, Horde.
-/// A neutral base area has (areaId - 1) % 3 == 0. This function adds the
-/// faction offset (1 or 2) to convert it to the corresponding faction variant.
-///
-/// Must be called AFTER MarkWaterAreas and MarkRoadAreas so that all base
-/// area IDs are finalized before faction upgrading.
+/// Upgrade neutral area ids inside faction rects to their Alliance/Horde variant.
+/// Must be called AFTER all other marking so that all base area ids are final.
 inline void MarkFactionAreas(rcCompactHeightfield* chf, const FactionMap* factionMap) noexcept
 {
-    if (!factionMap || factionMap->rects.empty())
-        return;
+    AreaMarkerDetail::ForEachOverlappingRect(chf, factionMap, [&](const FactionRect& rect) {
+        AreaMarkerDetail::ForEachSpan(chf, rect, [&](int i, int) {
+            const unsigned char area = chf->areas[i];
 
-    const float hfMaxX = chf->bmin[0] + chf->width * chf->cs;
-    const float hfMaxZ = chf->bmin[2] + chf->height * chf->cs;
-
-    for (const auto& rect : factionMap->rects)
-    {
-        // Skip rects that don't overlap with this sub-tile's heightfield
-        if (rect.maxX < chf->bmin[0] || rect.minX > hfMaxX || rect.maxZ < chf->bmin[2] || rect.minZ > hfMaxZ)
-            continue;
-
-        // Compute cell range covered by this rect
-        int minCX = std::max(0, static_cast<int>(floorf((rect.minX - chf->bmin[0]) / chf->cs)));
-        int maxCX = std::min(chf->width - 1, static_cast<int>(floorf((rect.maxX - chf->bmin[0]) / chf->cs)));
-        int minCZ = std::max(0, static_cast<int>(floorf((rect.minZ - chf->bmin[2]) / chf->cs)));
-        int maxCZ = std::min(chf->height - 1, static_cast<int>(floorf((rect.maxZ - chf->bmin[2]) / chf->cs)));
-
-        for (int z = minCZ; z <= maxCZ; ++z)
-        {
-            for (int x = minCX; x <= maxCX; ++x)
+            if (IsValidAnpArea(area) && GetAreaFaction(area) == AreaFaction::Neutral)
             {
-                const rcCompactCell& c = chf->cells[x + z * chf->width];
-                for (int i = static_cast<int>(c.index), ni = static_cast<int>(c.index + c.count); i < ni; ++i)
-                {
-                    unsigned char area = chf->areas[i];
-
-                    // Skip null/unwalkable areas and already-faction-marked areas.
-                    // Valid TriAreaId range: 1 (TERRAIN_GROUND) to 27 (HORDE_LIQUID_SLIME).
-                    // Neutral base areas satisfy: (area - 1) % 3 == 0
-                    if (area == 0 || area > HORDE_LIQUID_SLIME)
-                        continue;
-
-                    if ((area - 1) % 3 == 0)
-                    {
-                        // Upgrade neutral base to faction variant
-                        chf->areas[i] = area + rect.faction;
-                    }
-                }
+                chf->areas[i] = WithFaction(area, rect.faction);
             }
-        }
-    }
+        });
+    });
 }

@@ -1,109 +1,139 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <memory>
-#include <shared_mutex>
+#include <optional>
+#include <span>
+#include <unordered_map>
+#include <utility>
 
-#include "../../../recastnavigation/Detour/Include/DetourCommon.h"
-#include "../../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
-
-#include "ClientState.hpp"
+#include "../../../AmeisenNavigation.Pack/src/DetourUtils.hpp"
 #include "../NavSources/IQueryFilterProvider.hpp"
+#include "../Utils/Path.hpp"
+#include "ClientState.hpp"
 
-/// Custom deleter for dtNavMeshQuery allocated by Detour.
-struct NavMeshQueryDeleter
+/// Area cost override sent by a client.
+struct AreaCost
 {
-    void operator()(dtNavMeshQuery* q) const noexcept { dtFreeNavMeshQuery(q); }
+    unsigned char areaId;
+    float cost;
 };
 
-using NavMeshQueryPtr = std::unique_ptr<dtNavMeshQuery, NavMeshQueryDeleter>;
-
+/// Per-connection navigation state: query objects per map, the active query filter and reusable buffers.
+///
+/// A client is not thread-safe, it must only be used by one thread at a time (the server processes each
+/// connection's requests sequentially on that connection's thread).
 class AmeisenNavClient
 {
     size_t Id;
     ClientState State;
-    IQueryFilterProvider* FilterProvider;
+    const IQueryFilterProvider* FilterProvider;
 
-    /// Protects CustomFilter, FilterCustomizations, and State from concurrent access.
-    /// QueryFilter() (read path) takes shared lock; UpdateQueryFilter() (write path) takes exclusive lock.
-    mutable std::shared_mutex FilterMutex;
+    // Per-client area cost overrides, empty = use the provider's default filter.
+    std::optional<dtQueryFilter> CustomFilter;
 
-    // set per client area costs, to prioritize water movement for example
-    std::unique_ptr<dtQueryFilter> CustomFilter;
-    std::unordered_map<char, float> FilterCustomizations;
+    // One dtNavMeshQuery per map (a query is bound to one navmesh).
+    std::unordered_map<int, NavMeshQueryPtr> NavMeshQueries;
 
-    // Holds a dtNavMeshQuery for every map
-    std::unordered_map<int, NavMeshQueryPtr> NavMeshQuery;
-
-    // dtPolyRef buffer for path calculation
+    // Reusable buffers for path calculation.
     int PolyPathBufferSize;
     std::unique_ptr<dtPolyRef[]> PolyPathBuffer;
+    std::unique_ptr<dtPolyRef[]> StraightPathRefs;
+    Path PrimaryPath;
+    Path SecondaryPath;
 
 public:
-    AmeisenNavClient(size_t id, ClientState state, IQueryFilterProvider* filterProvider, int polyPathBufferSize = 512) noexcept
+    AmeisenNavClient(size_t id, const IQueryFilterProvider* filterProvider, int polyPathBufferSize = 512,
+                     int pointPathBufferSize = 256)
         : Id(id),
-        State(state),
-        FilterProvider(filterProvider),
-        CustomFilter(nullptr),
-        FilterCustomizations(),
-        NavMeshQuery(),
-        PolyPathBufferSize(polyPathBufferSize),
-        PolyPathBuffer(nullptr)
-    {}
-
-    ~AmeisenNavClient() = default;
+          State(ClientState::NORMAL),
+          FilterProvider(filterProvider),
+          CustomFilter(),
+          NavMeshQueries(),
+          PolyPathBufferSize(std::max(polyPathBufferSize, 1)),
+          PolyPathBuffer(std::make_unique<dtPolyRef[]>(static_cast<size_t>(PolyPathBufferSize))),
+          StraightPathRefs(std::make_unique<dtPolyRef[]>(static_cast<size_t>(std::max(pointPathBufferSize, 1)))),
+          PrimaryPath(pointPathBufferSize),
+          SecondaryPath(pointPathBufferSize)
+    {
+    }
 
     AmeisenNavClient(const AmeisenNavClient&) = delete;
     AmeisenNavClient& operator=(const AmeisenNavClient&) = delete;
 
-    constexpr inline size_t GetId() const noexcept { return Id; }
-    constexpr inline const ClientState& GetClientState() const noexcept { return State; }
+    size_t GetId() const noexcept { return Id; }
+    ClientState GetClientState() const noexcept { return State; }
+    bool HasCustomFilter() const noexcept { return CustomFilter.has_value(); }
 
-    inline dtQueryFilter* QueryFilter() noexcept
+    /// The filter used for all queries of this client.
+    const dtQueryFilter* QueryFilter() const noexcept
     {
-        std::shared_lock lock(FilterMutex);
-        return CustomFilter ? CustomFilter.get() : FilterProvider->Get(State);
+        return CustomFilter ? &*CustomFilter : FilterProvider->Get(State);
     }
 
-    inline dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept { auto it = NavMeshQuery.find(mapId); return it != NavMeshQuery.end() ? it->second.get() : nullptr; }
-    inline void SetNavmeshQuery(int mapId, dtNavMeshQuery* query) { NavMeshQuery[mapId].reset(query); }
-
-    constexpr inline int GetPolyPathBufferSize() const noexcept { return PolyPathBufferSize; }
-
-    inline dtPolyRef* GetPolyPathBuffer()
+    dtNavMeshQuery* GetNavmeshQuery(int mapId) noexcept
     {
-        if (!PolyPathBuffer) PolyPathBuffer = std::make_unique<dtPolyRef[]>(PolyPathBufferSize);
-        return PolyPathBuffer.get();
+        const auto it = NavMeshQueries.find(mapId);
+        return it != NavMeshQueries.end() ? it->second.get() : nullptr;
     }
 
-    inline void ResetQueryFilter() noexcept
-    {
-        std::unique_lock lock(FilterMutex);
-        FilterCustomizations.clear();
-    }
+    void SetNavmeshQuery(int mapId, NavMeshQueryPtr query) { NavMeshQueries[mapId] = std::move(query); }
 
-    inline void ConfigureQueryFilter(char areaId, float cost)
-    {
-        std::unique_lock lock(FilterMutex);
-        FilterCustomizations[areaId] = cost;
-    }
+    int GetPolyPathBufferSize() const noexcept { return PolyPathBufferSize; }
+    dtPolyRef* GetPolyPathBuffer() noexcept { return PolyPathBuffer.get(); }
 
-    inline void UpdateQueryFilter(ClientState state)
+    /// Poly refs of the straight path corners, sized like the path buffers.
+    dtPolyRef* GetStraightPathRefBuffer() noexcept { return StraightPathRefs.get(); }
+
+    /// Two reusable path buffers (result + scratch for smoothing/validation).
+    Path& GetPathBuffer() noexcept { return PrimaryPath; }
+    Path& GetScratchPathBuffer() noexcept { return SecondaryPath; }
+
+    /// Select the base filter by state and apply area cost overrides on top of it.
+    /// Returns false (and changes nothing) for invalid states, area ids or costs.
+    bool ConfigureQueryFilter(ClientState state, std::span<const AreaCost> costs) noexcept
     {
-        std::unique_lock lock(FilterMutex);
+        if (!IsValidClientState(state))
+        {
+            return false;
+        }
+
+        const dtQueryFilter* base = FilterProvider->Get(state);
+
+        if (!base)
+        {
+            return false;
+        }
+
+        for (const auto& [areaId, cost] : costs)
+        {
+            // dtQueryFilter stores DT_MAX_AREAS costs, anything else would write out of bounds.
+            // Non-positive/infinite costs would break the A* search.
+            if (areaId >= DT_MAX_AREAS || !std::isfinite(cost) || cost <= 0.0f)
+            {
+                return false;
+            }
+        }
+
         State = state;
 
-        if (!FilterCustomizations.empty())
+        if (costs.empty())
         {
-            const auto baseFilter = FilterProvider->Get(State);
-            if (!baseFilter) return;
-            auto newFilter = std::make_unique<dtQueryFilter>(*baseFilter);
-
-            for (const auto& [areaId, cost] : FilterCustomizations)
-            {
-                newFilter->setAreaCost(areaId, cost);
-            }
-
-            CustomFilter = std::move(newFilter);
+            CustomFilter.reset();
+            return true;
         }
+
+        CustomFilter.emplace(*base);
+
+        for (const auto& [areaId, cost] : costs)
+        {
+            CustomFilter->setAreaCost(areaId, cost);
+        }
+
+        return true;
     }
+
+    /// Drop all overrides and go back to the provider's default filter for the current state.
+    void ResetQueryFilter() noexcept { CustomFilter.reset(); }
 };

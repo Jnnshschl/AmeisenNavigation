@@ -1,85 +1,474 @@
 #include "Main.hpp"
 
-int main(int argc, char** argv)
+#include <charconv>
+#include <cstdio>
+#include <string_view>
+
+namespace {
+struct Options
 {
-    Logger::Initialize();
-
-    fputs(std::format("\033[96m"
-          "      ___                   _                 _   __\n"
-          "     /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __\n"
-          "    / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /\n"
-          "   / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / \n"
-          "  /_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/\n"
-          "                                          Exporter {}\033[0m\n\n", AMEISENNAV_VERSION).c_str(),
-          stdout);
-
     std::string wowDir;
     std::string outputDir;
-    int targetMapId = -1;
-    int targetTileX = -1;
-    int targetTileY = -1;
+    std::vector<int> mapIds; // empty = all maps
+    int tileX = -1;
+    int tileY = -1;
+    int threads = 0;
+    bool debug = false;
+    bool listMaps = false;
+};
+
+void PrintUsage()
+{
+    std::printf(
+        "Usage: AmeisenNavigation.Exporter --wow <path> --output <path> [options]\n\n"
+        "  -w, --wow <path>        WoW client folder (or its Data folder)\n"
+        "  -o, --output <path>     Output folder for the .anp files\n"
+        "  -m, --map <ids>         Only export these map ids (comma separated, e.g. 0,1,530,571)\n"
+        "  -t, --tile <x,y>        Only export a single ADT (debugging)\n"
+        "  -j, --threads <n>       Number of worker threads (default: all cores)\n"
+        "  -d, --debug             Debug logging and area debug images (<output>/debug)\n"
+        "  -l, --list-maps         List the maps in Map.dbc and exit\n"
+        "  -h, --help              Show this help\n\n"
+        "Example: AmeisenNavigation.Exporter -w \"C:\\WoW\" -o \"C:\\meshes\" -m 0,1 -j 8\n");
+}
+
+bool ParseInt(std::string_view s, int& out) noexcept
+{
+    const auto [ptr, ec] = std::from_chars(s.data(), s.data() + s.size(), out);
+    return ec == std::errc() && ptr == s.data() + s.size();
+}
+
+/// Returns false (after printing the reason) if the arguments are invalid.
+bool ParseArguments(int argc, char** argv, Options& options, bool& exitEarly)
+{
+    exitEarly = false;
 
     for (int i = 1; i < argc; ++i)
     {
-        std::string arg = argv[i];
-        if ((arg == "--wow" || arg == "-w") && i + 1 < argc)
+        const std::string_view arg = argv[i];
+        const bool hasValue = i + 1 < argc;
+
+        if (arg == "--help" || arg == "-h")
         {
-            wowDir = argv[++i];
+            PrintUsage();
+            exitEarly = true;
+            return true;
         }
-        else if ((arg == "--output" || arg == "-o") && i + 1 < argc)
+
+        if (arg == "--debug" || arg == "-d")
         {
-            outputDir = argv[++i];
+            options.debug = true;
         }
-        else if ((arg == "--map" || arg == "-m") && i + 1 < argc)
+        else if (arg == "--list-maps" || arg == "-l")
         {
-            try { targetMapId = std::stoi(std::string(argv[++i])); }
-            catch (...) { LogE("Invalid --map value: ", argv[i]); return 1; }
+            options.listMaps = true;
         }
-        else if ((arg == "--tile" || arg == "-t") && i + 1 < argc)
+        else if ((arg == "--wow" || arg == "-w") && hasValue)
         {
-            std::string tileStr = argv[++i];
-            size_t commaPos = tileStr.find(',');
-            if (commaPos != std::string::npos)
+            options.wowDir = argv[++i];
+        }
+        else if ((arg == "--output" || arg == "-o") && hasValue)
+        {
+            options.outputDir = argv[++i];
+        }
+        else if ((arg == "--map" || arg == "-m") && hasValue)
+        {
+            std::string_view list = argv[++i];
+
+            while (!list.empty())
             {
-                try
+                const auto comma = list.find(',');
+                const auto token = list.substr(0, comma);
+                int id = 0;
+
+                if (!ParseInt(token, id) || id < 0)
                 {
-                    targetTileX = std::stoi(tileStr.substr(0, commaPos));
-                    targetTileY = std::stoi(tileStr.substr(commaPos + 1));
+                    LogE("Invalid --map value: ", token);
+                    return false;
                 }
-                catch (...) { LogE("Invalid --tile value: ", tileStr); return 1; }
+
+                options.mapIds.push_back(id);
+                list = comma == std::string_view::npos ? std::string_view() : list.substr(comma + 1);
+            }
+        }
+        else if ((arg == "--tile" || arg == "-t") && hasValue)
+        {
+            const std::string_view tile = argv[++i];
+            const auto comma = tile.find(',');
+
+            if (comma == std::string_view::npos || !ParseInt(tile.substr(0, comma), options.tileX)
+                || !ParseInt(tile.substr(comma + 1), options.tileY) || options.tileX < 0 || options.tileX >= 64
+                || options.tileY < 0 || options.tileY >= 64)
+            {
+                LogE("Invalid --tile value: ", tile, " (expected x,y with 0 <= x,y < 64)");
+                return false;
+            }
+        }
+        else if ((arg == "--threads" || arg == "-j") && hasValue)
+        {
+            if (!ParseInt(argv[++i], options.threads) || options.threads < 1)
+            {
+                LogE("Invalid --threads value: ", argv[i]);
+                return false;
+            }
+        }
+        else
+        {
+            LogE("Unknown or incomplete argument: ", arg);
+            PrintUsage();
+            return false;
+        }
+    }
+
+    if (options.wowDir.empty() || (options.outputDir.empty() && !options.listMaps))
+    {
+        LogE("Missing required arguments.");
+        PrintUsage();
+        return false;
+    }
+
+    return true;
+}
+
+struct AreaData
+{
+    std::unordered_map<unsigned int, unsigned char> factions; // areaId -> 1 Alliance / 2 Horde
+    std::unordered_set<unsigned int> cities;
+};
+
+/// AreaTable.dbc (WotLK 3.3.5a): field 0 = ID, 2 = ParentAreaID, 4 = Flags, 28 = FactionGroupMask.
+/// FactionGroupMask: 0 = contested, 2 = Alliance, 4 = Horde, 6 = sanctuary. Flags: 0x08 capital, 0x20 town.
+/// Sub areas (e.g. "Trade District") inherit faction/city status from their parents.
+AreaData LoadAreaData(Dbc* areaTableDbc)
+{
+    AreaData result;
+
+    if (!areaTableDbc || !areaTableDbc->IsValid())
+    {
+        LogW("AreaTable.dbc missing or invalid - faction/city data will be unavailable");
+        return result;
+    }
+
+    constexpr unsigned int AREA_FLAG_CAPITAL = 0x08;
+    constexpr unsigned int AREA_FLAG_SLAVE_CAPITAL = 0x20;
+
+    struct AreaInfo
+    {
+        unsigned int parentId;
+        unsigned int flags;
+        unsigned char faction; // 0 = unknown, 1 = Alliance, 2 = Horde
+    };
+
+    std::unordered_map<unsigned int, AreaInfo> allAreas;
+
+    for (unsigned int i = 0u; i < areaTableDbc->GetRecordCount(); ++i)
+    {
+        const auto factionGroupMask = areaTableDbc->Read<unsigned int>(i, 28u);
+        const unsigned char faction = factionGroupMask == 2 ? 1 : (factionGroupMask == 4 ? 2 : 0);
+        allAreas[areaTableDbc->Read<unsigned int>(i, 0u)] = {areaTableDbc->Read<unsigned int>(i, 2u),
+                                                               areaTableDbc->Read<unsigned int>(i, 4u), faction};
+    }
+
+    const auto walkParents = [&](unsigned int areaId, auto&& predicate) -> const AreaInfo* {
+        unsigned int current = areaId;
+
+        for (int depth = 0; depth < 10; ++depth)
+        {
+            const auto it = allAreas.find(current);
+
+            if (it == allAreas.end())
+                return nullptr;
+
+            if (predicate(it->second))
+                return &it->second;
+
+            if (it->second.parentId == 0 || it->second.parentId == current)
+                return nullptr;
+
+            current = it->second.parentId;
+        }
+
+        return nullptr;
+    };
+
+    for (const auto& [areaId, info] : allAreas)
+    {
+        if (const AreaInfo* f = walkParents(areaId, [](const AreaInfo& a) { return a.faction != 0; }))
+        {
+            result.factions[areaId] = f->faction;
+        }
+
+        if (walkParents(areaId,
+                        [&](const AreaInfo& a) { return (a.flags & (AREA_FLAG_CAPITAL | AREA_FLAG_SLAVE_CAPITAL)) != 0; }))
+        {
+            result.cities.insert(areaId);
+        }
+    }
+
+    LogI(std::format("AreaTable.dbc: {} areas, {} faction-marked, {} city-marked", allAreas.size(),
+                     result.factions.size(), result.cities.size()));
+    return result;
+}
+
+/// Extract everything the navmesh needs from one ADT into the map wide containers.
+void ExtractAdt(Adt* adt, CachedFileReader& reader, Structure& mapGeometry, WaterMap& waterMap, RoadMap& roadMap,
+                CityMap& cityMap, FactionMap& factionMap, PlacementSet& wmoPlacements, PlacementSet& doodadPlacements,
+                const std::unordered_map<unsigned int, LiquidType>& liquidTypes, const AreaData& areas)
+{
+    Structure geometry;
+
+    const MTEX* mtex = adt->Mtex();
+    const auto roadTextureIds = FindRoadTextureIds(adt->ChunkInBounds(mtex) ? mtex : nullptr);
+
+    for (int a = 0; a < ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID; ++a)
+    {
+        const int cx = a % ADT_CELLS_PER_GRID;
+        const int cy = a / ADT_CELLS_PER_GRID;
+
+        ExtractTerrain(adt, cx, cy, &geometry);
+        ExtractLiquid(adt, cx, cy, &waterMap, &geometry, liquidTypes);
+        ExtractRoadCoverage(adt, cx, cy, &roadMap, roadTextureIds);
+        ExtractCityCoverage(adt, cx, cy, &cityMap, areas.cities);
+        ExtractFactionCoverage(adt, cx, cy, &factionMap, areas.factions);
+    }
+
+    // Objects are extracted once per placement (uniqueId) and never clipped at ADT borders.
+    ExtractWmoGeometry(adt, reader, &geometry, liquidTypes, &wmoPlacements);
+    ExtractDoodadGeometry(adt, reader, &geometry, &doodadPlacements);
+
+    geometry.Clean();
+
+    const std::lock_guard lock(mapGeometry.mutex);
+    mapGeometry.Append(geometry);
+}
+
+/// Export one map. Returns false on errors (missing data is not an error).
+bool ExportMap(unsigned int mapId, const std::string& mapName, const Options& options, CachedFileReader& reader,
+               const std::unordered_map<unsigned int, LiquidType>& liquidTypes, const AreaData& areas)
+{
+    const auto mapStart = std::chrono::steady_clock::now();
+    const auto mapsPath = std::format("World\\Maps\\{}\\{}", mapName, mapName);
+    const Wdt* wdt = reader.GetFileContent<Wdt>(std::format("{}.wdt", mapsPath).c_str());
+
+    if (!wdt || !wdt->IsValid())
+    {
+        LogD("[", mapName, "] no WDT, skipping");
+        return true;
+    }
+
+    struct AdtCoord
+    {
+        int x, y;
+    };
+
+    std::vector<AdtCoord> adts;
+
+    for (int y = 0; y < WDT_MAP_SIZE; ++y)
+    {
+        for (int x = 0; x < WDT_MAP_SIZE; ++x)
+        {
+            if (options.tileX >= 0 && (x != options.tileX || y != options.tileY))
+            {
+                continue;
+            }
+
+            if (wdt->Main()->adt[y][x].exists)
+            {
+                adts.push_back({x, y});
             }
         }
     }
 
-    if (wowDir.empty() || outputDir.empty())
+    if (adts.empty())
     {
-        LogE("Missing required arguments.");
-        LogI("Usage: AmeisenNavigation.Exporter.exe --wow <path> --output "
-             "<path> [--map <id>] [--tile x,y]");
-        LogI("Example: AmeisenNavigation.Exporter.exe -w \"C:\\WoW\" -o "
-             "\"C:\\Out\" -m 0 -t 32,48");
+        LogD("[", mapName, "] no terrain tiles (WMO-only map), skipping");
+        return true;
+    }
+
+    Structure mapGeometry;
+    WaterMap waterMap;
+    RoadMap roadMap;
+    FactionMap factionMap;
+    CityMap cityMap;
+    PlacementSet wmoPlacements;
+    PlacementSet doodadPlacements;
+
+    const int totalAdts = static_cast<int>(adts.size());
+    const int progressInterval = std::max(1, totalAdts / 20);
+    std::atomic<int> extracted{0};
+    std::atomic<int> missing{0};
+
+    LogI(std::format("[{}] Map {}: extracting {} ADTs", mapName, mapId, totalAdts));
+
+#pragma omp parallel for schedule(dynamic, 1)
+    for (int i = 0; i < totalAdts; ++i)
+    {
+        const auto [x, y] = adts[static_cast<size_t>(i)];
+        const auto adtPath = std::format("{}_{}_{}.adt", mapsPath, x, y);
+
+        // ADTs are only needed once, don't keep them in the cache.
+        UncachedFile file = reader.ReadUncached(adtPath.c_str());
+        Adt* adt = file.As<Adt>();
+
+        if (!adt || !adt->IsValid())
+        {
+            missing.fetch_add(1, std::memory_order_relaxed);
+            LogW("[", mapName, "] Missing or invalid ADT: ", adtPath);
+            continue;
+        }
+
+        ExtractAdt(adt, reader, mapGeometry, waterMap, roadMap, cityMap, factionMap, wmoPlacements, doodadPlacements,
+                   liquidTypes, areas);
+
+        const int done = extracted.fetch_add(1, std::memory_order_relaxed) + 1;
+
+        if (done % progressInterval == 0 || done == totalAdts)
+        {
+            LogP(std::format("[{}] Extracting ADTs: {} / {} ({:.1f}%)", mapName, done, totalAdts,
+                             100.0 * done / totalAdts));
+        }
+    }
+
+    Logger::EndProgress();
+
+    if (mapGeometry.verts.empty() || mapGeometry.tris.empty())
+    {
+        LogW("[", mapName, "] no geometry extracted, skipping");
+        return true;
+    }
+
+    // Detour tile grid aligned to the ADT grid: tile (x, y) = ADT (maxX - x, maxY - y).
+    int maxAdtX = 0;
+    int maxAdtY = 0;
+
+    for (const auto& adt : adts)
+    {
+        maxAdtX = std::max(maxAdtX, adt.x);
+        maxAdtY = std::max(maxAdtY, adt.y);
+    }
+
+    dtNavMeshParams params{};
+    params.orig[0] = static_cast<float>(31 - maxAdtX) * TILESIZE;
+    params.orig[1] = 0.0f;
+    params.orig[2] = static_cast<float>(31 - maxAdtY) * TILESIZE;
+    params.tileWidth = TILESIZE;
+    params.tileHeight = TILESIZE;
+    params.maxTiles = WDT_MAP_SIZE * WDT_MAP_SIZE;
+    params.maxPolys = 1 << 20; // ignored with 64 bit poly refs, kept positive for 32 bit readers
+
+    std::vector<TileCoord> tiles;
+    tiles.reserve(adts.size());
+
+    for (const auto& adt : adts)
+    {
+        tiles.push_back({maxAdtX - adt.x, maxAdtY - adt.y, adt.x, adt.y});
+    }
+
+    waterMap.BuildSpatialIndex();
+    roadMap.BuildSpatialIndex();
+    cityMap.BuildSpatialIndex();
+    factionMap.BuildSpatialIndex();
+
+    LogI(std::format("[{}] Geometry: {} verts, {} tris | Water: {} | Roads: {} | Cities: {} | Factions: {}", mapName,
+                     mapGeometry.verts.size(), mapGeometry.tris.size(), waterMap.rects.size(), roadMap.rects.size(),
+                     cityMap.rects.size(), factionMap.rects.size()));
+
+    // WMOs/M2s of this map aren't needed anymore, free them before the memory hungry build.
+    reader.Clear();
+
+    TileBuildConfig buildConfig;
+    buildConfig.debugBmp = options.debug;
+
+    Anp::AnpWriter writer(static_cast<int>(mapId), params);
+    AdtTileProcessor processor(&writer, options.outputDir, mapName, buildConfig);
+    processor.Process(&mapGeometry, tiles, &waterMap, &roadMap, &factionMap, &cityMap);
+
+    if (writer.GetTileCount() == 0)
+    {
+        LogW("[", mapName, "] no navmesh tiles were built, nothing saved");
+        return processor.GetStats().failed.load() == 0;
+    }
+
+    if (!writer.Save(options.outputDir))
+    {
+        LogE("[", mapName, "] failed to save ", Anp::FileName(static_cast<int>(mapId)));
+        return false;
+    }
+
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - mapStart).count();
+    LogS(std::format("[{}] Saved {} ({} tiles, {:.1f} MB) in {}", mapName, Anp::FileName(static_cast<int>(mapId)),
+                     writer.GetTileCount(), writer.GetStoredBytes() / (1024.0 * 1024.0),
+                     Logger::FormatDuration(seconds)));
+
+    return processor.GetStats().failed.load() == 0;
+}
+} // namespace
+
+int main(int argc, char** argv)
+{
+    Logger::Initialize();
+
+    Options options;
+    bool exitEarly = false;
+
+    if (!ParseArguments(argc, argv, options, exitEarly))
+    {
         return 1;
     }
 
-    // Ensure wowDir ends with Data\ if it doesn't already
-    std::filesystem::path wowPath(wowDir);
-    if (wowPath.filename().string() != "Data")
+    if (exitEarly)
+    {
+        return 0;
+    }
+
+    Logger::SetDebugEnabled(options.debug || Logger::IsDebugEnabled());
+
+    const bool color = Logger::IsColorEnabled();
+    std::fputs(std::format("{}"
+                           "      ___                   _                 _   __\n"
+                           "     /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __\n"
+                           "    / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /\n"
+                           "   / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / \n"
+                           "  /_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/\n"
+                           "                                          Exporter {}{}\n\n",
+                           color ? "\033[96m" : "", AMEISENNAV_VERSION, color ? "\033[0m" : "")
+                   .c_str(),
+               stdout);
+
+#ifdef _OPENMP
+    if (options.threads > 0)
+    {
+        omp_set_num_threads(options.threads);
+    }
+
+    // Tiles use nested parallelism for single-ADT exports (MSVC only implements OpenMP 2.0).
+#if _OPENMP >= 200805
+    omp_set_max_active_levels(2);
+#else
+    omp_set_nested(1);
+#endif
+#endif
+
+    // Accept both the client folder and its Data folder.
+    std::filesystem::path wowPath(options.wowDir);
+
+    if (wowPath.filename().string() != "Data" && std::filesystem::exists(wowPath / "Data"))
     {
         wowPath /= "Data";
     }
 
     try
     {
-        if (!std::filesystem::exists(wowPath))
+        if (!std::filesystem::is_directory(wowPath))
         {
             LogE("Game data directory does not exist: \"", wowPath.string(), "\"");
             return 1;
         }
 
-        if (!std::filesystem::exists(outputDir))
+        if (!options.listMaps && !std::filesystem::exists(options.outputDir))
         {
-            LogI("Creating output directory: \"", outputDir, "\"");
-            std::filesystem::create_directories(outputDir);
+            LogI("Creating output directory: \"", options.outputDir, "\"");
+            std::filesystem::create_directories(options.outputDir);
         }
     }
     catch (const std::filesystem::filesystem_error& e)
@@ -88,320 +477,98 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    LogI(std::format("Starting export. Game Data: \"{}\", Output: \"{}\"", wowPath.string(), outputDir));
+    LogI("Game data: \"", wowPath.string(), "\"");
 
-    MpqManager mpqManager(wowPath.string().c_str());
-    CachedFileReader mpqReader(&mpqManager);
+    MpqManager mpqManager(wowPath);
 
-    std::vector<std::pair<unsigned int, std::string>> maps;
-
-    if (Dbc* mapDbc = mpqReader.GetFileContent<Dbc>("DBFilesClient\\Map.dbc"))
+    if (mpqManager.GetArchiveCount() == 0)
     {
-        if (!mapDbc->IsValid())
-        {
-            LogE("Map.dbc has invalid header (expected WDBC magic)");
-            return 1;
-        }
-
-        for (unsigned int i = 0u; i < mapDbc->GetRecordCount(); ++i)
-        {
-            maps.push_back(std::make_pair(mapDbc->Read<unsigned int>(i, 0u), mapDbc->ReadString(i, 1u)));
-        }
-    }
-
-    if (maps.empty())
-    {
-        LogE("Failed to load Map.dbc or it contains no entries - cannot proceed");
+        LogE("No MPQ archives found in \"", wowPath.string(), "\"");
         return 1;
     }
 
+    CachedFileReader reader(&mpqManager);
+
+    // Map.dbc: field 0 = id, field 1 = internal name (directory)
+    std::vector<std::pair<unsigned int, std::string>> maps;
+    Dbc* mapDbc = reader.GetFileContent<Dbc>("DBFilesClient\\Map.dbc");
+
+    if (!mapDbc || !mapDbc->IsValid())
+    {
+        LogE("Map.dbc is missing or invalid - cannot proceed");
+        return 1;
+    }
+
+    for (unsigned int i = 0u; i < mapDbc->GetRecordCount(); ++i)
+    {
+        maps.emplace_back(mapDbc->Read<unsigned int>(i, 0u), mapDbc->ReadString(i, 1u));
+    }
+
+    if (options.listMaps)
+    {
+        for (const auto& [id, name] : maps)
+        {
+            std::printf("%5u  %s\n", id, name.c_str());
+        }
+
+        return 0;
+    }
+
+    // LiquidType.dbc: field 0 = id, field 3 = type (0 water, 1 ocean, 2 magma, 3 slime)
     std::unordered_map<unsigned int, LiquidType> liquidTypes;
 
-    if (Dbc* liquidTypeDbc = mpqReader.GetFileContent<Dbc>("DBFilesClient\\LiquidType.dbc"))
+    if (Dbc* liquidTypeDbc = reader.GetFileContent<Dbc>("DBFilesClient\\LiquidType.dbc");
+        liquidTypeDbc && liquidTypeDbc->IsValid())
     {
-        if (!liquidTypeDbc->IsValid())
+        for (unsigned int i = 0u; i < liquidTypeDbc->GetRecordCount(); ++i)
         {
-            LogW("LiquidType.dbc has invalid header - liquid types will be unavailable");
+            liquidTypes[liquidTypeDbc->Read<unsigned int>(i, 0u)] =
+                static_cast<LiquidType>(liquidTypeDbc->Read<unsigned int>(i, 3u));
         }
-        else
+    }
+    else
+    {
+        LogW("LiquidType.dbc missing or invalid - all liquids will be treated as water");
+    }
+
+    const AreaData areas = LoadAreaData(reader.GetFileContent<Dbc>("DBFilesClient\\AreaTable.dbc"));
+
+    for (const int id : options.mapIds)
+    {
+        if (std::none_of(maps.begin(), maps.end(), [id](const auto& m) { return m.first == static_cast<unsigned>(id); }))
         {
-            for (unsigned int i = 0u; i < liquidTypeDbc->GetRecordCount(); ++i)
-            {
-                liquidTypes[liquidTypeDbc->Read<unsigned int>(i, 0u)] =
-                    static_cast<LiquidType>(liquidTypeDbc->Read<unsigned int>(i, 3u));
-            }
+            LogW("Map ", id, " does not exist in Map.dbc");
         }
     }
 
-    // Load AreaTable.dbc to build faction + city lookups
-    // WotLK 3.3.5a layout: field 0=ID, field 2=ParentAreaID, field 4=Flags, field 28=FactionGroupMask
-    // FactionGroupMask: 0=Contested, 2=Alliance, 4=Horde, 6=Sanctuary
-    // Flags: 0x08=Capital, 0x20=SlaveCapital (secondary town)
-    //
-    // Sub-areas (e.g., "Trade District") often have flags/faction=0 but inherit
-    // from their parent zone (e.g., "Stormwind City"). We walk up the parent chain
-    // so that all sub-areas get properly marked.
-    std::unordered_map<unsigned int, unsigned char> areaFactions;
-    std::unordered_set<unsigned int> areaCities;
+    const auto exportStart = std::chrono::steady_clock::now();
+    int failedMaps = 0;
 
-    if (Dbc* areaTableDbc = mpqReader.GetFileContent<Dbc>("DBFilesClient\\AreaTable.dbc"))
+    for (const auto& [mapId, mapName] : maps)
     {
-        if (!areaTableDbc->IsValid())
+        if (!options.mapIds.empty()
+            && std::find(options.mapIds.begin(), options.mapIds.end(), static_cast<int>(mapId)) == options.mapIds.end())
         {
-            LogW("AreaTable.dbc has invalid header - faction/city data will be unavailable");
-        }
-        else
-        {
-        constexpr unsigned int AREA_FLAG_CAPITAL = 0x08;
-        constexpr unsigned int AREA_FLAG_SLAVE_CAPITAL = 0x20;
-
-        // Pass 1: read all areas - store parent, direct faction, and flags
-        struct AreaInfo
-        {
-            unsigned int parentId;
-            unsigned int flags;
-            unsigned char faction; // 0=unknown, 1=Alliance, 2=Horde
-        };
-        std::unordered_map<unsigned int, AreaInfo> allAreas;
-
-        for (unsigned int i = 0u; i < areaTableDbc->GetRecordCount(); ++i)
-        {
-            unsigned int areaId = areaTableDbc->Read<unsigned int>(i, 0u);
-            unsigned int parentId = areaTableDbc->Read<unsigned int>(i, 2u);
-            unsigned int flags = areaTableDbc->Read<unsigned int>(i, 4u);
-            unsigned int factionGroupMask = areaTableDbc->Read<unsigned int>(i, 28u);
-
-            unsigned char faction = 0;
-            if (factionGroupMask == 2)
-                faction = 1; // Alliance
-            else if (factionGroupMask == 4)
-                faction = 2; // Horde
-
-            allAreas[areaId] = {parentId, flags, faction};
-        }
-
-        // Pass 2: resolve faction by walking up parent chain for areas with faction=0
-        auto resolveFaction = [&](unsigned int areaId) -> unsigned char {
-            unsigned int current = areaId;
-            for (int depth = 0; depth < 10; ++depth)
-            {
-                auto it = allAreas.find(current);
-                if (it == allAreas.end())
-                    return 0;
-                if (it->second.faction != 0)
-                    return it->second.faction;
-                if (it->second.parentId == 0 || it->second.parentId == current)
-                    return 0;
-                current = it->second.parentId;
-            }
-            return 0;
-        };
-
-        // Pass 2b: resolve city status by walking up parent chain
-        auto resolveCity = [&](unsigned int areaId) -> bool {
-            unsigned int current = areaId;
-            for (int depth = 0; depth < 10; ++depth)
-            {
-                auto it = allAreas.find(current);
-                if (it == allAreas.end())
-                    return false;
-                if (it->second.flags & (AREA_FLAG_CAPITAL | AREA_FLAG_SLAVE_CAPITAL))
-                    return true;
-                if (it->second.parentId == 0 || it->second.parentId == current)
-                    return false;
-                current = it->second.parentId;
-            }
-            return false;
-        };
-
-        for (const auto& [areaId, info] : allAreas)
-        {
-            unsigned char faction = resolveFaction(areaId);
-            if (faction != 0)
-                areaFactions[areaId] = faction;
-
-            if (resolveCity(areaId))
-                areaCities.insert(areaId);
-        }
-
-        LogI(std::format("AreaTable.dbc: {} areas loaded, {} faction-marked, {} city-marked",
-                         allAreas.size(), areaFactions.size(), areaCities.size()));
-        } // else (valid DBC)
-    }
-
-    // Maps with no ADT tiles are automatically skipped via WDT existence checks.
-
-    dtNavMeshParams params{0};
-    params.tileWidth = TILESIZE;
-    params.tileHeight = TILESIZE;
-    params.maxPolys = 1 << DT_POLY_BITS;
-    params.maxTiles = WDT_MAP_SIZE * WDT_MAP_SIZE;
-    params.orig[0] = WORLDSIZE;
-    params.orig[1] = std::numeric_limits<float>::lowest();
-    params.orig[2] = WORLDSIZE;
-
-    for (const auto& map : maps)
-    {
-        unsigned int mapId = map.first;
-        const std::string& mapName = map.second;
-
-        if (targetMapId != -1 && mapId != static_cast<unsigned int>(targetMapId))
             continue;
-
-        START_TIMER(startTimeTile);
-
-        const auto mapsPath = std::format("World\\Maps\\{}\\{}", mapName, mapName);
-        const auto wdtPath = std::format("{}.wdt", mapsPath);
-
-        if (Wdt* wdt = mpqReader.GetFileContent<Wdt>(wdtPath.c_str()))
-        {
-            Structure mapGeometry;
-            WaterMap waterMap;
-            RoadMap roadMap;
-            FactionMap factionMap;
-            CityMap cityMap;
-
-            // Count how many ADTs exist so we can show accurate progress
-            int totalAdts = 0;
-            for (int i = 0; i < WDT_MAP_SIZE * WDT_MAP_SIZE; ++i)
-            {
-                int ax = i % WDT_MAP_SIZE;
-                int ay = i / WDT_MAP_SIZE;
-                if (targetTileX != -1 && targetTileY != -1 && (ax != targetTileX || ay != targetTileY))
-                    continue;
-                if (wdt->Main()->adt[ay][ax].exists)
-                    totalAdts++;
-            }
-
-            LogI(std::format("[{}] Extracting {} ADT tiles using {} threads...", mapName, totalAdts, omp_get_max_threads()));
-
-            std::atomic<int> adtsExtracted{0};
-            auto extractStart = std::chrono::high_resolution_clock::now();
-            const int adtProgressInterval = std::max(1, totalAdts / 20);
-
-#pragma omp parallel for schedule(dynamic)
-            for (int i = 0; i < WDT_MAP_SIZE * WDT_MAP_SIZE; ++i)
-            {
-                int x = i % WDT_MAP_SIZE;
-                int y = i / WDT_MAP_SIZE;
-
-                // Specific tile filter
-                if (targetTileX != -1 && targetTileY != -1)
-                {
-                    if (x != targetTileX || y != targetTileY)
-                        continue;
-                }
-
-                if (wdt->Main()->adt[y][x].exists)
-                {
-                    const auto adtPath = std::format("{}_{}_{}.adt", mapsPath, x, y);
-
-                    if (Adt* adt = mpqReader.GetFileContent<Adt>(adtPath.c_str()))
-                    {
-                        Structure terrain;
-
-                        // Step 1: Identify road textures from MTEX
-                        auto roadTextureIds = FindRoadTextureIds(adt->Mtex());
-
-                        // Step 2: Extract per-chunk data
-                        for (int a = 0; a < ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID; ++a)
-                        {
-                            const int cx = a % ADT_CELLS_PER_GRID;
-                            const int cy = a / ADT_CELLS_PER_GRID;
-
-                            ExtractTerrain(adt, cx, cy, &terrain);
-                            ExtractLiquid(adt, cx, cy, &waterMap, &terrain, liquidTypes);
-                            ExtractRoadCoverage(adt, cx, cy, &roadMap, roadTextureIds);
-                            ExtractCityCoverage(adt, cx, cy, &cityMap, areaCities);
-                            ExtractFactionCoverage(adt, cx, cy, &factionMap, areaFactions);
-                        }
-
-                        // Step 3: Extract object geometry
-                        ExtractWmoGeometry(adt, mpqReader, &terrain, liquidTypes);
-                        ExtractDoodadGeometry(adt, mpqReader, &terrain);
-
-                        terrain.Clean();
-
-                        if (!terrain.verts.empty())
-                            rcCalcBounds(reinterpret_cast<const float*>(terrain.verts.data()),
-                                         static_cast<int>(terrain.verts.size()), terrain.bbMin, terrain.bbMax);
-
-                        terrain.bbMax[0] = (32 - x) * TILESIZE;
-                        terrain.bbMax[2] = (32 - y) * TILESIZE;
-                        terrain.bbMin[0] = terrain.bbMax[0] - TILESIZE;
-                        terrain.bbMin[2] = terrain.bbMax[2] - TILESIZE;
-
-                        // Expand clip bounds slightly: MCNK positions are stored as floats
-                        // whose values may differ from the grid formula (32-x)*TILESIZE by
-                        // a small amount. Without tolerance, boundary vertices can fall just
-                        // outside the computed bounds and get clipped, creating gaps between
-                        // adjacent ADT tiles in the merged geometry.
-                        constexpr float clipEps = 1.0f;
-                        terrain.bbMin[0] -= clipEps;
-                        terrain.bbMin[2] -= clipEps;
-                        terrain.bbMax[0] += clipEps;
-                        terrain.bbMax[2] += clipEps;
-
-                        terrain.CleanOutOfBounds(terrain.bbMin, terrain.bbMax);
-
-#pragma omp critical(appendGeometry)
-                        {
-                            mapGeometry.Append(terrain);
-                        }
-
-                        const int done = adtsExtracted.fetch_add(1, std::memory_order_relaxed) + 1;
-                        if (done % adtProgressInterval == 0 || done == totalAdts)
-                        {
-                            auto now = std::chrono::high_resolution_clock::now();
-                            double elapsed = std::chrono::duration<double>(now - extractStart).count();
-                            double eta = (elapsed / done) * (totalAdts - done);
-                            Logger::LogProgress(std::format("[{}] Extracting ADTs: {} / {} ({:.1f}%) - ETA: {}",
-                                                            mapName, done, totalAdts, 100.0 * done / totalAdts,
-                                                            Logger::FormatDuration(eta)));
-                        }
-                    }
-                }
-            }
-
-            Logger::EndProgress();
-            {
-                auto now = std::chrono::high_resolution_clock::now();
-                double elapsed = std::chrono::duration<double>(now - extractStart).count();
-                LogS(std::format("[{}] Extracted {} ADTs in {}", mapName, adtsExtracted.load(), Logger::FormatDuration(elapsed)));
-            }
-
-            if (!mapGeometry.verts.empty())
-            {
-                // Compute vertex bounds BEFORE creating Anp so params.orig aligns
-                // with the tile grid that Process() will generate. Process() uses
-                // mapGeometry.bbMin as the grid origin - params.orig must match.
-                rcCalcBounds(mapGeometry.Verts(), static_cast<int>(mapGeometry.verts.size()), mapGeometry.bbMin,
-                             mapGeometry.bbMax);
-                params.orig[0] = mapGeometry.bbMin[0];
-                params.orig[2] = mapGeometry.bbMin[2];
-
-                Anp anp(mapId, params);
-                AdtTileProcessor tileProcessor(&anp, outputDir, mapName, false);
-
-                START_TIMER(startTimeNavmesh);
-                waterMap.BuildSpatialIndex();
-                roadMap.BuildSpatialIndex();
-
-                LogI(std::format("[{}] Geometry: {} verts, {} tris | Water: {} rects | Roads: {} | Cities: {} | Factions: {}",
-                                 mapName, mapGeometry.verts.size(), mapGeometry.tris.size(),
-                                 waterMap.rects.size(), roadMap.rects.size(), cityMap.rects.size(), factionMap.rects.size()));
-
-                tileProcessor.Process(&mapGeometry, &waterMap, &roadMap, &factionMap, &cityMap);
-                STOP_TIMER(startTimeNavmesh, std::format("[{}] Building navmesh took", mapName));
-
-                LogI(std::format("[{}] Saving {}/{:03}.anp...", mapName, outputDir, mapId));
-                anp.Save(outputDir.c_str());
-                LogS(std::format("[{}] Saved navmesh to {}/{:03}.anp", mapName, outputDir, mapId));
-            }
-
-            STOP_TIMER(startTimeTile, std::format("Parsing Map context [{}] took", mapName));
         }
+
+        if (!ExportMap(mapId, mapName, options, reader, liquidTypes, areas))
+        {
+            failedMaps++;
+        }
+
+        // Map names, liquid types and areas are plain copies, the cached files can go.
+        reader.Clear();
     }
 
+    const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - exportStart).count();
+
+    if (failedMaps > 0)
+    {
+        LogE("Export finished with ", failedMaps, " failed map(s) in ", Logger::FormatDuration(seconds));
+        return 2;
+    }
+
+    LogS("Export finished in ", Logger::FormatDuration(seconds));
     return 0;
 }

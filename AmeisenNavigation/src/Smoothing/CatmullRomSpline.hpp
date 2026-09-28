@@ -1,72 +1,84 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 
+#include "../Utils/Path.hpp"
 #include "../Utils/VectorUtils.hpp"
-#include "../Utils/Vector3.hpp"
 
-namespace CatmullRomSpline
+namespace CatmullRomSpline {
+/// Knot interval for the parametrized Catmull-Rom spline (alpha 0 = uniform, 0.5 = centripetal, 1 = chordal).
+/// Clamped to a small epsilon so duplicate points can't cause divisions by zero.
+inline float KnotInterval(const Vector3& a, const Vector3& b, float halfAlpha) noexcept
 {
-    /// Squared distance between two points.
-    inline float DistSq(const Vector3& a, const Vector3& b) noexcept
+    return std::max(std::pow((b - a).LengthSquared(), halfAlpha), 1e-4f);
+}
+
+/// Evaluate one Catmull-Rom segment between p1 and p2 at parameter t in [t1, t2] (Barry-Goldman pyramid).
+inline Vector3 Evaluate(const Vector3& p0, const Vector3& p1, const Vector3& p2, const Vector3& p3, float t0, float t1,
+                        float t2, float t3, float t) noexcept
+{
+    Vector3 a1, a2, a3, b1, b2, c;
+    ScaleAndAddVector3(p0, (t1 - t) / (t1 - t0), p1, (t - t0) / (t1 - t0), a1);
+    ScaleAndAddVector3(p1, (t2 - t) / (t2 - t1), p2, (t - t1) / (t2 - t1), a2);
+    ScaleAndAddVector3(p2, (t3 - t) / (t3 - t2), p3, (t - t2) / (t3 - t2), a3);
+    ScaleAndAddVector3(a1, (t2 - t) / (t2 - t0), a2, (t - t0) / (t2 - t0), b1);
+    ScaleAndAddVector3(a2, (t3 - t) / (t3 - t1), a3, (t - t1) / (t3 - t1), b2);
+    ScaleAndAddVector3(b1, (t2 - t) / (t2 - t1), b2, (t - t1) / (t2 - t1), c);
+    return c;
+}
+
+/// Interpolating spline through every input point. Each segment is sampled with `points` samples, the
+/// first/last segment use mirrored phantom control points so the curve starts and ends exactly at the
+/// input endpoints. Output never exceeds its capacity and always ends with the last input point.
+inline void SmoothPath(const Vector3* input, int inputSize, Path& output, int points, float alpha) noexcept
+{
+    output.Clear();
+
+    if (inputSize <= 0)
     {
-        float dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
-        return dx * dx + dy * dy + dz * dz;
+        return;
     }
 
-    static void SmoothPath(const Vector3* input, int inputSize, Vector3* output, int* outputSize, int outputMaxSize, int points, float alpha) noexcept
+    if (inputSize < 3 || points < 1)
     {
-        InsertVector3(output, *outputSize, input, 0);
-
-        const float halfAlpha = alpha * 0.5f;
-
-        Vector3 A1, A2, A3;
-        Vector3 B1, B2;
-        Vector3 C;
-
-        for (int i = 1; i < inputSize - 2; ++i)
+        for (int i = 0; i < inputSize; ++i)
         {
-            const Vector3& p0 = input[i - 1];
-            const Vector3& p1 = input[i];
-            const Vector3& p2 = input[i + 1];
-            const Vector3& p3 = input[i + 2];
+            output.TryAppend(input[i]);
+        }
 
-            const float t0 = 0.0f;
-            // powf(distSq, alpha*0.5) replaces powf(dx,2)+powf(dy,2)+... then powf(sum, alpha*0.5)
-            const float t1 = std::powf(DistSq(p1, p0), halfAlpha) + t0;
-            const float t2 = std::powf(DistSq(p2, p1), halfAlpha) + t1;
-            const float t3 = std::powf(DistSq(p3, p2), halfAlpha) + t2;
+        return;
+    }
 
-            // Skip degenerate segments where consecutive points are identical
-            if (t1 == t0 || t2 == t1 || t3 == t2 || t2 == t0 || t3 == t1)
-                continue;
+    const float halfAlpha = std::clamp(alpha, 0.0f, 1.0f) * 0.5f;
+    const Vector3 first = input[0] * 2.0f - input[1];
+    const Vector3 last = input[inputSize - 1] * 2.0f - input[inputSize - 2];
 
-            // Precompute reciprocals to replace divisions in the inner loop
-            const float inv_t1_t0 = 1.0f / (t1 - t0);
-            const float inv_t2_t1 = 1.0f / (t2 - t1);
-            const float inv_t3_t2 = 1.0f / (t3 - t2);
-            const float inv_t2_t0 = 1.0f / (t2 - t0);
-            const float inv_t3_t1 = 1.0f / (t3 - t1);
-            const float step = (t2 - t1) / static_cast<float>(points);
+    for (int i = 0; i < inputSize - 1; ++i)
+    {
+        const Vector3& p0 = i > 0 ? input[i - 1] : first;
+        const Vector3& p1 = input[i];
+        const Vector3& p2 = input[i + 1];
+        const Vector3& p3 = i + 2 < inputSize ? input[i + 2] : last;
 
-            for (float t = t1; t < t2; t += step)
+        const float t0 = 0.0f;
+        const float t1 = t0 + KnotInterval(p0, p1, halfAlpha);
+        const float t2 = t1 + KnotInterval(p1, p2, halfAlpha);
+        const float t3 = t2 + KnotInterval(p2, p3, halfAlpha);
+
+        // Sample [t1, t2), the segment end is the next segment's start (or the final point).
+        for (int k = 0; k < points; ++k)
+        {
+            if (output.GetSpace() <= 1)
             {
-                const float dt1 = t1 - t, dt2 = t2 - t, dt3 = t3 - t;
-                const float ft0 = t - t0, ft1 = t - t1, ft2 = t - t2;
-
-                ScaleAndAddVector3(p0, dt1 * inv_t1_t0, p1, ft0 * inv_t1_t0, A1);
-                ScaleAndAddVector3(p1, dt2 * inv_t2_t1, p2, ft1 * inv_t2_t1, A2);
-                ScaleAndAddVector3(p2, dt3 * inv_t3_t2, p3, ft2 * inv_t3_t2, A3);
-
-                ScaleAndAddVector3(A1, dt2 * inv_t2_t0, A2, ft0 * inv_t2_t0, B1);
-                ScaleAndAddVector3(A2, dt3 * inv_t3_t1, A3, ft1 * inv_t3_t1, B2);
-
-                ScaleAndAddVector3(B1, dt2 * inv_t2_t1, B2, ft1 * inv_t2_t1, C);
-
-                InsertVector3(output, *outputSize, &C, 0);
-
-                if (*outputSize > outputMaxSize - 1) { return; }
+                break;
             }
+
+            const float t = t1 + (t2 - t1) * (static_cast<float>(k) / static_cast<float>(points));
+            output.TryAppendUnique(k == 0 ? p1 : Evaluate(p0, p1, p2, p3, t0, t1, t2, t3, t));
         }
     }
+
+    output.TryAppendUnique(input[inputSize - 1]);
 }
+} // namespace CatmullRomSpline

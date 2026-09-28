@@ -1,117 +1,88 @@
 #pragma once
 
-#include <memory>
-#include <unordered_map>
-
-#include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
-
-#include "../../AmeisenNavigation.Exporter/src/Utils/Tri.hpp"
-
+#include "../../../../AmeisenNavigation.Pack/src/AnpFormat.hpp"
 #include "../../Clients/ClientState.hpp"
 #include "../IQueryFilterProvider.hpp"
 
-/// <summary>
-/// Helper to provide default dtQueryFilter's for ANP format navmeshes.
+/// Default dtQueryFilters for ANP navmeshes.
 ///
-/// All 27 TriAreaId values get explicit costs. Faction-specific filters
-/// multiply enemy faction area costs by factionDangerCost, making bots
-/// avoid enemy territory (e.g., Horde bot avoids Northshire Abbey).
-///
-/// Clients may override these defaults via ConfigureFilter messages.
-/// </summary>
+/// All 27 area ids get explicit costs. Faction-specific filters multiply enemy faction area costs by
+/// factionDangerCost, making bots avoid enemy territory (e.g. a Horde bot avoids Northshire Abbey).
+/// Clients may override these defaults via CONFIGURE_FILTER messages.
 class AnpQueryFilterProvider : public IQueryFilterProvider
 {
-    std::unordered_map<ClientState, std::unique_ptr<dtQueryFilter>> Filters;
-
-    /// Set costs for all 27 area IDs on a filter.
-    /// allyMult/hordeMult: multiplier applied to Alliance/Horde faction areas.
-    static void SetAllAreaCosts(dtQueryFilter* f, float ground, float road, float water,
-                                float badLiquid, float allyMult, float hordeMult) noexcept
-    {
-        // Terrain ground (+ city, WMO, doodad use same base cost)
-        f->setAreaCost(TERRAIN_GROUND, ground);
-        f->setAreaCost(ALLIANCE_TERRAIN_GROUND, ground * allyMult);
-        f->setAreaCost(HORDE_TERRAIN_GROUND, ground * hordeMult);
-
-        f->setAreaCost(TERRAIN_ROAD, road);
-        f->setAreaCost(ALLIANCE_TERRAIN_ROAD, road * allyMult);
-        f->setAreaCost(HORDE_TERRAIN_ROAD, road * hordeMult);
-
-        f->setAreaCost(TERRAIN_CITY, ground);
-        f->setAreaCost(ALLIANCE_TERRAIN_CITY, ground * allyMult);
-        f->setAreaCost(HORDE_TERRAIN_CITY, ground * hordeMult);
-
-        f->setAreaCost(WMO, ground);
-        f->setAreaCost(ALLIANCE_WMO, ground * allyMult);
-        f->setAreaCost(HORDE_WMO, ground * hordeMult);
-
-        f->setAreaCost(DOODAD, ground);
-        f->setAreaCost(ALLIANCE_DOODAD, ground * allyMult);
-        f->setAreaCost(HORDE_DOODAD, ground * hordeMult);
-
-        // Water
-        f->setAreaCost(LIQUID_WATER, water);
-        f->setAreaCost(ALLIANCE_LIQUID_WATER, water * allyMult);
-        f->setAreaCost(HORDE_LIQUID_WATER, water * hordeMult);
-
-        f->setAreaCost(LIQUID_OCEAN, water);
-        f->setAreaCost(ALLIANCE_LIQUID_OCEAN, water * allyMult);
-        f->setAreaCost(HORDE_LIQUID_OCEAN, water * hordeMult);
-
-        // Bad liquid (lava/slime) - always expensive regardless of faction
-        f->setAreaCost(LIQUID_LAVA, badLiquid);
-        f->setAreaCost(ALLIANCE_LIQUID_LAVA, badLiquid);
-        f->setAreaCost(HORDE_LIQUID_LAVA, badLiquid);
-
-        f->setAreaCost(LIQUID_SLIME, badLiquid);
-        f->setAreaCost(ALLIANCE_LIQUID_SLIME, badLiquid);
-        f->setAreaCost(HORDE_LIQUID_SLIME, badLiquid);
-    }
-
 public:
-    AnpQueryFilterProvider(float waterCost = 1.6f, float badLiquidCost = 4.0f, float roadCost = 0.75f,
-                           float factionDangerCost = 3.0f)
-        : Filters{}
+    struct Costs
     {
-        Filters[ClientState::NORMAL] = std::make_unique<dtQueryFilter>();
-        Filters[ClientState::NORMAL_ALLIANCE] = std::make_unique<dtQueryFilter>();
-        Filters[ClientState::NORMAL_HORDE] = std::make_unique<dtQueryFilter>();
-        Filters[ClientState::DEAD] = std::make_unique<dtQueryFilter>();
+        float ground = 1.0f;
+        float road = 0.75f;
+        float water = 1.6f;
+        float badLiquid = 4.0f;
+        float allianceMultiplier = 1.0f;
+        float hordeMultiplier = 1.0f;
+    };
 
-        char includeFlags = static_cast<char>(TriFlag::NAV_LAVA_SLIME) | static_cast<char>(TriFlag::NAV_WATER) |
-                            static_cast<char>(TriFlag::NAV_GROUND) | static_cast<char>(TriFlag::NAV_ROAD) |
-                            static_cast<char>(TriFlag::NAV_ALLIANCE) | static_cast<char>(TriFlag::NAV_HORDE);
+    explicit AnpQueryFilterProvider(float waterCost = 1.6f, float badLiquidCost = 4.0f, float roadCost = 0.75f,
+                                    float factionDangerCost = 3.0f) noexcept
+    {
+        const unsigned short includeFlags =
+            NAV_LAVA_SLIME | NAV_WATER | NAV_GROUND | NAV_ROAD | NAV_ALLIANCE | NAV_HORDE;
 
-        char excludeFlags = static_cast<char>(TriFlag::NAV_EMPTY);
+        for (int i = 0; i < ClientStateCount; ++i)
+        {
+            auto& filter = Filter(static_cast<ClientState>(i));
+            filter.setIncludeFlags(includeFlags);
+            filter.setExcludeFlags(0);
+        }
 
-        // NORMAL - no faction bias, all areas at base cost
-        Filters[ClientState::NORMAL]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::NORMAL].get(), 1.0f, roadCost, waterCost, badLiquidCost, 1.0f, 1.0f);
+        const Costs base{1.0f, roadCost, waterCost, badLiquidCost, 1.0f, 1.0f};
 
-        // NORMAL_ALLIANCE - Alliance bot: Horde areas are dangerous (hordeMult = factionDangerCost)
-        Filters[ClientState::NORMAL_ALLIANCE]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL_ALLIANCE]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::NORMAL_ALLIANCE].get(), 1.0f, roadCost, waterCost, badLiquidCost,
-                        1.0f, factionDangerCost);
+        ApplyCosts(Filter(ClientState::NORMAL), base);
 
-        // NORMAL_HORDE - Horde bot: Alliance areas are dangerous (allyMult = factionDangerCost)
-        Filters[ClientState::NORMAL_HORDE]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL_HORDE]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::NORMAL_HORDE].get(), 1.0f, roadCost, waterCost, badLiquidCost,
-                        factionDangerCost, 1.0f);
+        // Alliance bot: Horde areas are dangerous.
+        Costs alliance = base;
+        alliance.hordeMultiplier = factionDangerCost;
+        ApplyCosts(Filter(ClientState::NORMAL_ALLIANCE), alliance);
 
-        // DEAD - ghost mode, all areas cost 1.0 (free movement)
-        Filters[ClientState::DEAD]->setIncludeFlags(includeFlags);
-        Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
-        SetAllAreaCosts(Filters[ClientState::DEAD].get(), 1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f);
+        // Horde bot: Alliance areas are dangerous.
+        Costs horde = base;
+        horde.allianceMultiplier = factionDangerCost;
+        ApplyCosts(Filter(ClientState::NORMAL_HORDE), horde);
+
+        // Ghost: everything costs the same.
+        ApplyCosts(Filter(ClientState::DEAD), Costs{1.0f, 1.0f, 1.0f, 1.0f, 1.0f, 1.0f});
     }
 
-    ~AnpQueryFilterProvider() = default;
-
-    virtual dtQueryFilter* Get(ClientState state) const noexcept override
+    /// Set costs for all 27 area ids. Bad liquids are expensive regardless of faction.
+    static void ApplyCosts(dtQueryFilter& f, const Costs& c) noexcept
     {
-        auto it = Filters.find(state);
-        return it != Filters.end() ? it->second.get() : nullptr;
+        for (unsigned int area = TERRAIN_GROUND; area < ANP_AREA_COUNT; ++area)
+        {
+            float cost = c.ground;
+
+            switch (GetNeutralArea(area))
+            {
+                case TERRAIN_ROAD: cost = c.road; break;
+                case LIQUID_WATER:
+                case LIQUID_OCEAN: cost = c.water; break;
+                case LIQUID_LAVA:
+                case LIQUID_SLIME: cost = c.badLiquid; break;
+                default: break;
+            }
+
+            const bool isBadLiquid = GetNeutralArea(area) == LIQUID_LAVA || GetNeutralArea(area) == LIQUID_SLIME;
+
+            if (!isBadLiquid)
+            {
+                switch (GetAreaFaction(area))
+                {
+                    case AreaFaction::Alliance: cost *= c.allianceMultiplier; break;
+                    case AreaFaction::Horde: cost *= c.hordeMultiplier; break;
+                    default: break;
+                }
+            }
+
+            f.setAreaCost(static_cast<int>(area), cost);
+        }
     }
 };

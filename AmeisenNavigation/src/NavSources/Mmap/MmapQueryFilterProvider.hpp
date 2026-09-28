@@ -1,116 +1,69 @@
 #pragma once
 
-#include <memory>
-#include <unordered_map>
-
-#include "../../recastnavigation/Detour/Include/DetourNavMeshQuery.h"
-
+#include "../../Clients/ClientState.hpp"
 #include "../IQueryFilterProvider.hpp"
 #include "335a/NavArea335a.hpp"
 #include "548/NavArea548.hpp"
 #include "MmapFormat.hpp"
-#include "../../Clients/ClientState.hpp"
 
-/// <summary>
-/// Helper to provide default dtQueryFilter's. Clients may use their own filters to optimize movement,
-/// prefer moving through water or whatever.
-/// </summary>
+/// Default dtQueryFilters for TrinityCore/SkyFire MMAPs. MMAPs have no faction areas, so the faction
+/// states behave like NORMAL. DEAD walks through bad liquids at base cost.
 class MmapQueryFilterProvider : public IQueryFilterProvider
 {
-    std::unordered_map<ClientState, std::unique_ptr<dtQueryFilter>> Filters;
-
 public:
-    MmapQueryFilterProvider(MmapFormat format, float waterCost = 1.3f, float badLiquidCost = 4.0f)
-        : Filters{}
+    explicit MmapQueryFilterProvider(MmapFormat format, float waterCost = 1.3f, float badLiquidCost = 4.0f) noexcept
     {
-        Filters[ClientState::NORMAL] = std::make_unique<dtQueryFilter>();
-        Filters[ClientState::NORMAL_ALLIANCE] = std::make_unique<dtQueryFilter>();
-        Filters[ClientState::NORMAL_HORDE] = std::make_unique<dtQueryFilter>();
-        Filters[ClientState::DEAD] = std::make_unique<dtQueryFilter>();
-
-        switch (format)
+        if (format == MmapFormat::SF548)
         {
-        case MmapFormat::UNKNOWN:
-            Tc335aConfig(waterCost, badLiquidCost);
-            break;
-
-        case MmapFormat::TC335A:
-            Tc335aConfig(waterCost, badLiquidCost);
-            break;
-
-        case MmapFormat::SF548:
             Sf548Config(waterCost, badLiquidCost);
-            break;
-
-        default:
-            break;
+        }
+        else
+        {
+            Tc335aConfig(waterCost, badLiquidCost);
         }
     }
 
-    inline void Tc335aConfig(float waterCost, float badLiquidCost)
+private:
+    void Tc335aConfig(float waterCost, float badLiquidCost) noexcept
     {
-        char includeFlags = static_cast<char>(NavArea335a::GROUND)
-            | static_cast<char>(NavArea335a::WATER)
-            | static_cast<char>(NavArea335a::MAGMA_SLIME);
+        const auto includeFlags = static_cast<unsigned short>(static_cast<unsigned short>(NavFlag335a::GROUND)
+                                                              | static_cast<unsigned short>(NavFlag335a::WATER)
+                                                              | static_cast<unsigned short>(NavFlag335a::MAGMA_SLIME));
+        const auto excludeFlags = static_cast<unsigned short>(NavFlag335a::GROUND_STEEP);
 
-        char excludeFlags = static_cast<char>(NavArea335a::EMPTY)
-            | static_cast<char>(NavArea335a::GROUND_STEEP);
+        for (int i = 0; i < ClientStateCount; ++i)
+        {
+            auto& filter = Filter(static_cast<ClientState>(i));
+            filter.setIncludeFlags(includeFlags);
+            filter.setExcludeFlags(excludeFlags);
 
-        Filters[ClientState::NORMAL]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL]->setExcludeFlags(excludeFlags);
-        Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(NavArea335a::WATER), waterCost);
-        Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(NavArea335a::MAGMA_SLIME), badLiquidCost);
-
-        Filters[ClientState::NORMAL_ALLIANCE]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL_ALLIANCE]->setExcludeFlags(excludeFlags);
-        Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(NavArea335a::WATER), waterCost);
-        Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(NavArea335a::MAGMA_SLIME), badLiquidCost);
-
-        Filters[ClientState::NORMAL_HORDE]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL_HORDE]->setExcludeFlags(excludeFlags);
-        Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(NavArea335a::WATER), waterCost);
-        Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(NavArea335a::MAGMA_SLIME), badLiquidCost);
-
-        Filters[ClientState::DEAD]->setIncludeFlags(includeFlags);
-        Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
+            if (static_cast<ClientState>(i) != ClientState::DEAD)
+            {
+                // Costs are indexed by area id (not by flag).
+                filter.setAreaCost(static_cast<int>(NavArea335a::WATER), waterCost);
+                filter.setAreaCost(static_cast<int>(NavArea335a::MAGMA_SLIME), badLiquidCost);
+            }
+        }
     }
 
-    inline void Sf548Config(float waterCost, float badLiquidCost)
+    void Sf548Config(float waterCost, float badLiquidCost) noexcept
     {
-        char includeFlags = static_cast<char>(NavArea548::GROUND)
-            | static_cast<char>(NavArea548::WATER)
-            | static_cast<char>(NavArea548::MAGMA)
-            | static_cast<char>(NavArea548::SLIME);
+        const auto includeFlags = static_cast<unsigned short>(
+            static_cast<unsigned short>(NavArea548::GROUND) | static_cast<unsigned short>(NavArea548::WATER)
+            | static_cast<unsigned short>(NavArea548::MAGMA) | static_cast<unsigned short>(NavArea548::SLIME));
 
-        char excludeFlags = static_cast<char>(NavArea548::EMPTY);
+        for (int i = 0; i < ClientStateCount; ++i)
+        {
+            auto& filter = Filter(static_cast<ClientState>(i));
+            filter.setIncludeFlags(includeFlags);
+            filter.setExcludeFlags(0);
 
-        Filters[ClientState::NORMAL]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL]->setExcludeFlags(excludeFlags);
-        Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(NavArea548::WATER), waterCost);
-        Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(NavArea548::MAGMA), badLiquidCost);
-        Filters[ClientState::NORMAL]->setAreaCost(static_cast<char>(NavArea548::SLIME), badLiquidCost);
-
-        Filters[ClientState::NORMAL_ALLIANCE]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL_ALLIANCE]->setExcludeFlags(excludeFlags);
-        Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(NavArea548::WATER), waterCost);
-        Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(NavArea548::MAGMA), badLiquidCost);
-        Filters[ClientState::NORMAL_ALLIANCE]->setAreaCost(static_cast<char>(NavArea548::SLIME), badLiquidCost);
-
-        Filters[ClientState::NORMAL_HORDE]->setIncludeFlags(includeFlags);
-        Filters[ClientState::NORMAL_HORDE]->setExcludeFlags(excludeFlags);
-        Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(NavArea548::WATER), waterCost);
-        Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(NavArea548::MAGMA), badLiquidCost);
-        Filters[ClientState::NORMAL_HORDE]->setAreaCost(static_cast<char>(NavArea548::SLIME), badLiquidCost);
-
-        Filters[ClientState::DEAD]->setIncludeFlags(includeFlags);
-        Filters[ClientState::DEAD]->setExcludeFlags(excludeFlags);
-    }
-
-    ~MmapQueryFilterProvider() = default;
-
-    virtual dtQueryFilter* Get(ClientState state) const noexcept override
-    {
-        auto it = Filters.find(state);
-        return it != Filters.end() ? it->second.get() : nullptr;
+            if (static_cast<ClientState>(i) != ClientState::DEAD)
+            {
+                filter.setAreaCost(static_cast<int>(NavArea548::WATER), waterCost);
+                filter.setAreaCost(static_cast<int>(NavArea548::MAGMA), badLiquidCost);
+                filter.setAreaCost(static_cast<int>(NavArea548::SLIME), badLiquidCost);
+            }
+        }
     }
 };

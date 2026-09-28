@@ -1,6 +1,9 @@
 #pragma once
 
+#include <cstdint>
+
 #include "../Utils/Misc.hpp"
+#include "../Utils/Vector3.hpp"
 
 #pragma pack(push, 1)
 struct MD20
@@ -65,6 +68,22 @@ struct M2
 
 public:
     inline const MD20* Md20() const noexcept { return reinterpret_cast<MD20*>(Data); };
+
+    /// Header present and the collision vertex/index arrays inside the file.
+    inline bool IsValid() const noexcept
+    {
+        if (!Data || Size < sizeof(MD20))
+        {
+            return false;
+        }
+
+        const MD20* h = Md20();
+        const uint64_t vertsEnd = static_cast<uint64_t>(h->offsetBoundingVertices)
+                                  + static_cast<uint64_t>(h->countBoundingVertices) * sizeof(Vector3);
+        const uint64_t trisEnd = static_cast<uint64_t>(h->offsetBoundingTriangles)
+                                 + static_cast<uint64_t>(h->countBoundingTriangles) * sizeof(unsigned short);
+        return vertsEnd <= Size && trisEnd <= Size;
+    }
 
     inline const Vector3* Vertex(size_t i) const noexcept { return reinterpret_cast<Vector3*>(Data + Md20()->offsetBoundingVertices + (sizeof(Vector3) * i)); }
     inline const unsigned short* Tri(size_t i) const noexcept { return reinterpret_cast<unsigned short*>(Data + Md20()->offsetBoundingTriangles + (sizeof(unsigned short) * i)); }

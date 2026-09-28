@@ -1,400 +1,224 @@
-#include "Main.hpp"
+#include <atomic>
+#include <cstdio>
+#include <filesystem>
+#include <iostream>
+#include <string>
+#include <string_view>
+#include <vector>
 
-int __cdecl main(int argc, const char* argv[])
+#include "NavServer.hpp"
+#include "Utils/Logger.hpp"
+
+#ifdef _WIN32
+#include <io.h>
+#else
+#include <csignal>
+#include <unistd.h>
+#endif
+
+namespace {
+/// Target for the signal handler. Stop() only sets an atomic flag, so calling it from a signal is safe.
+std::atomic<NavServer*> g_SignalTarget{nullptr};
+
+#ifdef _WIN32
+BOOL WINAPI ConsoleCtrlHandler(DWORD signal)
+{
+    if (signal == CTRL_C_EVENT || signal == CTRL_BREAK_EVENT || signal == CTRL_CLOSE_EVENT)
+    {
+        if (NavServer* server = g_SignalTarget.load())
+        {
+            server->Stop();
+        }
+
+        return TRUE;
+    }
+
+    return FALSE;
+}
+
+bool InstallSignalHandlers() { return SetConsoleCtrlHandler(ConsoleCtrlHandler, TRUE) != 0; }
+
+bool IsInteractive() { return _isatty(_fileno(stdin)) != 0; }
+#else
+void SignalHandler(int)
+{
+    if (NavServer* server = g_SignalTarget.load())
+    {
+        server->Stop();
+    }
+}
+
+bool InstallSignalHandlers()
+{
+    struct sigaction action{};
+    action.sa_handler = SignalHandler;
+    sigemptyset(&action.sa_mask);
+
+    std::signal(SIGPIPE, SIG_IGN);
+    return sigaction(SIGINT, &action, nullptr) == 0 && sigaction(SIGTERM, &action, nullptr) == 0;
+}
+
+bool IsInteractive() { return false; }
+#endif
+
+/// Keep the console window open when started by double click on Windows, never block services.
+void WaitForKeyIfInteractive()
+{
+    if (IsInteractive())
+    {
+        LogI("Press enter to exit...");
+        std::cin.get();
+    }
+}
+
+void PrintBanner()
+{
+    const bool color = Logger::IsColorEnabled();
+    std::fputs(std::format("{}"
+                           "      ___                   _                 _   __           \n"
+                           "     /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __\n"
+                           "    / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /\n"
+                           "   / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / \n"
+                           "  /_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/  \n"
+                           "                                          Server {}{}\n\n",
+                           color ? "\033[96m" : "", AMEISENNAV_VERSION, color ? "\033[0m" : "")
+                   .c_str(),
+               stdout);
+}
+
+void PrintUsage(const char* exe)
+{
+    std::printf("Usage: %s [config.cfg]\n\n"
+                "  config.cfg   Path to the config file (default: config.cfg next to the executable).\n"
+                "               A default config is created if the file does not exist.\n"
+                "  --help       Show this help.\n"
+                "  --version    Print the version.\n",
+                exe);
+}
+
+std::filesystem::path DefaultConfigPath(const char* argv0)
+{
+    std::error_code ec;
+    const auto exe = std::filesystem::absolute(argv0 ? argv0 : "", ec);
+    return (ec ? std::filesystem::current_path(ec) : exe.parent_path()) / "config.cfg";
+}
+} // namespace
+
+int main(int argc, const char* argv[])
 {
     Logger::Initialize();
 
-    fputs(std::format(
-        "\033[96m"
-        "      ___                   _                 _   __           \n"
-        "     /   |  ____ ___  ___  (_)_______  ____  / | / /___ __   __\n"
-        "    / /| | / __ `__ \\/ _ \\/ / ___/ _ \\/ __ \\/  |/ / __ `/ | / /\n"
-        "   / ___ |/ / / / / /  __/ (__  )  __/ / / / /|  / /_/ /| |/ / \n"
-        "  /_/  |_/_/ /_/ /_/\\___/_/____/\\___/_/ /_/_/ |_/\\__,_/ |___/  \n"
-        "                                          Server {}\033[0m\n\n",
-        AMEISENNAV_VERSION).c_str(), stdout);
+    std::filesystem::path configPath = DefaultConfigPath(argc > 0 ? argv[0] : nullptr);
+    bool configFromArgs = false;
 
-    std::filesystem::path configPath(std::filesystem::path(argv[0]).parent_path().string() + "\\config.cfg");
-    auto config = std::make_unique<AmeisenNavConfig>();
-
-    if (argc > 1)
+    for (int i = 1; i < argc; ++i)
     {
-        configPath = std::filesystem::path(argv[1]);
+        const std::string_view arg = argv[i];
 
-        if (!std::filesystem::exists(configPath))
+        if (arg == "--help" || arg == "-h" || arg == "/?")
         {
-            LogE("Configfile does not exist: \"", argv[1], "\"");
-            std::cin.get();
-            return 1;
+            PrintUsage(argv[0]);
+            return 0;
         }
+
+        if (arg == "--version" || arg == "-v")
+        {
+            std::printf("AmeisenNavigation.Server %s (AnTCP %s)\n", AMEISENNAV_VERSION, ANTCP_SERVER_VERSION);
+            return 0;
+        }
+
+        configPath = std::filesystem::path(arg);
+        configFromArgs = true;
     }
+
+    PrintBanner();
+
+    AmeisenNavConfig config;
 
     if (std::filesystem::exists(configPath))
     {
-        config->Load(configPath);
-        LogI("Loaded Configfile: \"", configPath.string(), "\"");
+        std::vector<std::string> parseErrors;
+        config.Load(configPath, &parseErrors);
 
-        // directly save again to add new entries to it
-        config->Save(configPath);
+        for (const auto& error : parseErrors)
+        {
+            LogW("Config: ", error);
+        }
+
+        LogI("Loaded config: \"", configPath.string(), "\"");
+
+        // Save again so new options show up in existing config files.
+        config.Save(configPath);
     }
     else
     {
-        config->Save(configPath);
+        if (configFromArgs)
+        {
+            LogE("Config file does not exist: \"", configPath.string(), "\"");
+            WaitForKeyIfInteractive();
+            return 1;
+        }
 
-        LogI("Created default Configfile: \"", configPath.string(), "\"");
-        LogI("Edit it and restart the server, press any key to exit...");
-        std::cin.get();
+        if (!config.Save(configPath))
+        {
+            LogE("Failed to create default config: \"", configPath.string(), "\"");
+            WaitForKeyIfInteractive();
+            return 1;
+        }
+
+        LogI("Created default config: \"", configPath.string(), "\"");
+        LogI("Edit it and restart the server.");
+        WaitForKeyIfInteractive();
         return 1;
     }
 
-    // validate config
-    if (!std::filesystem::exists(config->mmapsPath))
+    Logger::SetDebugEnabled(config.debugLogging || Logger::IsDebugEnabled());
+
+    std::vector<std::string> errors;
+    std::vector<std::string> warnings;
+    NavServer::ValidateConfig(config, errors, warnings);
+
+    for (const auto& warning : warnings)
     {
-        LogE("MMAPS folder does not exist: \"", config->mmapsPath, "\"");
-        std::cin.get();
+        LogW("Config: ", warning);
+    }
+
+    if (!errors.empty())
+    {
+        for (const auto& error : errors)
+        {
+            LogE("Config: ", error);
+        }
+
+        WaitForKeyIfInteractive();
         return 1;
     }
 
-    if (config->maxPolyPath <= 0)
+    NavServer server(config);
+    g_SignalTarget.store(&server);
+
+    if (!InstallSignalHandlers())
     {
-        LogE("iMaxPolyPath has to be a value > 0");
-        std::cin.get();
+        LogW("Failed to install signal handlers, CTRL+C will not shut down gracefully");
+    }
+
+    LogI("Config: format=", config.useAnpFileFormat ? "ANP" : "MMAP", " maxPolyPath=", config.maxPolyPath,
+         " maxPointPath=", config.maxPointPath, " maxSearchNodes=", config.maxSearchNodes);
+    LogI("Config: meshes=\"", config.mmapsPath, "\"");
+
+    server.PreloadMaps();
+
+    LogS("Starting server on ", config.ip, ":", config.port);
+    const AnTcpError result = server.Run();
+    g_SignalTarget.store(nullptr);
+
+    if (result != AnTcpError::Success)
+    {
+        LogE("Server failed to start (AnTcpError ", static_cast<int>(result), "), is the port already in use?");
+        WaitForKeyIfInteractive();
         return 1;
     }
-
-    if (config->port <= 0 || config->port > 65535)
-    {
-        LogE("iPort has to be a value between 1 and 65535");
-        std::cin.get();
-        return 1;
-    }
-
-    if (config->maxSearchNodes <= 0 || config->maxSearchNodes > 65535)
-    {
-        LogE("iMaxSearchNodes has to be a value between 1 and 65535");
-        std::cin.get();
-        return 1;
-    }
-
-    if (config->maxPointPath <= 0)
-    {
-        LogE("iMaxPointPath has to be a value > 0");
-        std::cin.get();
-        return 1;
-    }
-
-    if (config->bezierCurvePoints < 2)
-    {
-        LogW("iBezierCurvePoints too low, clamping to 2");
-        config->bezierCurvePoints = 2;
-    }
-
-    if (config->catmullRomSplinePoints < 2)
-    {
-        LogW("iCatmullRomSplinePoints too low, clamping to 2");
-        config->catmullRomSplinePoints = 2;
-    }
-
-    if (config->factionDangerCost < 0.0f)
-    {
-        LogW("fFactionDangerCost negative, clamping to 0.0");
-        config->factionDangerCost = 0.0f;
-    }
-
-    // set ctrl+c handler to cleanup stuff when we exit
-    if (!SetConsoleCtrlHandler(SigIntHandler, 1))
-    {
-        LogE("SetConsoleCtrlHandler() failed: ", GetLastError());
-        std::cin.get();
-        return 1;
-    }
-
-    // NavServer takes ownership of config
-    auto* configPtr = config.get();
-    g_NavServer = std::make_unique<NavServer>(std::move(config));
-    g_NavServer->RegisterCallbacks();
-
-    LogI("Config: maxPolyPath=", configPtr->maxPolyPath,
-         " maxPointPath=", configPtr->maxPointPath,
-         " maxSearchNodes=", configPtr->maxSearchNodes,
-         " format=", configPtr->useAnpFileFormat ? "ANP" : "MMAP");
-    LogI("Config: meshes=\"", configPtr->mmapsPath, "\"");
-    LogS("Starting server on: ", configPtr->ip, ":", std::to_string(configPtr->port));
-    g_NavServer->Run();
 
     LogI("Server shutdown complete.");
-    g_NavServer.reset();
-}
-
-int __stdcall SigIntHandler(unsigned long signal)
-{
-    if (signal == CTRL_C_EVENT || signal == CTRL_CLOSE_EVENT)
-    {
-        LogI("Received CTRL-C or CTRL-EXIT, stopping server...");
-        if (g_NavServer) { g_NavServer->Stop(); }
-    }
-
-    return 1;
-}
-
-void OnClientConnect(ClientHandler* handler)
-{
-    LogI("Client Connected: ", handler->GetIpAddress(), ":", handler->GetPort());
-
-    g_NavServer->AllocClientBuffers(handler->GetId());
-    g_NavServer->Nav()->NewClient(handler->GetId(), static_cast<MmapFormat>(g_NavServer->Config()->mmapFormat));
-}
-
-void OnClientDisconnect(ClientHandler* handler)
-{
-    if (!g_NavServer->HasClientBuffers(handler->GetId()))
-        return;
-
-    g_NavServer->Nav()->FreeClient(handler->GetId());
-    g_NavServer->FreeClientBuffers(handler->GetId());
-
-    LogI("Client Disconnected: ", handler->GetIpAddress(), ":", handler->GetPort());
-}
-
-void PathCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    GenericPathCallback(handler, type, data, size, PathType::STRAIGHT);
-}
-
-void RandomPathCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    GenericPathCallback(handler, type, data, size, PathType::RANDOM);
-}
-
-void MoveAlongSurfaceCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    if (size < static_cast<int>(sizeof(MoveRequestData)))
-    {
-        LogE("MoveAlongSurface: packet too small (", size, " < ", sizeof(MoveRequestData), ")");
-        return;
-    }
-
-    const MoveRequestData request = *reinterpret_cast<const MoveRequestData*>(data);
-    Vector3 point;
-    bool ok = g_NavServer->Nav()->MoveAlongSurface(handler->GetId(), request.mapId, request.start, request.end, point);
-    LogD("[", handler->GetId(), "] MoveAlongSurface map=", request.mapId, ok ? " ok" : " FAIL");
-    handler->SendData(type, point, sizeof(Vector3));
-}
-
-void CastRayCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    if (size < static_cast<int>(sizeof(CastRayData)))
-    {
-        LogE("CastRay: packet too small (", size, " < ", sizeof(CastRayData), ")");
-        return;
-    }
-
-    const CastRayData request = *reinterpret_cast<const CastRayData*>(data);
-    dtRaycastHit hit;
-
-    bool rayHit = g_NavServer->Nav()->CastMovementRay(handler->GetId(), request.mapId, request.start, request.end, &hit);
-    LogD("[", handler->GetId(), "] CastRay map=", request.mapId, rayHit ? " hit" : " miss");
-
-    if (rayHit)
-    {
-        handler->SendData(type, request.end, sizeof(Vector3));
-    }
-    else
-    {
-        Vector3 zero;
-        handler->SendData(type, zero, sizeof(Vector3));
-    }
-}
-
-void GenericPathCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size, PathType pathType)
-{
-    if (size < static_cast<int>(sizeof(PathRequestData)))
-    {
-        LogE("PathRequest: packet too small (", size, " < ", sizeof(PathRequestData), ")");
-        return;
-    }
-
-#ifdef _DEBUG
-    const auto reqStart = std::chrono::high_resolution_clock::now();
-#endif
-
-    const PathRequestData request = *reinterpret_cast<const PathRequestData*>(data);
-    bool pathGenerated = false;
-
-    auto buffers = g_NavServer->GetClientBuffers(handler->GetId());
-    if (!buffers.first || !buffers.second)
-    {
-        LogE("PathRequest: no buffers for client ", handler->GetId());
-        return;
-    }
-
-    Path& path = *buffers.first;
-    Path& pathMisc = *buffers.second;
-
-    // Reset point counts so GetSpace() returns the full buffer size
-    path.pointCount = 0;
-    pathMisc.pointCount = 0;
-
-    switch (pathType)
-    {
-        case PathType::STRAIGHT:
-            pathGenerated = g_NavServer->Nav()->GetPath(handler->GetId(), request.mapId, request.start, request.end, path);
-            break;
-        case PathType::RANDOM:
-            pathGenerated = g_NavServer->Nav()->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path,
-                                               g_NavServer->Config()->randomPathMaxDistance);
-            break;
-    }
-
-    if (pathGenerated)
-    {
-        HandlePathFlagsAndSendData(handler, request.mapId, request.flags, path, pathMisc, type, pathType);
-    }
-    else
-    {
-        Vector3 zero;
-        handler->SendData(type, zero, sizeof(Vector3));
-    }
-
-#ifdef _DEBUG
-    {
-        const auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::high_resolution_clock::now() - reqStart).count();
-        LogD("[", handler->GetId(), "] ", (pathType == PathType::RANDOM ? "RandomPath" : "Path"),
-             " map=", request.mapId, pathGenerated ? " ok" : " FAIL",
-             " pts=", path.pointCount, " ", us, "us");
-    }
-#endif
-
-    path.pointCount = 0;
-    pathMisc.pointCount = 0;
-}
-
-void RandomPointCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    if (size < static_cast<int>(sizeof(int)))
-    {
-        LogE("RandomPoint: packet too small (", size, " < ", sizeof(int), ")");
-        return;
-    }
-
-    const int mapId = *reinterpret_cast<const int*>(data);
-    Vector3 point;
-    bool ok = g_NavServer->Nav()->GetRandomPoint(handler->GetId(), mapId, point);
-    LogD("[", handler->GetId(), "] RandomPoint map=", mapId, ok ? " ok" : " FAIL");
-    handler->SendData(type, point, sizeof(Vector3));
-}
-
-void RandomPointAroundCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    if (size < static_cast<int>(sizeof(RandomPointAroundData)))
-    {
-        LogE("RandomPointAround: packet too small (", size, " < ", sizeof(RandomPointAroundData), ")");
-        return;
-    }
-
-    const RandomPointAroundData request = *reinterpret_cast<const RandomPointAroundData*>(data);
-    Vector3 point;
-    bool ok = g_NavServer->Nav()->GetRandomPointAround(handler->GetId(), request.mapId, request.start, request.radius, point);
-    LogD("[", handler->GetId(), "] RandomPointAround map=", request.mapId, " r=", request.radius, ok ? " ok" : " FAIL");
-    handler->SendData(type, point, sizeof(Vector3));
-}
-
-void ConfigureFilterCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    bool result = true;
-
-    if (size < static_cast<int>(sizeof(ConfigureFilterData)))
-    {
-        LogE("ConfigureFilter: packet too small (", size, " < ", sizeof(ConfigureFilterData), ")");
-        result = false;
-        handler->SendData(type, &result, sizeof(bool));
-        return;
-    }
-
-    // Use a pointer into the original data buffer (flexible array pattern).
-    const auto* request = reinterpret_cast<const ConfigureFilterData*>(data);
-
-    AmeisenNavClient* client = g_NavServer->Nav()->GetClient(handler->GetId());
-    if (!client)
-    {
-        result = false;
-        handler->SendData(type, &result, sizeof(bool));
-        return;
-    }
-
-    // Validate entry count against received data size
-    int expectedSize = static_cast<int>(sizeof(ConfigureFilterData))
-        + (request->filterConfigCount - 1) * static_cast<int>(sizeof(FilterConfig));
-
-    if (request->filterConfigCount <= 0 || size < expectedSize)
-    {
-        result = false;
-        handler->SendData(type, &result, sizeof(bool));
-        return;
-    }
-
-    client->ResetQueryFilter();
-
-    const FilterConfig* filterConfigs = &request->firstFilterConfig;
-
-    for (int i = 0; i < request->filterConfigCount; ++i)
-    {
-        client->ConfigureQueryFilter(filterConfigs[i].areaId, filterConfigs[i].cost);
-    }
-
-    client->UpdateQueryFilter(request->state);
-    LogD("[", handler->GetId(), "] ConfigureFilter entries=", request->filterConfigCount);
-    handler->SendData(type, &result, sizeof(bool));
-}
-
-void GetHeightCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    if (size < static_cast<int>(sizeof(GetHeightData)))
-    {
-        LogE("GetHeight: packet too small (", size, " < ", sizeof(GetHeightData), ")");
-        return;
-    }
-
-    const GetHeightData request = *reinterpret_cast<const GetHeightData*>(data);
-    Vector3 point;
-    bool ok = g_NavServer->Nav()->GetHeight(handler->GetId(), request.mapId, request.position, point);
-    LogD("[", handler->GetId(), "] GetHeight map=", request.mapId, ok ? " ok" : " FAIL");
-    handler->SendData(type, point, sizeof(Vector3));
-}
-
-void GetConfigCallback(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
-{
-    const auto* cfg = g_NavServer->Config();
-    const auto& path = cfg->mmapsPath;
-
-    GetConfigResponseHeader header;
-    header.mmapFormat = cfg->mmapFormat;
-    header.useAnpFileFormat = cfg->useAnpFileFormat ? 1 : 0;
-    header.pathLength = static_cast<int>(path.size());
-
-    // Build response: header + path string bytes
-    const size_t totalSize = sizeof(GetConfigResponseHeader) + path.size();
-    std::vector<char> buffer(totalSize);
-    std::memcpy(buffer.data(), &header, sizeof(GetConfigResponseHeader));
-    std::memcpy(buffer.data() + sizeof(GetConfigResponseHeader), path.data(), path.size());
-
-    handler->SendData(type, buffer.data(), totalSize);
-    LogD("[", handler->GetId(), "] GetConfig path=\"", path, "\"");
-}
-
-void NavServer::RegisterCallbacks()
-{
-    server_->SetOnClientConnected(OnClientConnect);
-    server_->SetOnClientDisconnected(OnClientDisconnect);
-
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::PATH), PathCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::RANDOM_POINT_AROUND), RandomPointAroundCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::MOVE_ALONG_SURFACE), MoveAlongSurfaceCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::CAST_RAY), CastRayCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::RANDOM_PATH), RandomPathCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::RANDOM_POINT), RandomPointCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::CONFIGURE_FILTER), ConfigureFilterCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::GET_HEIGHT), GetHeightCallback);
-    server_->AddCallback(static_cast<AnTcpMessageType>(MessageType::GET_CONFIG), GetConfigCallback);
+    return 0;
 }

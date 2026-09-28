@@ -1,39 +1,58 @@
 #pragma once
 
-// toggle debug output here
-#if 0
-#define DEBUG_ONLY(x) x
-#define BENCHMARK(x) x
-#else
-#define DEBUG_ONLY(x)
-#define BENCHMARK(x)
-#endif
-
 #include <atomic>
-#include <chrono>
-#include <iostream>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <functional>
+#include <list>
 #include <memory>
-#include <new>
+#include <mutex>
 #include <string>
 #include <thread>
+#include <type_traits>
 #include <unordered_map>
 #include <vector>
 
+#ifdef _WIN32
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
-
+#endif
 #include <winsock2.h>
 #include <ws2tcpip.h>
-#include <iphlpapi.h>
+using AnTcpSocket = SOCKET;
+constexpr AnTcpSocket ANTCP_INVALID_SOCKET = INVALID_SOCKET;
+#else
+#include <netinet/in.h>
+#include <sys/socket.h>
+using AnTcpSocket = int;
+constexpr AnTcpSocket ANTCP_INVALID_SOCKET = -1;
+#endif
 
-constexpr auto ANTCP_SERVER_VERSION = "1.2.1.0";
-constexpr auto ANTCP_MAX_PACKET_SIZE = 8192;
+/// AnTCP: minimal request/response protocol over TCP.
+///
+/// Every message in both directions is framed as:
+///   int32 size (little endian, counts type + payload) | uint8 type | payload[size - 1]
+///
+/// The server dispatches each request to the callback registered for its type. Every connection has its own
+/// thread, requests of one connection are processed strictly in order.
+
+constexpr auto ANTCP_SERVER_VERSION = "2.0.0.0";
+
+/// Maximum size (type + payload) of an incoming packet.
+constexpr int ANTCP_MAX_PACKET_SIZE = 8192;
+
+/// Maximum size (type + payload) of an outgoing packet.
+constexpr size_t ANTCP_MAX_RESPONSE_SIZE = 64u * 1024u * 1024u;
 
 // type used in the payload to specify the size of a packet
-typedef int AnTcpSizeType;
+using AnTcpSizeType = int32_t;
 
 // type used to identify the type of a message
-typedef unsigned char AnTcpMessageType;
+using AnTcpMessageType = unsigned char;
 
 enum class AnTcpError
 {
@@ -45,266 +64,129 @@ enum class AnTcpError
     SocketListeningFailed
 };
 
-// Forward declaration
 class ClientHandler;
+class AnTcpServer;
 
-/// Function pointer types - no std::function overhead on the hot path.
-using AnTcpMessageCallback = void(*)(ClientHandler*, AnTcpMessageType, const void*, int);
-using AnTcpClientCallback = void(*)(ClientHandler*);
+using AnTcpMessageCallback = std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>;
+using AnTcpClientCallback = std::function<void(ClientHandler*)>;
 
+/// One connected client. Owns the socket and the receive thread.
 class ClientHandler
 {
-private:
+    friend class AnTcpServer;
+
     size_t Id;
-    SOCKET Socket;
-    SOCKADDR_IN SocketInfo;
-    std::atomic<bool>& ShouldExit;
-    std::unordered_map<AnTcpMessageType, AnTcpMessageCallback>* Callbacks;
-
-    std::atomic<bool> IsActive;
-    std::unique_ptr<std::thread> Thread;
-
-    AnTcpClientCallback OnClientConnected;
-    AnTcpClientCallback OnClientDisconnected;
+    AnTcpSocket Socket;
+    sockaddr_storage Address;
+    AnTcpServer* Server;
+    std::atomic<bool> Running;
+    std::atomic<bool> Finished;
+    std::mutex SendMutex;
+    std::vector<char> SendBuffer;
+    std::thread Thread;
 
 public:
-    ClientHandler
-    (
-        SOCKET socket,
-        const SOCKADDR_IN& socketInfo,
-        std::atomic<bool>& shouldExit,
-        std::unordered_map<AnTcpMessageType, AnTcpMessageCallback>* callbacks,
-        AnTcpClientCallback onClientConnected = nullptr,
-        AnTcpClientCallback onClientDisconnected = nullptr
-    )
-        : Id(static_cast<unsigned int>(socketInfo.sin_addr.S_un.S_addr + socketInfo.sin_port)),
-        Socket(socket),
-        SocketInfo(socketInfo),
-        ShouldExit(shouldExit),
-        Callbacks(callbacks),
-        IsActive(true),
-        Thread(std::make_unique<std::thread>(&ClientHandler::Listen, this)),
-        OnClientConnected(onClientConnected),
-        OnClientDisconnected(onClientDisconnected)
-    {
-    }
-
-    ~ClientHandler()
-    {
-        DEBUG_ONLY(std::cout << "[" << Id << "] " << "Deleting Handler: " << Id << std::endl);
-
-        Disconnect();
-
-        if (Thread && Thread->joinable())
-        {
-            Thread->join();
-        }
-    }
+    ClientHandler(size_t id, AnTcpSocket socket, const sockaddr_storage& address, AnTcpServer* server) noexcept;
+    ~ClientHandler();
 
     ClientHandler(const ClientHandler&) = delete;
     ClientHandler& operator=(const ClientHandler&) = delete;
 
-    constexpr auto GetId() const noexcept { return Id; }
+    /// Unique id for the lifetime of the server (never reused).
+    size_t GetId() const noexcept { return Id; }
 
-    bool IsDisconnected() const noexcept { return !IsActive.load(std::memory_order_acquire); }
+    /// True once the receive loop has ended (connection closed or Disconnect() called).
+    bool IsDisconnected() const noexcept { return Finished.load(std::memory_order_acquire); }
 
-    /// Send a single value (by copy). Use SendDataPtr for structs.
-    template<typename T>
-    bool SendDataVar(AnTcpMessageType type, const T data) const noexcept
+    /// Send a single value (by copy).
+    template <typename T>
+    bool SendDataVar(AnTcpMessageType type, const T data) noexcept
     {
+        static_assert(std::is_trivially_copyable_v<T>);
         return SendData(type, &data, sizeof(T));
     }
 
     /// Send a struct (by pointer, sizeof(T) bytes). For arrays use SendData with explicit size.
-    template<typename T>
-    bool SendDataPtr(AnTcpMessageType type, const T* data) const noexcept
+    template <typename T>
+    bool SendDataPtr(AnTcpMessageType type, const T* data) noexcept
     {
+        static_assert(std::is_trivially_copyable_v<T>);
         return SendData(type, data, sizeof(T));
     }
 
-    /// Send raw data to the client. Coalesced into a single send() call.
-    inline bool SendData(AnTcpMessageType type, const void* data, size_t size) const noexcept
-    {
-        const AnTcpSizeType packetSize = static_cast<AnTcpSizeType>(size + sizeof(AnTcpMessageType));
-        constexpr size_t HEADER_SIZE = sizeof(AnTcpSizeType) + sizeof(AnTcpMessageType);
-        const size_t totalSize = HEADER_SIZE + size;
+    /// Send one framed packet (header + payload in a single send call). Thread-safe.
+    bool SendData(AnTcpMessageType type, const void* data, size_t size) noexcept;
 
-        if (size > ANTCP_MAX_PACKET_SIZE)
-            return false;
+    /// Close the connection. The receive thread ends and the disconnect callback fires on it.
+    void Disconnect() noexcept;
 
-        // Stack buffer for small packets; heap fallback for large path data
-        constexpr size_t STACK_THRESHOLD = 512;
-        char stackBuf[HEADER_SIZE + STACK_THRESHOLD];
-        char* heapBuf = nullptr;
-        char* buf;
-
-        if (totalSize <= sizeof(stackBuf))
-        {
-            buf = stackBuf;
-        }
-        else
-        {
-            heapBuf = new (std::nothrow) char[totalSize];
-            if (!heapBuf)
-                return false;
-            buf = heapBuf;
-        }
-
-        memcpy(buf, &packetSize, sizeof(AnTcpSizeType));
-        memcpy(buf + sizeof(AnTcpSizeType), &type, sizeof(AnTcpMessageType));
-        memcpy(buf + HEADER_SIZE, data, size);
-
-        bool ok = send(Socket, buf, static_cast<int>(totalSize), 0) != SOCKET_ERROR;
-        delete[] heapBuf;
-        return ok;
-    }
-
-    inline void Disconnect() noexcept
-    {
-        if (!IsActive.load(std::memory_order_acquire))
-            return;
-
-        IsActive.store(false, std::memory_order_release);
-
-        if (OnClientDisconnected)
-        {
-            OnClientDisconnected(this);
-        }
-
-        closesocket(Socket);
-        Socket = INVALID_SOCKET;
-    }
-
-    inline std::string GetIpAddress() const
-    {
-        char ipAddressBuffer[128]{ 0 };
-        inet_ntop(AF_INET, &SocketInfo.sin_addr, ipAddressBuffer, 128);
-        return std::string(ipAddressBuffer);
-    }
-
-    constexpr unsigned short GetPort() const noexcept
-    {
-        return SocketInfo.sin_port;
-    }
-
-    constexpr unsigned short GetAddressFamily() const noexcept
-    {
-        return SocketInfo.sin_family;
-    }
+    std::string GetIpAddress() const;
+    unsigned short GetPort() const noexcept;
+    unsigned short GetAddressFamily() const noexcept { return Address.ss_family; }
 
 private:
-    /// Client receive loop: reassembles packets and dispatches to callbacks.
+    void Start();
+
+    /// Client receive loop: reassembles packets and dispatches them to the callbacks.
     void Listen() noexcept;
 
-    /// Dispatch a complete packet to its registered callback.
-    inline bool ProcessPacket(const char* data, AnTcpSizeType size) noexcept
-    {
-        auto msgType = static_cast<AnTcpMessageType>(data[0]);
-        auto it = Callbacks->find(msgType);
-
-        if (it != Callbacks->end())
-        {
-            BENCHMARK(const auto packetStart = std::chrono::high_resolution_clock::now());
-
-            it->second(this, msgType, data + sizeof(AnTcpMessageType), size - sizeof(AnTcpMessageType));
-
-            BENCHMARK(std::cout << "[" << Id << "] " << "Processing packet of type \""
-                << std::to_string(msgType) << "\" took: "
-                << std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::high_resolution_clock::now() - packetStart) << std::endl);
-
-            return true;
-        }
-
-        DEBUG_ONLY(std::cout << "[" << Id << "] " << "\"" << std::to_string(msgType)
-            << "\" is an unknown message type..." << std::endl);
-
-        return false;
-    }
+    bool SendAll(const char* data, size_t size) noexcept;
 };
 
+/// Blocking TCP server. Run() serves until Stop() is called (Stop is async-signal-safe).
 class AnTcpServer
 {
-private:
+    friend class ClientHandler;
+
     std::string Ip;
     std::string Port;
     std::atomic<bool> ShouldExit;
-    SOCKET ListenSocket;
-    std::vector<std::unique_ptr<ClientHandler>> Clients;
-    std::unordered_map<AnTcpMessageType, AnTcpMessageCallback> Callbacks;
+    std::atomic<unsigned short> BoundPort;
+    std::atomic<size_t> NextClientId;
+    AnTcpSocket ListenSocket;
 
+    std::mutex ClientsMutex;
+    std::list<std::unique_ptr<ClientHandler>> Clients;
+
+    std::unordered_map<AnTcpMessageType, AnTcpMessageCallback> Callbacks;
     AnTcpClientCallback OnClientConnected;
     AnTcpClientCallback OnClientDisconnected;
 
 public:
-    AnTcpServer(const std::string& ip, unsigned short port)
-        : Ip(ip),
-        Port(std::to_string(port)),
-        ShouldExit(false),
-        ListenSocket(INVALID_SOCKET),
-        Clients(),
-        Callbacks(),
-        OnClientConnected(nullptr),
-        OnClientDisconnected(nullptr)
-    {
-    }
-
-    AnTcpServer(const std::string& ip, const std::string& port)
-        : Ip(ip),
-        Port(port),
-        ShouldExit(false),
-        ListenSocket(INVALID_SOCKET),
-        Clients(),
-        Callbacks(),
-        OnClientConnected(nullptr),
-        OnClientDisconnected(nullptr)
-    {
-    }
+    AnTcpServer(const std::string& ip, unsigned short port);
+    AnTcpServer(const std::string& ip, const std::string& port);
+    ~AnTcpServer();
 
     AnTcpServer(const AnTcpServer&) = delete;
     AnTcpServer& operator=(const AnTcpServer&) = delete;
 
-    inline void SetOnClientConnected(AnTcpClientCallback handlerFunction)
+    // Callbacks must be registered before Run() and must not change while the server is running.
+
+    void SetOnClientConnected(AnTcpClientCallback handler) { OnClientConnected = std::move(handler); }
+    void SetOnClientDisconnected(AnTcpClientCallback handler) { OnClientDisconnected = std::move(handler); }
+
+    bool AddCallback(AnTcpMessageType type, AnTcpMessageCallback callback)
     {
-        OnClientConnected = handlerFunction;
+        return Callbacks.try_emplace(type, std::move(callback)).second;
     }
 
-    inline void SetOnClientDisconnected(AnTcpClientCallback handlerFunction)
-    {
-        OnClientDisconnected = handlerFunction;
-    }
+    bool RemoveCallback(AnTcpMessageType type) noexcept { return Callbacks.erase(type) > 0; }
 
-    inline bool AddCallback(AnTcpMessageType type, AnTcpMessageCallback callback)
-    {
-        auto [it, inserted] = Callbacks.try_emplace(type, callback);
-        return inserted;
-    }
+    /// Request the server to stop. Returns immediately, Run() returns within ~100ms.
+    /// Only touches an atomic flag, so it is safe to call from signal handlers and other threads.
+    void Stop() noexcept { ShouldExit.store(true, std::memory_order_release); }
 
-    inline bool RemoveCallback(AnTcpMessageType type) noexcept
-    {
-        return Callbacks.erase(type) > 0;
-    }
+    bool IsStopping() const noexcept { return ShouldExit.load(std::memory_order_acquire); }
 
-    inline void Stop() noexcept
-    {
-        ShouldExit = true;
-        SocketCleanup();
-    }
+    /// Port the server is listening on (useful when started with port 0), 0 if not listening.
+    unsigned short GetBoundPort() const noexcept { return BoundPort.load(std::memory_order_acquire); }
 
-    /// Starts the server (blocking). Returns error code on failure.
+    size_t GetClientCount();
+
+    /// Starts the server (blocking). Returns an error code if the server couldn't be started.
     AnTcpError Run() noexcept;
 
 private:
-    constexpr void SocketCleanup() noexcept
-    {
-        if (ListenSocket != INVALID_SOCKET)
-        {
-            closesocket(ListenSocket);
-            ListenSocket = INVALID_SOCKET;
-        }
-    }
-
-    void ClientCleanup() noexcept
-    {
-        std::erase_if(Clients, [](const auto& c) { return c && c->IsDisconnected(); });
-    }
+    void CleanupClients(bool all) noexcept;
+    bool Dispatch(ClientHandler* handler, const char* packet, AnTcpSizeType size) noexcept;
 };
