@@ -1,6 +1,8 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -69,6 +71,7 @@ class AnTcpServer;
 
 using AnTcpMessageCallback = std::function<void(ClientHandler*, AnTcpMessageType, const void*, int)>;
 using AnTcpClientCallback = std::function<void(ClientHandler*)>;
+using AnTcpRejectCallback = std::function<void(size_t activeClients)>;
 
 /// One connected client. Owns the socket and the receive thread.
 class ClientHandler
@@ -143,6 +146,9 @@ class AnTcpServer
     std::atomic<bool> ShouldExit;
     std::atomic<unsigned short> BoundPort;
     std::atomic<size_t> NextClientId;
+    std::atomic<size_t> MaxClients{0};
+    std::atomic<long long> IdleTimeoutMs{0};
+    std::atomic<size_t> RejectedClients{0};
     AnTcpSocket ListenSocket;
 
     std::mutex ClientsMutex;
@@ -151,6 +157,7 @@ class AnTcpServer
     std::unordered_map<AnTcpMessageType, AnTcpMessageCallback> Callbacks;
     AnTcpClientCallback OnClientConnected;
     AnTcpClientCallback OnClientDisconnected;
+    AnTcpRejectCallback OnClientRejected;
 
 public:
     AnTcpServer(const std::string& ip, unsigned short port);
@@ -164,6 +171,23 @@ public:
 
     void SetOnClientConnected(AnTcpClientCallback handler) { OnClientConnected = std::move(handler); }
     void SetOnClientDisconnected(AnTcpClientCallback handler) { OnClientDisconnected = std::move(handler); }
+
+    /// Called (on the accept thread) when a connection is refused because of the client limit.
+    void SetOnClientRejected(AnTcpRejectCallback handler) { OnClientRejected = std::move(handler); }
+
+    /// Maximum number of connected clients, connections beyond it are closed right after accept (0 = unlimited).
+    /// Every client costs a thread, the limit keeps a connection flood from exhausting them.
+    void SetMaxClients(size_t maxClients) noexcept { MaxClients.store(maxClients, std::memory_order_relaxed); }
+
+    /// Disconnect clients that haven't sent anything for this long (0 = never). Vanished peers are detected by
+    /// TCP keepalive (~2 minutes) regardless, this also drops connected but silent clients.
+    void SetIdleTimeout(std::chrono::milliseconds timeout) noexcept
+    {
+        IdleTimeoutMs.store(std::max<long long>(0, timeout.count()), std::memory_order_relaxed);
+    }
+
+    /// Connections refused because of the client limit.
+    size_t GetRejectedCount() const noexcept { return RejectedClients.load(std::memory_order_relaxed); }
 
     bool AddCallback(AnTcpMessageType type, AnTcpMessageCallback callback)
     {

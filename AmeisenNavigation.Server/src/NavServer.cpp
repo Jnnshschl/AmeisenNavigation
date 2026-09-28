@@ -52,7 +52,8 @@ const char* MessageName(AnTcpMessageType type) noexcept
 
 void LogTooSmall(ClientHandler* handler, AnTcpMessageType type, int size, size_t expected)
 {
-    LogW("[", handler->GetId(), "] ", MessageName(type), ": packet too small (", size, " < ", expected, ")");
+    // Debug level: a misbehaving client could otherwise flood the log.
+    LogD("[", handler->GetId(), "] ", MessageName(type), ": packet too small (", size, " < ", expected, ")");
 }
 } // namespace
 
@@ -73,6 +74,8 @@ NavServer::NavServer(const AmeisenNavConfig& config) : Cfg(config)
 
     Navigation = std::make_unique<AmeisenNavigation>(settings);
     TcpServer = std::make_unique<AnTcpServer>(Cfg.ip, static_cast<unsigned short>(Cfg.port));
+    TcpServer->SetMaxClients(static_cast<size_t>(Cfg.maxClients));
+    TcpServer->SetIdleTimeout(std::chrono::seconds(Cfg.clientIdleTimeoutSec));
 
     RegisterCallbacks();
 }
@@ -111,6 +114,16 @@ void NavServer::ValidateConfig(AmeisenNavConfig& config, std::vector<std::string
     if (config.maxSearchNodes <= 0 || config.maxSearchNodes > 65535)
     {
         errors.push_back("iMaxSearchNodes has to be a value between 1 and 65535");
+    }
+
+    if (config.maxClients < 0)
+    {
+        errors.push_back("iMaxClients has to be >= 0 (0 = unlimited)");
+    }
+
+    if (config.clientIdleTimeoutSec < 0)
+    {
+        errors.push_back("iClientIdleTimeoutSec has to be >= 0 (0 = never)");
     }
 
     if (config.maxPointPath < 2)
@@ -192,6 +205,19 @@ void NavServer::RegisterCallbacks()
 
     s.SetOnClientConnected([this](ClientHandler* h) { OnClientConnect(h); });
     s.SetOnClientDisconnected([this](ClientHandler* h) { OnClientDisconnect(h); });
+
+    // A connection flood would otherwise log one line per refused connection: at most one warning per 10s.
+    s.SetOnClientRejected([this](size_t active) {
+        using namespace std::chrono;
+        const long long now = duration_cast<seconds>(steady_clock::now().time_since_epoch()).count();
+        long long last = LastRejectLog.load(std::memory_order_relaxed);
+
+        if ((last == 0 || now - last >= 10) && LastRejectLog.compare_exchange_strong(last, now))
+        {
+            LogW("Client limit reached (", active, " connected, iMaxClients=", Cfg.maxClients,
+                 "), refusing new connections (", TcpServer->GetRejectedCount(), " refused so far)");
+        }
+    });
 
     const auto add = [&](MessageType type, auto member) {
         s.AddCallback(static_cast<AnTcpMessageType>(type),
@@ -450,7 +476,7 @@ void NavServer::HandleConfigureFilter(ClientHandler* handler, AnTcpMessageType t
 
     if (count < 0 || count > MAX_FILTER_CONFIGS || static_cast<size_t>(size) < expectedSize)
     {
-        LogW("[", handler->GetId(), "] ConfigureFilter: invalid entry count ", count);
+        LogD("[", handler->GetId(), "] ConfigureFilter: invalid entry count ", count);
         reply(false);
         return;
     }
@@ -477,7 +503,7 @@ void NavServer::HandleConfigureFilter(ClientHandler* handler, AnTcpMessageType t
 
     if (!ok)
     {
-        LogW("[", handler->GetId(), "] ConfigureFilter: rejected (state=", static_cast<int>(header.state),
+        LogD("[", handler->GetId(), "] ConfigureFilter: rejected (state=", static_cast<int>(header.state),
              ", entries=", count, ")");
     }
 
@@ -555,7 +581,7 @@ void NavServer::HandleExplorePoly(ClientHandler* handler, AnTcpMessageType type,
     if (count < 3 || count > MAX_EXPLORE_POLYGON_POINTS
         || static_cast<size_t>(size) < sizeof(request) + static_cast<size_t>(count) * sizeof(Vector3))
     {
-        LogW("[", handler->GetId(), "] ExplorePoly: invalid polygon (", count, " points, ", size, " bytes)");
+        LogD("[", handler->GetId(), "] ExplorePoly: invalid polygon (", count, " points, ", size, " bytes)");
         SendZero(handler, type);
         return;
     }

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -17,6 +18,7 @@ class NavServer
     AmeisenNavConfig Cfg;
     std::unique_ptr<AmeisenNavigation> Navigation;
     std::unique_ptr<AnTcpServer> TcpServer;
+    std::atomic<long long> LastRejectLog{0};
 
 public:
     explicit NavServer(const AmeisenNavConfig& config);

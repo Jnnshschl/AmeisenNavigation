@@ -32,6 +32,8 @@ struct AmeisenNavConfig
     float waterCost = 1.6f;  // water, ocean
     int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;
+    int clientIdleTimeoutSec = 0; // disconnect silent clients after this many seconds, 0 = never
+    int maxClients = 1024;        // simultaneous connections (one thread each), 0 = unlimited
     int maxPointPath = 512;
     int maxPolyPath = 2048;
     int maxSearchNodes = 65535;
@@ -300,6 +302,8 @@ private:
             {"fWaterCost", std::ref(waterCost)},
             {"iBezierCurvePoints", std::ref(bezierCurvePoints)},
             {"iCatmullRomSplinePoints", std::ref(catmullRomSplinePoints)},
+            {"iClientIdleTimeoutSec", std::ref(clientIdleTimeoutSec)},
+            {"iMaxClients", std::ref(maxClients)},
             {"iMaxPointPath", std::ref(maxPointPath)},
             {"iMaxPolyPath", std::ref(maxPolyPath)},
             {"iMaxSearchNodes", std::ref(maxSearchNodes)},

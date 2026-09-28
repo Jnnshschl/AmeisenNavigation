@@ -96,6 +96,26 @@ inline void ConfigureClientSocket(AnTcpSocket socket) noexcept
 #ifdef SO_NOSIGPIPE
     setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, reinterpret_cast<const char*>(&flag), sizeof(flag));
 #endif
+
+    // Probe after 60s of silence, every 10s, give up after 6 unanswered probes: a vanished peer frees its thread
+    // after ~2 minutes instead of the OS default of ~2 hours.
+    const int keepIdle = 60;
+    const int keepInterval = 10;
+    const int keepCount = 6;
+#if defined(TCP_KEEPIDLE) && defined(TCP_KEEPINTVL) && defined(TCP_KEEPCNT)
+    setsockopt(socket, IPPROTO_TCP, TCP_KEEPIDLE, reinterpret_cast<const char*>(&keepIdle), sizeof(keepIdle));
+    setsockopt(socket, IPPROTO_TCP, TCP_KEEPINTVL, reinterpret_cast<const char*>(&keepInterval),
+               sizeof(keepInterval));
+    setsockopt(socket, IPPROTO_TCP, TCP_KEEPCNT, reinterpret_cast<const char*>(&keepCount), sizeof(keepCount));
+#elif defined(TCP_KEEPALIVE) && !defined(_WIN32)
+    setsockopt(socket, IPPROTO_TCP, TCP_KEEPALIVE, reinterpret_cast<const char*>(&keepIdle), sizeof(keepIdle));
+    (void)keepInterval;
+    (void)keepCount;
+#else
+    (void)keepIdle;
+    (void)keepInterval;
+    (void)keepCount;
+#endif
 }
 } // namespace
 
@@ -252,9 +272,18 @@ void ClientHandler::Listen() noexcept
         std::vector<char> buffer(RECEIVE_BUFFER_SIZE);
         size_t filled = 0;
         bool ok = true;
+        auto lastActivity = std::chrono::steady_clock::now();
 
         while (ok && Running.load(std::memory_order_acquire) && !Server->IsStopping())
         {
+            const long long idleTimeoutMs = Server->IdleTimeoutMs.load(std::memory_order_relaxed);
+
+            if (idleTimeoutMs > 0
+                && std::chrono::steady_clock::now() - lastActivity > std::chrono::milliseconds(idleTimeoutMs))
+            {
+                break; // idle for too long
+            }
+
             // Wait for data with a timeout instead of blocking in recv(): on Windows shutdown() does not wake up
             // a blocked recv() while the peer keeps the connection open, polling lets Disconnect()/Stop() work
             // on every platform within CLIENT_POLL_INTERVAL_MS.
@@ -287,6 +316,7 @@ void ClientHandler::Listen() noexcept
             }
 
             filled += static_cast<size_t>(received);
+            lastActivity = std::chrono::steady_clock::now();
 
             // Dispatch every complete packet in the buffer (clients may pipeline requests).
             size_t offset = 0;
@@ -524,6 +554,36 @@ AnTcpError AnTcpServer::Run() noexcept
         if (clientSocket == ANTCP_INVALID_SOCKET)
         {
             continue;
+        }
+
+        if (const size_t maxClients = MaxClients.load(std::memory_order_relaxed); maxClients > 0)
+        {
+            size_t active = 0;
+
+            {
+                const std::lock_guard lock(ClientsMutex);
+                active = static_cast<size_t>(std::count_if(Clients.begin(), Clients.end(),
+                                                           [](const auto& c) { return !c->IsDisconnected(); }));
+            }
+
+            if (active >= maxClients)
+            {
+                RejectedClients.fetch_add(1, std::memory_order_relaxed);
+
+                try
+                {
+                    if (OnClientRejected)
+                    {
+                        OnClientRejected(active);
+                    }
+                }
+                catch (...)
+                {
+                }
+
+                CloseSocket(clientSocket);
+                continue;
+            }
         }
 
         ConfigureClientSocket(clientSocket);

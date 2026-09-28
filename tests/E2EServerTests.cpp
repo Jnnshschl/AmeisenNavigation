@@ -3,6 +3,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstring>
+#include <functional>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -52,7 +53,16 @@ public:
         if (connect(Socket, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0)
         {
             Close();
+            return;
         }
+
+        // Fail a test instead of hanging it when the server never answers.
+#ifdef _WIN32
+        const DWORD timeout = 15000;
+#else
+        const timeval timeout{15, 0};
+#endif
+        setsockopt(Socket, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
     }
 
     ~RawClient() { Close(); }
@@ -186,13 +196,18 @@ class ServerFixture
     std::thread Thread;
 
 public:
-    ServerFixture()
+    explicit ServerFixture(const std::function<void(AmeisenNavConfig&)>& customize = {})
     {
         AmeisenNavConfig config;
         config.mmapsPath = TestWorld::Get().meshDir.string();
         config.useAnpFileFormat = true;
         config.port = 0;
         config.maxPointPath = 256;
+
+        if (customize)
+        {
+            customize(config);
+        }
 
         std::vector<std::string> errors, warnings;
         NavServer::ValidateConfig(config, errors, warnings);
@@ -616,4 +631,68 @@ TEST_CASE(Server_StopsWhileClientsAreConnected)
 
     char byte = 0;
     CHECK(!client.RecvExact(&byte, 1)); // connection was closed by the server
+}
+
+namespace {
+/// True if the server closed the connection within the socket's receive timeout.
+bool ClosedByServer(RawClient& client)
+{
+    char byte = 0;
+    return !client.RecvExact(&byte, 1);
+}
+} // namespace
+
+TEST_CASE(Server_ClientLimit)
+{
+    ServerFixture server([](AmeisenNavConfig& config) { config.maxClients = 2; });
+
+    RawClient first(server.Port());
+    RawClient second(server.Port());
+    REQUIRE(first.Connected() && second.Connected());
+
+    // Both are served (the round trips also make sure the server registered them).
+    CHECK(first.Request(MessageType::PATH, MakePathRequest()).has_value());
+    CHECK(second.Request(MessageType::PATH, MakePathRequest()).has_value());
+
+    // The third connection is accepted by the kernel and closed by the server right away.
+    RawClient third(server.Port());
+    REQUIRE(third.Connected());
+    CHECK(ClosedByServer(third));
+    CHECK(server.Get().Server().GetRejectedCount() >= 1);
+
+    // A slot frees up when a client leaves.
+    first.Close();
+
+    bool servedAfterLeave = false;
+
+    for (int attempt = 0; attempt < 50 && !servedAfterLeave; ++attempt)
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        RawClient next(server.Port());
+        servedAfterLeave = next.Connected() && next.Request(MessageType::PATH, MakePathRequest()).has_value();
+    }
+
+    CHECK(servedAfterLeave);
+    CHECK(second.Request(MessageType::PATH, MakePathRequest()).has_value());
+}
+
+TEST_CASE(Server_IdleTimeout)
+{
+    ServerFixture server([](AmeisenNavConfig& config) { config.clientIdleTimeoutSec = 1; });
+
+    RawClient idle(server.Port());
+    RawClient busy(server.Port());
+    REQUIRE(idle.Connected() && busy.Connected());
+
+    // The busy client keeps sending for well over the timeout and stays connected.
+    const auto start = std::chrono::steady_clock::now();
+
+    while (std::chrono::steady_clock::now() - start < std::chrono::milliseconds(2500))
+    {
+        REQUIRE(busy.Request(MessageType::PATH, MakePathRequest()).has_value());
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    }
+
+    // The silent one was dropped after ~1s.
+    CHECK(ClosedByServer(idle));
 }
