@@ -153,8 +153,17 @@ inline void BridsonsPoissonDiskSampling(const Vector3* vertices, int vertexCount
     }
 
     const float cellSize = minDistance / std::numbers::sqrt2_v<float>;
-    const int gridW = std::max(1, static_cast<int>(std::ceil((maxX - minX) / cellSize)) + 1);
-    const int gridH = std::max(1, static_cast<int>(std::ceil((maxY - minY) / cellSize)) + 1);
+    const double gridWd = std::ceil(static_cast<double>(maxX - minX) / cellSize) + 1.0;
+    const double gridHd = std::ceil(static_cast<double>(maxY - minY) / cellSize) + 1.0;
+
+    // Non-finite bounds or a grid too large for the requested points (the int conversions below would overflow).
+    if (!std::isfinite(gridWd * gridHd) || gridWd * gridHd > 16.0 * 1024.0 * 1024.0)
+    {
+        return;
+    }
+
+    const int gridW = std::max(1, static_cast<int>(gridWd));
+    const int gridH = std::max(1, static_cast<int>(gridHd));
 
     // Grid stores index + 1 of the sample in each cell (0 = empty), a cell holds at most one sample.
     std::vector<int> grid(static_cast<size_t>(gridW) * static_cast<size_t>(gridH), 0);

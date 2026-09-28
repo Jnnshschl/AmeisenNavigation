@@ -384,3 +384,20 @@ TEST_CASE(Tour_OrderIsAShortPermutation)
     CHECK(Tour::Length(start, grid, order) <= 990.0f * 1.25f);
     CHECK(Tour::Order(start, std::span<const Vector3>()).empty());
 }
+
+TEST_CASE(Polygon_SamplingRejectsHugeOrInvalidPolygons)
+{
+    const Vector3 huge[] = {{-1e30f, -1e30f, 0}, {1e30f, -1e30f, 0}, {0, 1e30f, 0}};
+    const Vector3 nan[] = {{0, 0, 0}, {std::nanf(""), 0, 0}, {0, 10, 0}};
+    std::vector<Vector3> points(64);
+    std::vector<Vector3> temp(64);
+    int count = -1;
+
+    PolygonMath::BridsonsPoissonDiskSampling(huge, 3, points.data(), &count, temp.data(), 64, 1.0f);
+    CHECK_EQ(count, 0);
+    PolygonMath::BridsonsPoissonDiskSampling(nan, 3, points.data(), &count, temp.data(), 64, 1.0f);
+    CHECK_EQ(count, 0);
+
+    CHECK(PolygonMath::HexGridSampling(huge, 1.0f, 1024).empty());
+    CHECK(PolygonMath::HexGridSampling(nan, 1.0f, 1024).empty());
+}

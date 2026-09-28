@@ -153,7 +153,8 @@ struct AmeisenNavConfig
         for (const auto& field : GetFieldMap())
         {
             const std::string name = prefix + field.first;
-            const char* value = std::getenv(name.c_str());
+            // Only called at startup before any thread exists.
+            const char* value = std::getenv(name.c_str()); // NOLINT(concurrency-mt-unsafe)
 
             if (!value)
             {

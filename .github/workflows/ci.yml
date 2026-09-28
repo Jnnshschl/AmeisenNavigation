@@ -232,10 +232,12 @@ jobs:
           chmod +x AmeisenNavigation-linux-x64/*
           tar -czf AmeisenNavigation-linux-x64.tar.gz -C AmeisenNavigation-linux-x64 .
           (cd AmeisenNavigation-windows-x64 && zip -r ../AmeisenNavigation-windows-x64.zip .)
+          sha256sum AmeisenNavigation-linux-x64.tar.gz AmeisenNavigation-windows-x64.zip > SHA256SUMS
 
       - uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/AmeisenNavigation-linux-x64.tar.gz
             artifacts/AmeisenNavigation-windows-x64.zip
+            artifacts/SHA256SUMS
           generate_release_notes: true
