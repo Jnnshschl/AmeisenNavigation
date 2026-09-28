@@ -31,9 +31,30 @@ namespace AnTCP.Client.Objects
 
         /// <summary>
         /// Read the data as a single unmanaged value. Zero allocations.
+        /// Throws <see cref="InvalidOperationException"/> if the response is too small.
         /// </summary>
         public T As<T>() where T : unmanaged
-            => MemoryMarshal.Read<T>(_data);
+        {
+            if (_data.Length < sizeof(T))
+                throw new InvalidOperationException($"Response has {_data.Length} bytes, {typeof(T).Name} needs {sizeof(T)}.");
+
+            return MemoryMarshal.Read<T>(_data);
+        }
+
+        /// <summary>
+        /// Read the data as a single unmanaged value, returns false if the response is too small.
+        /// </summary>
+        public bool TryAs<T>(out T value) where T : unmanaged
+        {
+            if (_data.Length < sizeof(T))
+            {
+                value = default;
+                return false;
+            }
+
+            value = MemoryMarshal.Read<T>(_data);
+            return true;
+        }
 
         /// <summary>
         /// Copy the data into a new array of unmanaged values.

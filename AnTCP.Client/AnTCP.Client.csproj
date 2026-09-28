@@ -3,10 +3,12 @@
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <Title>AnTCP Client</Title>
-    <AssemblyVersion>1.1.1.0</AssemblyVersion>
-    <FileVersion>1.1.1.0</FileVersion>
-    <Version>1.1.1</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <Version>1.2.0</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
   </PropertyGroup>
 
 </Project>

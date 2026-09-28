@@ -28,6 +28,15 @@ namespace AmeisenNavigation.Client
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct CastRayExResponse
+    {
+        public int Hit;
+        public float Fraction;
+        public Vector3 Position;
+        public Vector3 Normal;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct RandomPointAroundData
     {
         public int MapId;
