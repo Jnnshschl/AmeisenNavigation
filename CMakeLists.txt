@@ -1,7 +1,12 @@
 cmake_minimum_required(VERSION 3.21)
 
+# The version lives in AmeisenNavigation.Pack/src/Version.hpp (also used by the Visual Studio projects).
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/AmeisenNavigation.Pack/src/Version.hpp ANAV_VERSION_LINE
+    REGEX "AMEISENNAV_VERSION = \"[0-9.]+\"")
+string(REGEX MATCH "[0-9]+(\\.[0-9]+)+" ANAV_VERSION "${ANAV_VERSION_LINE}")
+
 project(AmeisenNavigation
-    VERSION 1.9.0
+    VERSION ${ANAV_VERSION}
     DESCRIPTION "Navigation server and navmesh exporter for World of Warcraft bots"
     LANGUAGES C CXX)
 
@@ -14,6 +19,8 @@ option(ANAV_ENABLE_LTO      "Enable link time optimization for release builds"  
 option(ANAV_ENABLE_OPENMP   "Use OpenMP for parallel tile loading/building"          ON)
 option(ANAV_WARNINGS_AS_ERRORS "Treat compiler warnings in project code as errors"   OFF)
 option(ANAV_SANITIZE        "Build with address + undefined behavior sanitizers"     OFF)
+option(ANAV_BUILD_FUZZERS   "Build the libFuzzer targets (Clang, instruments everything)" OFF)
+option(ANAV_HARDENING       "Compiler/linker hardening: stack protector, FORTIFY_SOURCE, RELRO, CET/CFG" ON)
 
 option(ANAV_USE_BUNDLED_STORMLIB "MSVC: link the prebuilt StormLib from dep/ instead of building it" ON)
 set(ANAV_STORMLIB_TAG "v9.31" CACHE STRING "StormLib git tag used when fetching it")
@@ -26,6 +33,53 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
+# Fuzzing instruments every target (coverage + ASan/UBSan), so it has to be set before any target exists.
+if(ANAV_BUILD_FUZZERS)
+    if(NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        message(FATAL_ERROR "ANAV_BUILD_FUZZERS needs Clang (libFuzzer)")
+    endif()
+    # Detour's dtLink array is 4 byte aligned by format (see anav_recast), alignment isn't checked.
+    add_compile_options(-fsanitize=fuzzer-no-link,address,undefined,float-cast-overflow -fno-sanitize=alignment
+        -fno-sanitize-recover=all -fno-omit-frame-pointer -g)
+    add_link_options(-fsanitize=address,undefined,float-cast-overflow)
+    set(ANAV_ENABLE_LTO OFF CACHE BOOL "" FORCE)
+    set(ANAV_SANITIZE OFF CACHE BOOL "" FORCE)
+endif()
+
+# OpenSSF compiler hardening guide. Applies to every target (the server parses network input, Detour and the
+# exporter parse files), costs ~1% at most.
+if(ANAV_HARDENING)
+    if(MSVC)
+        add_compile_options(/guard:cf)
+        add_link_options(/guard:cf $<$<STREQUAL:${CMAKE_CXX_COMPILER_ARCHITECTURE_ID},x64>:/CETCOMPAT>)
+    else()
+        include(CheckCXXCompilerFlag)
+        include(CheckPIESupported)
+        check_pie_supported()
+        set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+        add_compile_options(-fstack-protector-strong)
+
+        foreach(flag -fstack-clash-protection -fcf-protection=full)
+            string(MAKE_C_IDENTIFIER "ANAV_HAS${flag}" flagVar)
+            check_cxx_compiler_flag(${flag} ${flagVar})
+            if(${flagVar})
+                add_compile_options(${flag})
+            endif()
+        endforeach()
+
+        # FORTIFY_SOURCE needs optimization and doesn't mix with sanitizers. Distributions often predefine it.
+        if(NOT ANAV_SANITIZE AND NOT ANAV_BUILD_FUZZERS)
+            add_compile_options($<$<NOT:$<CONFIG:Debug>>:-U_FORTIFY_SOURCE>
+                                $<$<NOT:$<CONFIG:Debug>>:-D_FORTIFY_SOURCE=3>)
+        endif()
+
+        if(NOT APPLE)
+            add_link_options(-Wl,-z,relro -Wl,-z,now -Wl,-z,noexecstack)
+        endif()
+    endif()
+endif()
 
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -205,4 +259,8 @@ endif()
 if(ANAV_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(ANAV_BUILD_FUZZERS)
+    add_subdirectory(tests/fuzz)
 endif()

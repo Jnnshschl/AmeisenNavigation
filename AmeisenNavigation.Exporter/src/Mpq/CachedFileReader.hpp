@@ -102,6 +102,31 @@ public:
         }
     }
 
+    /// Put a file into the cache as if it had been read from the MPQs, replacing a cached one (tests, fuzzing).
+    bool Insert(const char* filename, const unsigned char* data, size_t size) noexcept
+    {
+        try
+        {
+            auto slot = std::make_unique<Slot>();
+
+            if (size > 0)
+            {
+                slot->buffer = std::make_unique<unsigned char[]>(size);
+                std::memcpy(slot->buffer.get(), data, size);
+                slot->entry = {slot->buffer.get(), static_cast<unsigned int>(size)};
+            }
+
+            const auto hash = XXH3_64bits(filename, std::strlen(filename));
+            std::unique_lock writeLock(CacheMutex);
+            Cache[hash] = std::move(slot);
+            return true;
+        }
+        catch (...)
+        {
+            return false;
+        }
+    }
+
     /// Read a file without caching it.
     UncachedFile ReadUncached(const char* filename) noexcept
     {

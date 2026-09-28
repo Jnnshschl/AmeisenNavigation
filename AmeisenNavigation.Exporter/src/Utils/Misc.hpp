@@ -79,11 +79,19 @@ T* FindSubChunk(unsigned char* memory, unsigned int size, const char chunkName[5
         return nullptr; // clean walk, the chunk really doesn't exist
     }
 
-    for (unsigned char* cursor = memory, *end = memory + (size - 4); cursor < end; ++cursor)
+    // Byte scan fallback: only accept a match whose header and declared size fit into the buffer, callers derive
+    // element counts from that size.
+    for (unsigned char* cursor = memory, *end = memory + (size - 8); cursor <= end; ++cursor)
     {
         if (ChunkDetail::MagicEquals(cursor, chunkName))
         {
-            return reinterpret_cast<T*>(cursor);
+            uint32_t chunkSize = 0;
+            std::memcpy(&chunkSize, cursor + 4, sizeof(chunkSize));
+
+            if (chunkSize <= static_cast<uint32_t>(memory + size - cursor - 8))
+            {
+                return reinterpret_cast<T*>(cursor);
+            }
         }
     }
 

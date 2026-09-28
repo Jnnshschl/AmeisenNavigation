@@ -126,6 +126,60 @@ jobs:
       - name: Build tester
         run: dotnet build AmeisenNavigation.Tester/AmeisenNavigation.Tester.csproj -c Release
 
+  tsan:
+    name: Linux (ThreadSanitizer)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build
+
+      # libgomp isn't instrumented, OpenMP would only produce false positives.
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DANAV_BUILD_EXPORTER=OFF
+          -DANAV_ENABLE_OPENMP=OFF -DANAV_ENABLE_LTO=OFF -DCMAKE_CXX_FLAGS=-fsanitize=thread
+          -DCMAKE_EXE_LINKER_FLAGS=-fsanitize=thread
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Test
+        env:
+          TSAN_OPTIONS: halt_on_error=1
+        run: ctest --test-dir build --output-on-failure
+
+  fuzz:
+    name: Fuzzing (libFuzzer, 60s per target)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install dependencies
+        run: sudo apt-get update && sudo apt-get install -y ninja-build clang-18 libclang-rt-18-dev
+
+      - name: Configure
+        env:
+          CC: clang-18
+          CXX: clang++-18
+        run: >
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DANAV_BUILD_FUZZERS=ON
+          -DANAV_BUILD_TESTS=OFF -DANAV_ENABLE_OPENMP=OFF
+
+      - name: Build
+        run: cmake --build build
+
+      - name: Fuzz
+        run: tests/fuzz/run_fuzzers.sh build 60
+
+      - name: Upload crashes
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: build/artifacts
+
   docker:
     name: Docker image
     runs-on: ubuntu-24.04
@@ -163,7 +217,7 @@ jobs:
   release:
     name: Release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, sanitizers, windows, dotnet, docker]
+    needs: [linux, sanitizers, tsan, fuzz, windows, dotnet, docker]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

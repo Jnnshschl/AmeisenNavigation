@@ -696,3 +696,33 @@ TEST_CASE(Server_IdleTimeout)
     // The silent one was dropped after ~1s.
     CHECK(ClosedByServer(idle));
 }
+
+TEST_CASE(Server_StatsSummary)
+{
+    ServerFixture server;
+    RawClient client(server.Port());
+    REQUIRE(client.Connected());
+
+    server.Get().TakeStatsSummary(1.0); // drop anything from connecting
+
+    for (int i = 0; i < 3; ++i)
+    {
+        REQUIRE(client.Request(MessageType::PATH, MakePathRequest()).has_value());
+    }
+
+    GetHeightData height{TestWorld::MAP_ID, Wow(-600.0f, 3.0f, -200.0f)};
+    REQUIRE(client.Request(MessageType::GET_HEIGHT, height).has_value());
+
+    // A request is recorded after its response went out. Requests of one connection run strictly in order, so
+    // once this answer arrives everything before it has been recorded.
+    const int mapId = TestWorld::MAP_ID;
+    REQUIRE(client.Request(MessageType::RANDOM_POINT, mapId).has_value());
+
+    const std::string summary = server.Get().TakeStatsSummary(2.0);
+    CHECK(summary.find("Path 3 avg") != std::string::npos);
+    CHECK(summary.find("GetHeight 1 avg") != std::string::npos);
+    CHECK(summary.find("1 clients") != std::string::npos);
+
+    // Counters were reset.
+    CHECK(server.Get().TakeStatsSummary(1.0).empty());
+}

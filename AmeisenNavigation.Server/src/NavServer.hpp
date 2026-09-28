@@ -1,16 +1,28 @@
 #pragma once
 
+#include <array>
 #include <atomic>
+#include <condition_variable>
+#include <cstdint>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
 #include "AmeisenNavigation.hpp"
 #include "AnTcpServer.hpp"
+#include "../../AmeisenNavigation.Pack/src/Version.hpp"
 #include "Config/Config.hpp"
 #include "Protocol.hpp"
 
-constexpr auto AMEISENNAV_VERSION = "1.9.0.0";
+
+/// Lock free request counters of one message type, collected for the periodic stats log.
+struct RequestStats
+{
+    std::atomic<uint64_t> count{0};
+    std::atomic<uint64_t> totalMicros{0};
+    std::atomic<uint64_t> maxMicros{0};
+};
 
 /// Owns the TCP server, the navigation engine and the config, and implements all request handlers.
 class NavServer
@@ -19,6 +31,12 @@ class NavServer
     std::unique_ptr<AmeisenNavigation> Navigation;
     std::unique_ptr<AnTcpServer> TcpServer;
     std::atomic<long long> LastRejectLog{0};
+
+    static constexpr size_t STATS_SLOTS = 16; // covers every MessageType
+    std::array<RequestStats, STATS_SLOTS> Stats{};
+    std::mutex StatsMutex;
+    std::condition_variable StatsCv;
+    bool StatsStop = false;
 
 public:
     explicit NavServer(const AmeisenNavConfig& config);
@@ -40,14 +58,20 @@ public:
     /// Load the navmeshes listed in sPreloadMaps.
     void PreloadMaps();
 
-    /// Serve until Stop() is called (blocking).
-    AnTcpError Run() noexcept { return TcpServer->Run(); }
+    /// Serve until Stop() is called (blocking). Logs request stats every iStatsIntervalSec while running.
+    AnTcpError Run() noexcept;
+
+    /// Requests per type with average/max latency since the last call, empty if there were none. Resets the
+    /// counters. `seconds` is the covered time span (for the request rate).
+    std::string TakeStatsSummary(double seconds);
 
     /// Async-signal-safe.
     void Stop() noexcept { TcpServer->Stop(); }
 
 private:
     void RegisterCallbacks();
+    void RecordRequest(AnTcpMessageType type, uint64_t micros) noexcept;
+    void StatsLoop();
 
     void OnClientConnect(ClientHandler* handler);
     void OnClientDisconnect(ClientHandler* handler);

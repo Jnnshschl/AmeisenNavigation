@@ -278,6 +278,9 @@ public:
     }
 };
 
+/// Upper bound for the decompressed tile data of one map (the biggest continents are well below 1 GB).
+constexpr uint64_t MAX_ANP_TILE_BYTES = 8ull * 1024 * 1024 * 1024;
+
 struct LoadResult
 {
     NavMeshPtr navMesh;
@@ -286,50 +289,27 @@ struct LoadResult
     int tilesRejected = 0;
 };
 
-/// Load a complete .anp file into a ready-to-query dtNavMesh.
+/// Load an .anp archive from memory into a ready-to-query dtNavMesh. `name` is only used for log messages.
+/// Every tile is validated (ValidateTileData) before Detour sees it, broken tiles are counted as rejected.
 /// Tiles are decompressed in parallel (OpenMP), then added sequentially (dtNavMesh::addTile is not thread-safe).
-inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
+inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSize, const std::string& name) noexcept
 {
     LoadResult result;
 
     try
     {
-        std::vector<unsigned char> fileData;
-
+        if (!archive || archiveSize == 0)
         {
-            std::ifstream file(anpFilePath, std::ios::binary | std::ios::ate);
-
-            if (!file.is_open())
-            {
-                LogE("Failed to open .anp file: ", anpFilePath.string());
-                return result;
-            }
-
-            const auto size = static_cast<std::streamoff>(file.tellg());
-
-            if (size <= 0)
-            {
-                LogE("Empty .anp file: ", anpFilePath.string());
-                return result;
-            }
-
-            fileData.resize(static_cast<size_t>(size));
-            file.seekg(0);
-            file.read(reinterpret_cast<char*>(fileData.data()), size);
-
-            if (!file.good())
-            {
-                LogE("Failed to read .anp file: ", anpFilePath.string());
-                return result;
-            }
+            LogE("Empty .anp file: ", name);
+            return result;
         }
 
         mz_zip_archive zip;
         mz_zip_zero_struct(&zip);
 
-        if (!mz_zip_reader_init_mem(&zip, fileData.data(), fileData.size(), 0))
+        if (!mz_zip_reader_init_mem(&zip, archive, archiveSize, 0))
         {
-            LogE("Invalid .anp archive: ", anpFilePath.string());
+            LogE("Invalid .anp archive: ", name);
             return result;
         }
 
@@ -349,32 +329,51 @@ inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
             || !mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(mapIdIndex), &mapId, sizeof(mapId), 0)
             || !mz_zip_reader_extract_to_mem(&zip, static_cast<mz_uint>(paramsIndex), &params, sizeof(params), 0))
         {
-            LogE("Failed to read mapId/params from .anp file: ", anpFilePath.string());
+            LogE("Failed to read mapId/params from .anp file: ", name);
             return result;
         }
 
-        NavMeshPtr navMesh(dtAllocNavMesh());
+        NavMeshPtr navMesh(ValidateNavMeshParams(params) ? dtAllocNavMesh() : nullptr);
 
         if (!navMesh || dtStatusFailed(navMesh->init(&params)))
         {
-            LogE("Failed to init navmesh from .anp file: ", anpFilePath.string());
+            LogE("Invalid navmesh parameters in .anp file: ", name);
             return result;
         }
 
         std::vector<mz_uint> tileEntries;
         const mz_uint fileCount = mz_zip_reader_get_num_files(&zip);
         tileEntries.reserve(fileCount);
+        uint64_t declaredBytes = 0;
 
         for (mz_uint i = 0; i < fileCount; ++i)
         {
-            char name[64]{};
+            char entryName[64]{};
             int x = 0;
             int y = 0;
 
-            if (mz_zip_reader_get_filename(&zip, i, name, sizeof(name)) > 0 && ParseTileEntryName(name, x, y))
+            mz_zip_archive_file_stat stat{};
+
+            // The declared size decides the allocation, don't trust it beyond what a tile can be.
+            if (mz_zip_reader_get_filename(&zip, i, entryName, sizeof(entryName)) > 0
+                && ParseTileEntryName(entryName, x, y) && mz_zip_reader_file_stat(&zip, i, &stat)
+                && stat.m_uncomp_size <= MAX_TILE_DATA_SIZE
+                && tileEntries.size() < static_cast<size_t>(params.maxTiles))
             {
                 tileEntries.push_back(i);
+                declaredBytes += stat.m_uncomp_size;
             }
+            else if (ParseTileEntryName(entryName, x, y))
+            {
+                result.tilesRejected++;
+            }
+        }
+
+        // All tiles are decompressed before they are added, a bogus archive mustn't claim more than any map has.
+        if (declaredBytes > MAX_ANP_TILE_BYTES)
+        {
+            LogE("Rejecting .anp file ", name, ": tiles claim ", declaredBytes / (1024 * 1024), " MB");
+            return result;
         }
 
         struct Extracted
@@ -435,7 +434,7 @@ inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
     }
     catch (const std::exception& e)
     {
-        LogE("Failed to load .anp file ", anpFilePath.string(), ": ", e.what());
+        LogE("Failed to load .anp file ", name, ": ", e.what());
         result.navMesh.reset();
         return result;
     }
@@ -443,6 +442,46 @@ inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
     {
         result.navMesh.reset();
         return result;
+    }
+}
+
+/// Load a complete .anp file into a ready-to-query dtNavMesh.
+inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
+{
+    try
+    {
+        std::ifstream file(anpFilePath, std::ios::binary | std::ios::ate);
+
+        if (!file.is_open())
+        {
+            LogE("Failed to open .anp file: ", anpFilePath.string());
+            return {};
+        }
+
+        const auto size = static_cast<std::streamoff>(file.tellg());
+
+        if (size <= 0)
+        {
+            LogE("Empty .anp file: ", anpFilePath.string());
+            return {};
+        }
+
+        std::vector<unsigned char> fileData(static_cast<size_t>(size));
+        file.seekg(0);
+        file.read(reinterpret_cast<char*>(fileData.data()), size);
+
+        if (!file.good())
+        {
+            LogE("Failed to read .anp file: ", anpFilePath.string());
+            return {};
+        }
+
+        return LoadFromMemory(fileData.data(), fileData.size(), anpFilePath.string());
+    }
+    catch (const std::exception& e)
+    {
+        LogE("Failed to load .anp file ", anpFilePath.string(), ": ", e.what());
+        return {};
     }
 }
 } // namespace Anp

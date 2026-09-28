@@ -66,6 +66,12 @@ inline std::atomic<bool>& ColorFlag() noexcept
     return enabled;
 }
 
+inline std::atomic<bool>& QuietFlag() noexcept
+{
+    static std::atomic<bool> quiet{false};
+    return quiet;
+}
+
 inline const char* LevelTag(Level level, bool color) noexcept
 {
     switch (level)
@@ -138,7 +144,13 @@ inline bool IsDebugEnabled() noexcept { return Detail::DebugFlag().load(std::mem
 inline void SetColorsEnabled(bool enabled) noexcept { Detail::ColorFlag().store(enabled, std::memory_order_relaxed); }
 inline bool IsColorEnabled() noexcept { return Detail::ColorFlag().load(std::memory_order_relaxed); }
 
-inline bool IsEnabled(Level level) noexcept { return level != Level::Debug || IsDebugEnabled(); }
+/// Suppress all output (fuzzers, tools that only want their own output).
+inline void SetQuiet(bool quiet) noexcept { Detail::QuietFlag().store(quiet, std::memory_order_relaxed); }
+
+inline bool IsEnabled(Level level) noexcept
+{
+    return !Detail::QuietFlag().load(std::memory_order_relaxed) && (level != Level::Debug || IsDebugEnabled());
+}
 
 /// Log a pre-formatted message.
 inline void LogImpl(Level level, std::string_view msg) noexcept
@@ -185,6 +197,11 @@ inline void Log(Level level, const Args&... args) noexcept
 /// Overwrite-in-place progress line (uses \r, no newline). Falls back to normal lines when not on a terminal.
 inline void LogProgress(std::string_view msg) noexcept
 {
+    if (!IsEnabled(Level::Progress))
+    {
+        return;
+    }
+
     try
     {
         if (!IsColorEnabled())
@@ -204,7 +221,7 @@ inline void LogProgress(std::string_view msg) noexcept
 /// End a progress sequence so subsequent logs start on a fresh line.
 inline void EndProgress() noexcept
 {
-    if (IsColorEnabled())
+    if (IsColorEnabled() && IsEnabled(Level::Progress))
     {
         Detail::Write("\n");
     }

@@ -210,7 +210,11 @@ public:
     /// Starts the server (blocking). Returns an error code if the server couldn't be started.
     AnTcpError Run() noexcept;
 
+    /// Process one packet (type byte + payload) for a client exactly like the receive loop does: calls the
+    /// registered callback or answers unknown types with an empty payload. Returns false if the client should be
+    /// dropped. Public for in-process use (tests, fuzzing).
+    bool Dispatch(ClientHandler* handler, const char* packet, AnTcpSizeType size) noexcept;
+
 private:
     void CleanupClients(bool all) noexcept;
-    bool Dispatch(ClientHandler* handler, const char* packet, AnTcpSizeType size) noexcept;
 };

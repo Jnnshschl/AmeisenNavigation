@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <fstream>
 #include <iomanip>
 #include <mutex>
@@ -14,6 +15,9 @@
 /// Triangle soup (RD coordinates) with one area id per triangle. Used for per-ADT extraction and the merged map.
 struct Structure
 {
+    /// Coordinates beyond this are garbage (the world spans +-17067 yards) and dropped by Clean().
+    static constexpr float MAX_COORDINATE = 1e6f;
+
     std::mutex mutex;
     std::vector<Vector3> verts;
     std::vector<Tri> tris;
@@ -52,6 +56,36 @@ struct Structure
     /// </summary>
     inline void Clean() noexcept
     {
+        // Corrupt client files can produce NaN/huge coordinates or bad indices: Recast converts coordinates to
+        // ints while rasterizing (undefined behaviour for them), drop those triangles first.
+        {
+            const auto validVertex = [this](int index) {
+                if (index < 0 || static_cast<size_t>(index) >= verts.size())
+                {
+                    return false;
+                }
+
+                const Vector3& v = verts[static_cast<size_t>(index)];
+                return v.IsFinite() && std::fabs(v.x) <= MAX_COORDINATE && std::fabs(v.y) <= MAX_COORDINATE
+                       && std::fabs(v.z) <= MAX_COORDINATE;
+            };
+
+            size_t kept = 0;
+
+            for (size_t i = 0; i < tris.size() && i < triTypes.size(); ++i)
+            {
+                if (validVertex(tris[i].a) && validVertex(tris[i].b) && validVertex(tris[i].c))
+                {
+                    tris[kept] = tris[i];
+                    triTypes[kept] = triTypes[i];
+                    kept++;
+                }
+            }
+
+            tris.resize(kept);
+            triTypes.resize(kept);
+        }
+
         std::vector<bool> isVertexUsed(verts.size(), false);
 
         for (const auto& tri : tris)

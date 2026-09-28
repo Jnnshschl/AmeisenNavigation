@@ -34,6 +34,7 @@ struct AmeisenNavConfig
     int catmullRomSplinePoints = 4;
     int clientIdleTimeoutSec = 0; // disconnect silent clients after this many seconds, 0 = never
     int maxClients = 1024;        // simultaneous connections (one thread each), 0 = unlimited
+    int statsIntervalSec = 300;   // log request counts/latencies this often (only if there were requests), 0 = off
     int maxPointPath = 512;
     int maxPolyPath = 2048;
     int maxSearchNodes = 65535;
@@ -304,6 +305,7 @@ private:
             {"iCatmullRomSplinePoints", std::ref(catmullRomSplinePoints)},
             {"iClientIdleTimeoutSec", std::ref(clientIdleTimeoutSec)},
             {"iMaxClients", std::ref(maxClients)},
+            {"iStatsIntervalSec", std::ref(statsIntervalSec)},
             {"iMaxPointPath", std::ref(maxPointPath)},
             {"iMaxPolyPath", std::ref(maxPolyPath)},
             {"iMaxSearchNodes", std::ref(maxSearchNodes)},

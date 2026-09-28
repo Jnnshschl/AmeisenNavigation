@@ -107,7 +107,11 @@ struct WmoGroup
 
 public:
     inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
-    inline const MOGP* Mogp() const noexcept { return reinterpret_cast<MOGP*>(Data + sizeof(MVER)); };
+    /// Group header, nullptr if the file is too small to hold it.
+    inline const MOGP* Mogp() const noexcept
+    {
+        return Data && Size >= sizeof(MVER) + sizeof(MOGP) ? reinterpret_cast<MOGP*>(Data + sizeof(MVER)) : nullptr;
+    }
     inline const MOVT* Movt() const noexcept { return GetSubChunk(Data, Size, MOVT); }
     inline const MOVI* Movi() const noexcept { return GetSubChunk(Data, Size, MOVI); }
     inline const MONR* Monr() const noexcept { return GetSubChunk(Data, Size, MONR); }

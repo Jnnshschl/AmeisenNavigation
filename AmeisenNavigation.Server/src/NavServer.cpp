@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <format>
 #include <span>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -121,6 +122,11 @@ void NavServer::ValidateConfig(AmeisenNavConfig& config, std::vector<std::string
         errors.push_back("iMaxClients has to be >= 0 (0 = unlimited)");
     }
 
+    if (config.statsIntervalSec < 0)
+    {
+        errors.push_back("iStatsIntervalSec has to be >= 0 (0 = off)");
+    }
+
     if (config.clientIdleTimeoutSec < 0)
     {
         errors.push_back("iClientIdleTimeoutSec has to be >= 0 (0 = never)");
@@ -219,21 +225,32 @@ void NavServer::RegisterCallbacks()
         }
     });
 
+    // Every handler is timed for the stats log.
+    const auto timed = [this](auto&& handler) {
+        return [this, handler](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+            const auto start = std::chrono::steady_clock::now();
+            handler(h, t, d, sz);
+            RecordRequest(t, static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                                       std::chrono::steady_clock::now() - start)
+                                                       .count()));
+        };
+    };
+
     const auto add = [&](MessageType type, auto member) {
         s.AddCallback(static_cast<AnTcpMessageType>(type),
-                      [this, member](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+                      timed([this, member](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
                           (this->*member)(h, t, d, sz);
-                      });
+                      }));
     };
 
     s.AddCallback(static_cast<AnTcpMessageType>(MessageType::PATH),
-                  [this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+                  timed([this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
                       HandlePath(h, t, d, sz, PathType::STRAIGHT);
-                  });
+                  }));
     s.AddCallback(static_cast<AnTcpMessageType>(MessageType::RANDOM_PATH),
-                  [this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+                  timed([this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
                       HandlePath(h, t, d, sz, PathType::RANDOM);
-                  });
+                  }));
 
     add(MessageType::MOVE_ALONG_SURFACE, &NavServer::HandleMoveAlongSurface);
     add(MessageType::CAST_RAY, &NavServer::HandleCastRay);
@@ -244,6 +261,111 @@ void NavServer::RegisterCallbacks()
     add(MessageType::GET_HEIGHT, &NavServer::HandleGetHeight);
     add(MessageType::GET_CONFIG, &NavServer::HandleGetConfig);
     add(MessageType::EXPLORE_POLY, &NavServer::HandleExplorePoly);
+}
+
+AnTcpError NavServer::Run() noexcept
+{
+    std::thread reporter;
+
+    {
+        const std::lock_guard lock(StatsMutex);
+        StatsStop = false;
+    }
+
+    if (Cfg.statsIntervalSec > 0)
+    {
+        try
+        {
+            reporter = std::thread([this] { StatsLoop(); });
+        }
+        catch (...)
+        {
+            LogW("Failed to start the stats thread, request stats are disabled");
+        }
+    }
+
+    const AnTcpError result = TcpServer->Run();
+
+    {
+        const std::lock_guard lock(StatsMutex);
+        StatsStop = true;
+    }
+
+    StatsCv.notify_all();
+
+    if (reporter.joinable())
+    {
+        reporter.join();
+    }
+
+    return result;
+}
+
+void NavServer::RecordRequest(AnTcpMessageType type, uint64_t micros) noexcept
+{
+    auto& stats = Stats[type % STATS_SLOTS];
+    stats.count.fetch_add(1, std::memory_order_relaxed);
+    stats.totalMicros.fetch_add(micros, std::memory_order_relaxed);
+
+    uint64_t max = stats.maxMicros.load(std::memory_order_relaxed);
+
+    while (micros > max && !stats.maxMicros.compare_exchange_weak(max, micros, std::memory_order_relaxed))
+    {
+    }
+}
+
+std::string NavServer::TakeStatsSummary(double seconds)
+{
+    std::string details;
+    uint64_t total = 0;
+
+    for (size_t i = 0; i < STATS_SLOTS; ++i)
+    {
+        const uint64_t count = Stats[i].count.exchange(0, std::memory_order_relaxed);
+        const uint64_t micros = Stats[i].totalMicros.exchange(0, std::memory_order_relaxed);
+        const uint64_t max = Stats[i].maxMicros.exchange(0, std::memory_order_relaxed);
+
+        if (count == 0)
+        {
+            continue;
+        }
+
+        total += count;
+        details += std::format(" | {} {} avg {:.2f}ms max {:.2f}ms", MessageName(static_cast<AnTcpMessageType>(i)),
+                               count, static_cast<double>(micros) / static_cast<double>(count) / 1000.0,
+                               static_cast<double>(max) / 1000.0);
+    }
+
+    if (total == 0)
+    {
+        return {};
+    }
+
+    return std::format("Stats {:.0f}s: {} requests ({:.1f}/s), {} clients, {} refused{}", seconds, total,
+                       seconds > 0.0 ? static_cast<double>(total) / seconds : 0.0, TcpServer->GetClientCount(),
+                       TcpServer->GetRejectedCount(), details);
+}
+
+void NavServer::StatsLoop()
+{
+    auto last = std::chrono::steady_clock::now();
+    std::unique_lock lock(StatsMutex);
+
+    while (!StatsCv.wait_for(lock, std::chrono::seconds(Cfg.statsIntervalSec), [this] { return StatsStop; }))
+    {
+        const auto now = std::chrono::steady_clock::now();
+        lock.unlock();
+
+        const std::string summary = TakeStatsSummary(std::chrono::duration<double>(now - last).count());
+        last = now;
+
+        if (!summary.empty())
+        {
+            LogI(summary);
+        }
+
+        lock.lock();
+    }
 }
 
 void NavServer::OnClientConnect(ClientHandler* handler)

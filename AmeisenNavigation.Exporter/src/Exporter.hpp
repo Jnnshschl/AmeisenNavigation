@@ -8,7 +8,7 @@
 
 #include "Processors/AdtTileProcessor.hpp"
 
-constexpr auto AMEISENNAV_VERSION = "1.9.0.0";
+#include "../../AmeisenNavigation.Pack/src/Version.hpp"
 
 /// What to export and how.
 struct ExportOptions

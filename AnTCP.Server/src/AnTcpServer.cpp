@@ -401,6 +401,11 @@ size_t AnTcpServer::GetClientCount()
 
 bool AnTcpServer::Dispatch(ClientHandler* handler, const char* packet, AnTcpSizeType size) noexcept
 {
+    if (!handler || !packet || size < static_cast<AnTcpSizeType>(sizeof(AnTcpMessageType)))
+    {
+        return false;
+    }
+
     const auto type = static_cast<AnTcpMessageType>(packet[0]);
     const auto it = Callbacks.find(type);
 

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cmath>
+#include <cstring>
 #include <thread>
 #include <vector>
 
@@ -597,4 +598,95 @@ TEST_CASE(Navigation_QueriesArePooledAcrossClients)
 
     CHECK_EQ(failures.load(), 0);
     CHECK(nav.GetQueryCount(TestWorld::MAP_ID) <= static_cast<size_t>(threads) + 1);
+}
+
+TEST_CASE(Pipeline_TileValidationRejectsCorruption)
+{
+    const auto loaded = Anp::Load(TestWorld::Get().meshDir / "001.anp");
+    REQUIRE(loaded.navMesh);
+
+    const dtNavMesh* mesh = loaded.navMesh.get();
+    const dtMeshTile* tile = nullptr;
+
+    for (int i = 0; i < mesh->getMaxTiles() && !tile; ++i)
+    {
+        const dtMeshTile* t = mesh->getTile(i);
+        tile = t && t->header ? t : nullptr;
+    }
+
+    REQUIRE(tile);
+    const std::vector<unsigned char> original(tile->data, tile->data + tile->dataSize);
+    REQUIRE(ValidateTileData(original.data(), original.size()));
+
+    dtMeshHeader header;
+    std::memcpy(&header, original.data(), sizeof(header));
+    REQUIRE(header.polyCount > 1);
+
+    const auto align4 = [](size_t x) { return (x + 3) & ~size_t{3}; };
+    const size_t vertsOffset = align4(sizeof(dtMeshHeader));
+    const size_t polysOffset = vertsOffset + align4(sizeof(float) * 3 * static_cast<size_t>(header.vertCount));
+    const size_t detailOffset = polysOffset + align4(sizeof(dtPoly) * static_cast<size_t>(header.polyCount))
+                                + align4(sizeof(dtLink) * static_cast<size_t>(header.maxLinkCount));
+
+    const auto rejected = [&](auto&& mutate) {
+        std::vector<unsigned char> copy = original;
+        mutate(copy);
+        return !ValidateTileData(copy.data(), copy.size());
+    };
+
+    const auto withHeader = [&](auto&& change) {
+        return rejected([&](std::vector<unsigned char>& data) {
+            dtMeshHeader h;
+            std::memcpy(&h, data.data(), sizeof(h));
+            change(h);
+            std::memcpy(data.data(), &h, sizeof(h));
+        });
+    };
+
+    const auto withPoly = [&](int index, auto&& change) {
+        return rejected([&](std::vector<unsigned char>& data) {
+            dtPoly p;
+            std::memcpy(&p, data.data() + polysOffset + sizeof(dtPoly) * static_cast<size_t>(index), sizeof(p));
+            change(p);
+            std::memcpy(data.data() + polysOffset + sizeof(dtPoly) * static_cast<size_t>(index), &p, sizeof(p));
+        });
+    };
+
+    // Header: link slots (addTile writes links[maxLinkCount - 1]), non-finite bounds, BV quantization range.
+    CHECK(withHeader([](dtMeshHeader& h) { h.maxLinkCount = 0; }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.bmin[1] = std::nanf(""); }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.bvQuantFactor = 1e12f; }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.offMeshBase = h.polyCount + 1; }));
+    CHECK(withHeader([](dtMeshHeader& h) { h.detailMeshCount = 0; }));
+
+    // Polygons: vertex index, self neighbour, out of range neighbour, vertex count, type.
+    CHECK(withPoly(0, [&](dtPoly& p) { p.verts[0] = static_cast<unsigned short>(header.vertCount); }));
+    CHECK(withPoly(1, [](dtPoly& p) { p.neis[0] = 2; })); // poly 1 linked to itself (index + 1)
+    CHECK(withPoly(0, [&](dtPoly& p) { p.neis[0] = static_cast<unsigned short>(header.polyCount + 1); }));
+    CHECK(withPoly(0, [](dtPoly& p) { p.vertCount = 2; }));
+    CHECK(withPoly(0, [](dtPoly& p) { p.vertCount = DT_VERTS_PER_POLYGON + 1; }));
+    CHECK(withPoly(0, [](dtPoly& p) { p.setType(DT_POLYTYPE_OFFMESH_CONNECTION); }));
+
+    // Detail mesh without triangles, detail triangles past the end.
+    CHECK(rejected([&](std::vector<unsigned char>& data) {
+        dtPolyDetail d;
+        std::memcpy(&d, data.data() + detailOffset, sizeof(d));
+        d.triCount = 0;
+        std::memcpy(data.data() + detailOffset, &d, sizeof(d));
+    }));
+    CHECK(rejected([&](std::vector<unsigned char>& data) {
+        dtPolyDetail d;
+        std::memcpy(&d, data.data() + detailOffset, sizeof(d));
+        d.triBase = static_cast<unsigned int>(header.detailTriCount);
+        std::memcpy(data.data() + detailOffset, &d, sizeof(d));
+    }));
+
+    // A NaN vertex.
+    CHECK(rejected([&](std::vector<unsigned char>& data) {
+        const float nan = std::nanf("");
+        std::memcpy(data.data() + vertsOffset + sizeof(float), &nan, sizeof(nan));
+    }));
+
+    // Truncated.
+    CHECK(!ValidateTileData(original.data(), original.size() - 4));
 }

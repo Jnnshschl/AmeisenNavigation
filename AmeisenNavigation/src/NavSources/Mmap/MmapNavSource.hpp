@@ -142,7 +142,7 @@ private:
             }
         }
 
-        NavMeshPtr navMesh(dtAllocNavMesh());
+        NavMeshPtr navMesh(ValidateNavMeshParams(params) ? dtAllocNavMesh() : nullptr);
 
         if (!navMesh || dtStatusFailed(navMesh->init(&params)))
         {

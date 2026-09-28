@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
 #include <cstring>
 #include <format>
@@ -175,7 +176,15 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
 
         liquidHandled = true;
 
-        for (unsigned int k = 0; k < mh2o->liquid[y][x].used; k++)
+        // `used` comes straight from the file: only as many instances as fit into the chunk (a corrupt count
+        // would otherwise loop billions of times).
+        const size_t instanceOffset = mh2o->liquid[y][x].offsetInstances;
+        const size_t maxInstances =
+            instanceOffset < mh2o->size ? (mh2o->size - instanceOffset) / sizeof(AdtLiquid) : 0;
+        const auto instanceCount =
+            static_cast<unsigned int>(std::min<size_t>(mh2o->liquid[y][x].used, maxInstances));
+
+        for (unsigned int k = 0; k < instanceCount; k++)
         {
             const AdtLiquid* liquid = mh2o->GetInstance(x, y, k);
 
