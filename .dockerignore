@@ -1,0 +1,14 @@
+# Only the C++ sources are needed to build the image.
+.git
+.github
+.int
+.vs
+build
+dep
+img
+**/bin
+**/obj
+AmeisenNavigation.Client
+AmeisenNavigation.Tester
+AnTCP.Client
+*.user

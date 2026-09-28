@@ -120,3 +120,33 @@ TEST_CASE(Config_MmapFormatMapping)
     CHECK(NavServer::ToMmapFormat(1) == MmapFormat::TC335A);
     CHECK(NavServer::ToMmapFormat(2) == MmapFormat::SF548);
 }
+
+TEST_CASE(Config_EnvironmentOverrides)
+{
+    const auto set = [](const char* name, const char* value) {
+#ifdef _WIN32
+        _putenv_s(name, value);
+#else
+        setenv(name, value, 1);
+#endif
+    };
+
+    set("ANAVTEST_iPort", "4711");
+    set("ANAVTEST_sMmapsPath", " /meshes ");
+    set("ANAVTEST_bUseAnpFileFormat", "true");
+    set("ANAVTEST_fWaterCost", "not a number");
+
+    AmeisenNavConfig cfg;
+    std::vector<std::string> errors;
+    CHECK_EQ(cfg.ApplyEnvironment("ANAVTEST_", &errors), 3);
+    CHECK_EQ(cfg.port, 4711);
+    CHECK_EQ(cfg.mmapsPath, std::string("/meshes"));
+    CHECK(cfg.useAnpFileFormat);
+    CHECK_NEAR(cfg.waterCost, 1.6f, 1e-6);
+    REQUIRE(errors.size() == 1);
+    CHECK(errors[0].find("ANAVTEST_fWaterCost") != std::string::npos);
+
+    // Nothing set for another prefix.
+    AmeisenNavConfig untouched;
+    CHECK_EQ(untouched.ApplyEnvironment("ANAVTEST_NOPE_"), 0);
+}

@@ -1,0 +1,49 @@
+# systemd unit for AmeisenNavigation.Server
+#
+#   sudo cmake --install build --prefix /usr/local
+#   sudo install -Dm644 deploy/ameisennav.service /etc/systemd/system/ameisennav.service
+#   sudo install -Dm644 config.cfg /etc/ameisennav/config.cfg   # or set ANAV_<key>=... below
+#   sudo systemctl daemon-reload && sudo systemctl enable --now ameisennav
+#   journalctl -u ameisennav -f
+
+[Unit]
+Description=AmeisenNavigation navmesh server
+Documentation=https://github.com/Jnnshschl/AmeisenNavigation
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/AmeisenNavigation.Server /etc/ameisennav/config.cfg
+# Config values can also come from the environment, e.g.:
+# Environment=ANAV_sMmapsPath=/srv/meshes ANAV_bUseAnpFileFormat=1 ANAV_sIp=0.0.0.0
+Restart=on-failure
+RestartSec=2
+KillSignal=SIGTERM
+TimeoutStopSec=10
+
+# Unprivileged throwaway user, read-only view of the system (the navmeshes only need to be readable).
+DynamicUser=yes
+ConfigurationDirectory=ameisennav
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

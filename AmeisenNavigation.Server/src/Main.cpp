@@ -92,7 +92,9 @@ void PrintUsage(const char* exe)
                 "  config.cfg   Path to the config file (default: config.cfg next to the executable).\n"
                 "               A default config is created if the file does not exist.\n"
                 "  --help       Show this help.\n"
-                "  --version    Print the version.\n",
+                "  --version    Print the version.\n\n"
+                "Every config key can be overridden with an environment variable named ANAV_<key>,\n"
+                "e.g. ANAV_sMmapsPath=/meshes ANAV_iPort=47110 ANAV_bUseAnpFileFormat=1.\n",
                 exe);
 }
 
@@ -134,8 +136,9 @@ int main(int argc, const char* argv[])
     PrintBanner();
 
     AmeisenNavConfig config;
+    const bool configExists = std::filesystem::exists(configPath);
 
-    if (std::filesystem::exists(configPath))
+    if (configExists)
     {
         std::vector<std::string> parseErrors;
         config.Load(configPath, &parseErrors);
@@ -147,10 +150,25 @@ int main(int argc, const char* argv[])
 
         LogI("Loaded config: \"", configPath.string(), "\"");
 
-        // Save again so new options show up in existing config files.
+        // Save again so new options show up in existing config files (environment overrides aren't saved).
         config.Save(configPath);
     }
-    else
+
+    std::vector<std::string> envErrors;
+    const int envOverrides = config.ApplyEnvironment("ANAV_", &envErrors);
+
+    for (const auto& error : envErrors)
+    {
+        LogW("Config: ", error);
+    }
+
+    if (envOverrides > 0)
+    {
+        LogI("Config: ", envOverrides, " value(s) from ANAV_* environment variables");
+    }
+
+    // Without a config file the environment alone can configure the server (containers).
+    if (!configExists && envOverrides == 0)
     {
         if (configFromArgs)
         {

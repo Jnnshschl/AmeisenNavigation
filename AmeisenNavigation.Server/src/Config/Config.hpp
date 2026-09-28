@@ -2,6 +2,7 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -128,69 +129,7 @@ struct AmeisenNavConfig
                 continue;
             }
 
-            const bool ok = std::visit(
-                [&](auto&& r) -> bool {
-                    using T = std::decay_t<decltype(r.get())>;
-
-                    if constexpr (std::is_same_v<T, bool>)
-                    {
-                        if (value == "true" || value == "True" || value == "TRUE")
-                        {
-                            r.get() = true;
-                            return true;
-                        }
-
-                        if (value == "false" || value == "False" || value == "FALSE")
-                        {
-                            r.get() = false;
-                            return true;
-                        }
-
-                        int v = 0;
-                        const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
-
-                        if (ec != std::errc() || ptr != value.data() + value.size())
-                        {
-                            return false;
-                        }
-
-                        r.get() = v > 0;
-                        return true;
-                    }
-                    else if constexpr (std::is_same_v<T, int>)
-                    {
-                        int v = 0;
-                        const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
-
-                        if (ec != std::errc() || ptr != value.data() + value.size())
-                        {
-                            return false;
-                        }
-
-                        r.get() = v;
-                        return true;
-                    }
-                    else if constexpr (std::is_same_v<T, float>)
-                    {
-                        // std::stof accepts "1.0f"-style leftovers, be strict instead.
-                        float v = 0.0f;
-                        const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
-
-                        if (ec != std::errc() || ptr != value.data() + value.size() || !std::isfinite(v))
-                        {
-                            return false;
-                        }
-
-                        r.get() = v;
-                        return true;
-                    }
-                    else
-                    {
-                        r.get() = std::string(value);
-                        return true;
-                    }
-                },
-                it->second);
+            const bool ok = ParseValue(it->second, value);
 
             if (!ok && errors)
             {
@@ -199,6 +138,36 @@ struct AmeisenNavConfig
         }
 
         return true;
+    }
+
+    /// Override fields from environment variables named <prefix><key>, e.g. ANAV_sMmapsPath=/meshes or
+    /// ANAV_iPort=47111 (containers, service managers). Returns the number of applied overrides, malformed
+    /// values are skipped and reported through `errors` (if given).
+    int ApplyEnvironment(const char* prefix = "ANAV_", std::vector<std::string>* errors = nullptr)
+    {
+        int applied = 0;
+
+        for (const auto& field : GetFieldMap())
+        {
+            const std::string name = prefix + field.first;
+            const char* value = std::getenv(name.c_str());
+
+            if (!value)
+            {
+                continue;
+            }
+
+            if (ParseValue(field.second, Trim(value)))
+            {
+                applied++;
+            }
+            else if (errors)
+            {
+                errors->push_back(name + " has an invalid value: \"" + value + "\"");
+            }
+        }
+
+        return applied;
     }
 
     /// Parse sPreloadMaps ("0, 1,530") into map ids, invalid entries are skipped.
@@ -235,6 +204,74 @@ struct AmeisenNavConfig
     }
 
 private:
+    /// Parse a value into a field. Returns false (and leaves the field unchanged) if the value is malformed.
+    static bool ParseValue(const ConfigRef& ref, std::string_view value)
+    {
+        return std::visit(
+            [&](auto&& r) -> bool {
+                using T = std::decay_t<decltype(r.get())>;
+
+                if constexpr (std::is_same_v<T, bool>)
+                {
+                    if (value == "true" || value == "True" || value == "TRUE")
+                    {
+                        r.get() = true;
+                        return true;
+                    }
+
+                    if (value == "false" || value == "False" || value == "FALSE")
+                    {
+                        r.get() = false;
+                        return true;
+                    }
+
+                    int v = 0;
+                    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
+
+                    if (ec != std::errc() || ptr != value.data() + value.size())
+                    {
+                        return false;
+                    }
+
+                    r.get() = v > 0;
+                    return true;
+                }
+                else if constexpr (std::is_same_v<T, int>)
+                {
+                    int v = 0;
+                    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
+
+                    if (ec != std::errc() || ptr != value.data() + value.size())
+                    {
+                        return false;
+                    }
+
+                    r.get() = v;
+                    return true;
+                }
+                else if constexpr (std::is_same_v<T, float>)
+                {
+                    // std::stof accepts "1.0f"-style leftovers, be strict instead.
+                    float v = 0.0f;
+                    const auto [ptr, ec] = std::from_chars(value.data(), value.data() + value.size(), v);
+
+                    if (ec != std::errc() || ptr != value.data() + value.size() || !std::isfinite(v))
+                    {
+                        return false;
+                    }
+
+                    r.get() = v;
+                    return true;
+                }
+                else
+                {
+                    r.get() = std::string(value);
+                    return true;
+                }
+            },
+            ref);
+    }
+
     static std::string_view Trim(std::string_view s) noexcept
     {
         constexpr std::string_view whitespace = " \t\r\n\"";
