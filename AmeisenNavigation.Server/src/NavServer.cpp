@@ -6,6 +6,7 @@
 #include <filesystem>
 #include <format>
 #include <span>
+#include <vector>
 
 namespace {
 /// Copy a request out of the (possibly unaligned) receive buffer. Returns false if the packet is too small.
@@ -66,6 +67,9 @@ NavServer::NavServer(const AmeisenNavConfig& config) : Cfg(config)
     settings.maxPointPath = Cfg.maxPointPath;
     settings.maxSearchNodes = Cfg.maxSearchNodes;
     settings.factionDangerCost = Cfg.factionDangerCost;
+    settings.waterCost = Cfg.waterCost;
+    settings.badLiquidCost = Cfg.badLiquidCost;
+    settings.roadCost = Cfg.roadCost;
 
     Navigation = std::make_unique<AmeisenNavigation>(settings);
     TcpServer = std::make_unique<AnTcpServer>(Cfg.ip, static_cast<unsigned short>(Cfg.port));
@@ -152,6 +156,18 @@ void NavServer::ValidateConfig(AmeisenNavConfig& config, std::vector<std::string
         config.factionDangerCost = 0.01f;
     }
 
+    const std::pair<const char*, float*> costs[]{
+        {"fWaterCost", &config.waterCost}, {"fBadLiquidCost", &config.badLiquidCost}, {"fRoadCost", &config.roadCost}};
+
+    for (const auto& cost : costs)
+    {
+        if (*cost.second < 0.01f)
+        {
+            warnings.push_back(std::format("{} too low, clamping to 0.01", cost.first));
+            *cost.second = 0.01f;
+        }
+    }
+
     if (config.randomPathMaxDistance < 0.0f)
     {
         warnings.push_back("fRandomPathMaxDistance negative, clamping to 0");
@@ -201,6 +217,7 @@ void NavServer::RegisterCallbacks()
     add(MessageType::CONFIGURE_FILTER, &NavServer::HandleConfigureFilter);
     add(MessageType::GET_HEIGHT, &NavServer::HandleGetHeight);
     add(MessageType::GET_CONFIG, &NavServer::HandleGetConfig);
+    add(MessageType::EXPLORE_POLY, &NavServer::HandleExplorePoly);
 }
 
 void NavServer::OnClientConnect(ClientHandler* handler)
@@ -289,10 +306,17 @@ void NavServer::HandlePath(ClientHandler* handler, AnTcpMessageType type, const 
     Path& path = client->GetPathBuffer();
     Path& scratch = client->GetScratchPathBuffer();
 
-    const bool ok = pathType == PathType::RANDOM
-                        ? Navigation->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path,
-                                                    Cfg.randomPathMaxDistance)
-                        : Navigation->GetPath(handler->GetId(), request.mapId, request.start, request.end, path);
+    bool partial = false;
+    bool ok = pathType == PathType::RANDOM
+                  ? Navigation->GetRandomPath(handler->GetId(), request.mapId, request.start, request.end, path,
+                                              Cfg.randomPathMaxDistance, &partial)
+                  : Navigation->GetPath(handler->GetId(), request.mapId, request.start, request.end, path, &partial);
+
+    if (ok && partial && HasFlag(request.flags, PathRequestFlags::REQUIRE_COMPLETE))
+    {
+        LogD("[", handler->GetId(), "] ", MessageName(type), ": end not reachable, partial path rejected");
+        ok = false;
+    }
 
     int pointCount = 0;
 
@@ -494,9 +518,80 @@ void NavServer::HandleGetConfig(ClientHandler* handler, AnTcpMessageType type, c
     header.useAnpFileFormat = Cfg.useAnpFileFormat ? 1 : 0;
     header.pathLength = static_cast<int>(path.size());
 
-    std::vector<char> buffer(sizeof(GetConfigResponseHeader) + path.size());
-    std::memcpy(buffer.data(), &header, sizeof(GetConfigResponseHeader));
-    std::memcpy(buffer.data() + sizeof(GetConfigResponseHeader), path.data(), path.size());
+    const std::string_view version = AMEISENNAV_VERSION;
+    GetConfigResponseTrailer trailer{};
+    trailer.protocolVersion = PROTOCOL_VERSION;
+    trailer.maxPointPath = Cfg.maxPointPath;
+    trailer.versionLength = static_cast<int>(version.size());
+
+    std::vector<char> buffer;
+    buffer.reserve(sizeof(header) + path.size() + sizeof(trailer) + version.size());
+
+    const auto append = [&](const void* bytes, size_t count) {
+        buffer.insert(buffer.end(), static_cast<const char*>(bytes), static_cast<const char*>(bytes) + count);
+    };
+
+    append(&header, sizeof(header));
+    append(path.data(), path.size());
+    append(&trailer, sizeof(trailer));
+    append(version.data(), version.size());
 
     handler->SendData(type, buffer.data(), buffer.size());
+}
+
+void NavServer::HandleExplorePoly(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
+{
+    ExplorePolyRequestHeader request{};
+
+    if (!ReadRequest(data, size, request))
+    {
+        LogTooSmall(handler, type, size, sizeof(request));
+        SendZero(handler, type);
+        return;
+    }
+
+    const int count = request.pointCount;
+
+    if (count < 3 || count > MAX_EXPLORE_POLYGON_POINTS
+        || static_cast<size_t>(size) < sizeof(request) + static_cast<size_t>(count) * sizeof(Vector3))
+    {
+        LogW("[", handler->GetId(), "] ExplorePoly: invalid polygon (", count, " points, ", size, " bytes)");
+        SendZero(handler, type);
+        return;
+    }
+
+    const auto start = std::chrono::steady_clock::now();
+    const auto client = Navigation->GetClient(handler->GetId());
+
+    if (!client)
+    {
+        SendZero(handler, type);
+        return;
+    }
+
+    std::vector<Vector3> polygon(static_cast<size_t>(count));
+    std::memcpy(polygon.data(), static_cast<const char*>(data) + sizeof(request), polygon.size() * sizeof(Vector3));
+
+    Path& path = client->GetPathBuffer();
+    Path& scratch = client->GetScratchPathBuffer();
+    ExploreResult result;
+
+    const bool ok = Navigation->ExplorePolygon(handler->GetId(), request.mapId, request.start, polygon,
+                                               request.spacing, path, &result);
+
+    if (ok)
+    {
+        const Path* route =
+            ApplyPathFlags(handler->GetId(), request.mapId, request.flags, PathType::STRAIGHT, path, scratch);
+        handler->SendData(type, route->points, static_cast<size_t>(route->pointCount) * sizeof(Vector3));
+    }
+    else
+    {
+        SendZero(handler, type);
+    }
+
+    LogD("[", handler->GetId(), "] ExplorePoly map=", request.mapId, ok ? " ok" : " FAIL", " waypoints=",
+         result.reached, "/", result.waypoints, " pts=", path.pointCount, " ",
+         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count(),
+         "us");
 }

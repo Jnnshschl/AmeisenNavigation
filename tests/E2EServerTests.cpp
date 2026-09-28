@@ -356,6 +356,124 @@ TEST_CASE(Server_FilterHeightAndPoints)
     CHECK(AsVectors(*response)[0].y < TestWorld::WALL_X);
 }
 
+namespace {
+std::vector<char> ExploreRequest(int pointCount, const std::vector<Vector3>& polygon, int flags = 0)
+{
+    ExplorePolyRequestHeader header{};
+    header.mapId = TestWorld::MAP_ID;
+    header.flags = flags;
+    header.start = Wow(-380.0f, 0.0f, -440.0f);
+    header.spacing = 40.0f;
+    header.pointCount = pointCount;
+
+    std::vector<char> packet(sizeof(header) + polygon.size() * sizeof(Vector3));
+    std::memcpy(packet.data(), &header, sizeof(header));
+    std::memcpy(packet.data() + sizeof(header), polygon.data(), polygon.size() * sizeof(Vector3));
+    return packet;
+}
+} // namespace
+
+TEST_CASE(Server_ExplorePoly)
+{
+    ServerFixture server;
+    RawClient client(server.Port());
+    REQUIRE(client.Connected());
+
+    const std::vector<Vector3> outline{Wow(-390.0f, 0.0f, -450.0f), Wow(-210.0f, 0.0f, -450.0f),
+                                       Wow(-210.0f, 0.0f, -150.0f), Wow(-390.0f, 0.0f, -150.0f)};
+    const auto type = static_cast<unsigned char>(MessageType::EXPLORE_POLY);
+
+    for (const int flags : {0, static_cast<int>(PathRequestFlags::SMOOTH_CATMULLROM)
+                                   | static_cast<int>(PathRequestFlags::VALIDATE_MAS)})
+    {
+        const auto packet = ExploreRequest(4, outline, flags);
+        REQUIRE(client.SendRequest(type, packet.data(), packet.size()));
+        const auto response = client.ReadResponse(type);
+        REQUIRE(response.has_value());
+
+        const auto points = AsVectors(*response);
+        CHECK(points.size() > 20);
+        CHECK(points.size() <= 256);
+
+        for (const auto& p : points)
+        {
+            CHECK(p.IsFinite());
+            CHECK_NEAR(p.z, 0.0f, 0.6);
+        }
+    }
+
+    // Too few points, count larger than the payload, absurd count: a zero vector, connection stays usable.
+    for (const auto& packet : {ExploreRequest(2, {outline[0], outline[1]}), ExploreRequest(5, outline),
+                               ExploreRequest(1 << 20, outline)})
+    {
+        REQUIRE(client.SendRequest(type, packet.data(), packet.size()));
+        const auto response = client.ReadResponse(type);
+        REQUIRE(response.has_value());
+        CHECK(AsVectors(*response).size() == 1 && AsVectors(*response)[0].IsZero());
+    }
+}
+
+TEST_CASE(Server_RequireCompletePaths)
+{
+    ServerFixture server;
+    RawClient client(server.Port());
+    REQUIRE(client.Connected());
+
+    const int requireComplete = static_cast<int>(PathRequestFlags::REQUIRE_COMPLETE);
+
+    // Reachable: flag changes nothing.
+    auto response = client.Request(MessageType::PATH, MakePathRequest(requireComplete));
+    REQUIRE(response.has_value());
+    CHECK(AsVectors(*response).size() >= 3);
+
+    // The platform deck can't be reached from the ground.
+    PathRequestData toDeck = MakePathRequest();
+    toDeck.start = Wow(-600.0f, 0.0f, -425.0f);
+    toDeck.end = Wow(-425.0f, TestWorld::PLATFORM_Y, -425.0f);
+
+    response = client.Request(MessageType::PATH, toDeck);
+    REQUIRE(response.has_value());
+    CHECK(AsVectors(*response).size() >= 2);
+
+    toDeck.flags = requireComplete;
+
+    for (const MessageType type : {MessageType::PATH, MessageType::RANDOM_PATH})
+    {
+        response = client.Request(type, toDeck);
+        REQUIRE(response.has_value());
+        CHECK(AsVectors(*response).size() == 1 && AsVectors(*response)[0].IsZero());
+    }
+}
+
+TEST_CASE(Server_GetConfigReportsVersion)
+{
+    ServerFixture server;
+    RawClient client(server.Port());
+    REQUIRE(client.Connected());
+
+    REQUIRE(client.SendRequest(static_cast<unsigned char>(MessageType::GET_CONFIG), nullptr, 0));
+    const auto response = client.ReadResponse(static_cast<unsigned char>(MessageType::GET_CONFIG));
+    REQUIRE(response.has_value());
+    REQUIRE(response->size() >= sizeof(GetConfigResponseHeader));
+
+    GetConfigResponseHeader header{};
+    std::memcpy(&header, response->data(), sizeof(header));
+    CHECK_EQ(header.useAnpFileFormat, 1);
+
+    const size_t trailerOffset = sizeof(header) + static_cast<size_t>(header.pathLength);
+    REQUIRE(response->size() >= trailerOffset + sizeof(GetConfigResponseTrailer));
+    CHECK(std::string(response->data() + sizeof(header), static_cast<size_t>(header.pathLength))
+          == TestWorld::Get().meshDir.string());
+
+    GetConfigResponseTrailer trailer{};
+    std::memcpy(&trailer, response->data() + trailerOffset, sizeof(trailer));
+    CHECK_EQ(trailer.protocolVersion, PROTOCOL_VERSION);
+    CHECK_EQ(trailer.maxPointPath, 256);
+    REQUIRE(response->size() == trailerOffset + sizeof(trailer) + static_cast<size_t>(trailer.versionLength));
+    CHECK(std::string(response->data() + trailerOffset + sizeof(trailer), static_cast<size_t>(trailer.versionLength))
+          == AMEISENNAV_VERSION);
+}
+
 TEST_CASE(Server_MalformedRequestsAlwaysGetAnAnswer)
 {
     ServerFixture server;
@@ -366,7 +484,8 @@ TEST_CASE(Server_MalformedRequestsAlwaysGetAnAnswer)
 
     for (const MessageType type : {MessageType::PATH, MessageType::RANDOM_PATH, MessageType::MOVE_ALONG_SURFACE,
                                    MessageType::CAST_RAY, MessageType::RANDOM_POINT, MessageType::RANDOM_POINT_AROUND,
-                                   MessageType::GET_HEIGHT, MessageType::CONFIGURE_FILTER, MessageType::CAST_RAY_EX})
+                                   MessageType::GET_HEIGHT, MessageType::CONFIGURE_FILTER, MessageType::CAST_RAY_EX,
+                                   MessageType::EXPLORE_POLY})
     {
         REQUIRE(client.SendRequest(static_cast<unsigned char>(type), &tiny, 1));
         CHECK(client.ReadResponse(static_cast<unsigned char>(type)).has_value());

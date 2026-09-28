@@ -45,6 +45,16 @@ namespace AmeisenNavigation.Client
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct ExplorePolyRequestHeader
+    {
+        public int MapId;
+        public int Flags;
+        public Vector3 Start;
+        public float Spacing;
+        public int PointCount;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct GetHeightData
     {
         public int MapId;

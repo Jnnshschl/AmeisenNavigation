@@ -24,8 +24,11 @@ struct AmeisenNavConfig
     bool debugLogging = false;
     bool useAnpFileFormat = false;
     float catmullRomSplineAlpha = 0.5f;
+    float badLiquidCost = 4.0f; // lava, slime
     float factionDangerCost = 3.0f;
     float randomPathMaxDistance = 1.0f;
+    float roadCost = 0.75f;  // ANP roads, < 1 prefers them
+    float waterCost = 1.6f;  // water, ocean
     int bezierCurvePoints = 8;
     int catmullRomSplinePoints = 4;
     int maxPointPath = 512;
@@ -252,9 +255,12 @@ private:
         return {
             {"bDebugLogging", std::ref(debugLogging)},
             {"bUseAnpFileFormat", std::ref(useAnpFileFormat)},
+            {"fBadLiquidCost", std::ref(badLiquidCost)},
             {"fCatmullRomSplineAlpha", std::ref(catmullRomSplineAlpha)},
             {"fFactionDangerCost", std::ref(factionDangerCost)},
             {"fRandomPathMaxDistance", std::ref(randomPathMaxDistance)},
+            {"fRoadCost", std::ref(roadCost)},
+            {"fWaterCost", std::ref(waterCost)},
             {"iBezierCurvePoints", std::ref(bezierCurvePoints)},
             {"iCatmullRomSplinePoints", std::ref(catmullRomSplinePoints)},
             {"iMaxPointPath", std::ref(maxPointPath)},

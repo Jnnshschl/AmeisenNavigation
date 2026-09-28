@@ -45,14 +45,16 @@ AmeisenNavigation::AmeisenNavigation(const AmeisenNavigationSettings& settings) 
     if (Settings.useAnp)
     {
         NavSource = std::make_unique<AnpNavSource>(Settings.meshFolder);
-        FilterProvider = std::make_unique<AnpQueryFilterProvider>(1.6f, 4.0f, 0.75f, Settings.factionDangerCost);
+        FilterProvider = std::make_unique<AnpQueryFilterProvider>(Settings.waterCost, Settings.badLiquidCost,
+                                                                  Settings.roadCost, Settings.factionDangerCost);
     }
     else
     {
         auto mmapSource =
             std::make_unique<MmapNavSource>(Settings.meshFolder, Settings.mmapFormat, Settings.customMmapPatterns);
         Settings.mmapFormat = mmapSource->GetFormat();
-        FilterProvider = std::make_unique<MmapQueryFilterProvider>(Settings.mmapFormat);
+        FilterProvider =
+            std::make_unique<MmapQueryFilterProvider>(Settings.mmapFormat, Settings.waterCost, Settings.badLiquidCost);
         NavSource = std::move(mmapSource);
     }
 }
@@ -110,7 +112,7 @@ size_t AmeisenNavigation::GetClientCount() const
 bool AmeisenNavigation::PreloadMap(int mapId) noexcept { return NavSource->Get(mapId) != nullptr; }
 
 bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const Vector3& startPosition, const Vector3& endPosition,
-                                Path& path)
+                                Path& path, bool* partial)
 {
     path.Clear();
     const auto ctx = GetQueryContext(clientId, mapId);
@@ -122,7 +124,8 @@ bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const Vector3& start
 
     LogD("[", clientId, "] GetPath (", mapId, ") ", startPosition, " -> ", endPosition);
 
-    if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, startPosition, endPosition, path))
+    if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, startPosition, endPosition, path, nullptr,
+                             partial))
     {
         return false;
     }
@@ -132,7 +135,7 @@ bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const Vector3& start
 }
 
 bool AmeisenNavigation::GetRandomPath(size_t clientId, int mapId, const Vector3& startPosition,
-                                      const Vector3& endPosition, Path& path, float maxRandomDistance)
+                                      const Vector3& endPosition, Path& path, float maxRandomDistance, bool* partial)
 {
     path.Clear();
     const auto ctx = GetQueryContext(clientId, mapId);
@@ -148,7 +151,8 @@ bool AmeisenNavigation::GetRandomPath(size_t clientId, int mapId, const Vector3&
     // findStraightPath writes them.
     dtPolyRef* cornerRefs = ctx.client->GetStraightPathRefBuffer();
 
-    if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, startPosition, endPosition, path, cornerRefs))
+    if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, startPosition, endPosition, path, cornerRefs,
+                             partial))
     {
         return false;
     }
@@ -488,6 +492,131 @@ bool AmeisenNavigation::PostProcessMoveAlongSurface(size_t clientId, int mapId, 
     return true;
 }
 
+bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3& startPosition,
+                                       std::span<const Vector3> polygon, float spacing, Path& path,
+                                       ExploreResult* result)
+{
+    path.Clear();
+    ExploreResult local;
+    ExploreResult& res = result ? *result : local;
+    res = ExploreResult{};
+
+    if (polygon.size() < 3 || polygon.size() > static_cast<size_t>(MAX_EXPLORE_POLYGON_POINTS)
+        || !startPosition.IsFinite() || !std::isfinite(spacing)
+        || std::any_of(polygon.begin(), polygon.end(), [](const Vector3& v) { return !v.IsFinite(); }))
+    {
+        return false;
+    }
+
+    const auto ctx = GetQueryContext(clientId, mapId);
+
+    if (!ctx)
+    {
+        return false;
+    }
+
+    // Grid points inside the polygon, grow the spacing until they fit.
+    spacing = std::max(spacing, MIN_EXPLORE_SPACING);
+    std::vector<Vector3> samples;
+
+    for (int attempt = 0; attempt < 32; ++attempt)
+    {
+        samples = PolygonMath::HexGridSampling(polygon, spacing, MAX_EXPLORE_WAYPOINTS);
+
+        if (!samples.empty())
+        {
+            break;
+        }
+
+        spacing *= 1.5f;
+    }
+
+    res.spacing = spacing;
+
+    // The outline's height picks the floor on stacked geometry (caves, buildings, bridges).
+    float probeHeight = 0.0f;
+
+    for (const Vector3& v : polygon)
+    {
+        probeHeight += v.z / static_cast<float>(polygon.size());
+    }
+
+    // Snap to the navmesh, keep points still inside the polygon and not too close to another one.
+    const float snapExtents[3]{spacing * 0.5f, HEIGHT_QUERY_EXTENTS[1], spacing * 0.5f};
+    const float minDistance = spacing * 0.25f;
+    std::vector<Vector3> waypoints;
+    waypoints.reserve(samples.size());
+
+    for (const Vector3& sample : samples)
+    {
+        PolyPosition snapped;
+
+        if (!FindNearestPoly(ctx.query, ctx.filter, Vector3(sample.y, probeHeight, sample.x), snapped, snapExtents))
+        {
+            continue;
+        }
+
+        const Vector3 wow = snapped.pos.ToWowCoords();
+
+        if (!PolygonMath::IsInside2D(polygon.data(), static_cast<int>(polygon.size()), wow)
+            || std::any_of(waypoints.begin(), waypoints.end(),
+                           [&](const Vector3& w) { return w.DistanceTo(wow) < minDistance; }))
+        {
+            continue;
+        }
+
+        waypoints.push_back(wow);
+    }
+
+    res.waypoints = static_cast<int>(waypoints.size());
+
+    if (waypoints.empty())
+    {
+        return false;
+    }
+
+    // Connect the waypoints in tour order with navmesh paths. Segments use their own buffer, the client's
+    // path buffers may be the output.
+    Path segment(Settings.maxPointPath);
+    Vector3 current = startPosition;
+
+    for (const int index : Tour::Order(startPosition, waypoints))
+    {
+        const Vector3& target = waypoints[static_cast<size_t>(index)];
+        bool partial = false;
+
+        if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, current, target, segment, nullptr, &partial)
+            || partial)
+        {
+            continue; // unreachable from here (other island, blocked by the filter, ...)
+        }
+
+        segment.ToWowCoords();
+
+        for (int i = path.Empty() ? 0 : 1; i < segment.pointCount; ++i)
+        {
+            if (!path.TryAppendUnique(segment[i]))
+            {
+                res.truncated = true;
+                break;
+            }
+        }
+
+        if (res.truncated)
+        {
+            break;
+        }
+
+        res.reached++;
+        current = target;
+    }
+
+    LogD("[", clientId, "] ExplorePolygon (", mapId, ") ", polygon.size(), " vertices, spacing ", spacing, ": ",
+         res.reached, "/", res.waypoints, " waypoints, ", path.pointCount, " points",
+         res.truncated ? " (truncated)" : "");
+    return res.reached > 0 && path.pointCount > 0;
+}
+
 void AmeisenNavigation::SmoothPathChaikinCurve(const Path& input, Path& output) const noexcept
 {
     ChaikinCurve::SmoothPath(input.points, input.pointCount, output);
@@ -558,10 +687,15 @@ AmeisenNavigation::QueryContext AmeisenNavigation::GetQueryContext(size_t client
 
 bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQueryFilter* filter,
                                             AmeisenNavClient& client, const Vector3& startPosition,
-                                            const Vector3& endPosition, Path& path,
-                                            dtPolyRef* straightPathRefs) noexcept
+                                            const Vector3& endPosition, Path& path, dtPolyRef* straightPathRefs,
+                                            bool* partial) noexcept
 {
     path.Clear();
+
+    if (partial)
+    {
+        *partial = false;
+    }
 
     if (!startPosition.IsFinite() || !endPosition.IsFinite())
     {
@@ -603,9 +737,15 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
     // For partial paths, aim at the closest point of the last reached polygon instead of the unreachable end.
     Vector3 endPos = end.pos;
 
+    // DT_PARTIAL_RESULT or a poly path cut at the buffer size: either way the end poly wasn't reached.
     if (polyPath[polyPathCount - 1] != end.poly)
     {
         query->closestPointOnPoly(polyPath[polyPathCount - 1], end.pos, endPos, nullptr);
+
+        if (partial)
+        {
+            *partial = true;
+        }
     }
 
     // Corner refs go into the client's buffer, never write more corners than it holds.

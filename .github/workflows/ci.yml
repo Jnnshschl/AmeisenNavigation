@@ -46,6 +46,15 @@ jobs:
       - name: Test
         run: ctest --test-dir build --output-on-failure
 
+      - uses: actions/setup-dotnet@v6
+        if: matrix.compiler == 'gcc'
+        with:
+          dotnet-version: 10.0.x
+
+      - name: C# client integration (real server, test world from the e2e tests)
+        if: matrix.compiler == 'gcc'
+        run: tests/run_client_integration.sh build/bin/AmeisenNavigation.Server
+
       - name: Upload binaries
         if: matrix.compiler == 'gcc'
         uses: actions/upload-artifact@v7

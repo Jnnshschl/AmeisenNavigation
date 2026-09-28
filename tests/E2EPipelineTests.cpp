@@ -322,3 +322,126 @@ TEST_CASE(Navigation_UnknownMapAndClientFailGracefully)
     CHECK(!Navigation().GetPath(CLIENT, TestWorld::MAP_ID, Wow(std::nanf(""), 0, 0), Wow(1, 0, 1), path));
     CHECK_EQ(path.pointCount, 0);
 }
+
+TEST_CASE(Navigation_PartialPathIsReported)
+{
+    EnsureClient();
+    Path path(256);
+    bool partial = true;
+
+    REQUIRE(Navigation().GetPath(CLIENT, TestWorld::MAP_ID, Wow(-700.0f, 0.0f, -300.0f), Wow(-200.0f, 0.0f, -300.0f),
+                                 path, &partial));
+    CHECK(!partial);
+
+    // The platform deck (5 yards up, no ramp) can't be reached from the ground: the path leads next to it.
+    const Vector3 ground = Wow(-600.0f, 0.0f, -425.0f);
+    const Vector3 deck = Wow(-425.0f, TestWorld::PLATFORM_Y, -425.0f);
+
+    REQUIRE(Navigation().GetPath(CLIENT, TestWorld::MAP_ID, ground, deck, path, &partial));
+    CHECK(partial);
+    REQUIRE(path.pointCount >= 2);
+    CHECK_NEAR(path[path.pointCount - 1].z, 0.0f, 0.6);
+
+    partial = false;
+    REQUIRE(Navigation().GetRandomPath(CLIENT, TestWorld::MAP_ID, ground, deck, path, 1.0f, &partial));
+    CHECK(partial);
+}
+
+TEST_CASE(Navigation_ExplorePolygonCoversArea)
+{
+    EnsureClient();
+
+    // Both sides of the wall: RD x [-390, -210], z [-450, -150]. The wall can only be passed at its end (z > -100).
+    const Vector3 outline[] = {Wow(-390.0f, 0.0f, -450.0f), Wow(-210.0f, 0.0f, -450.0f), Wow(-210.0f, 0.0f, -150.0f),
+                               Wow(-390.0f, 0.0f, -150.0f)};
+    const Vector3 start = Wow(-380.0f, 0.0f, -440.0f);
+    constexpr float spacing = 40.0f;
+
+    Path path(256);
+    ExploreResult result;
+    REQUIRE(Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, start, outline, spacing, path, &result));
+
+    CHECK_NEAR(result.spacing, spacing, 1e-3);
+    CHECK(result.waypoints > 20);
+    CHECK_EQ(result.reached, result.waypoints);
+    CHECK(!result.truncated);
+    CHECK(path[0].DistanceTo(start) < 2.0f);
+
+    bool aroundWall = false;
+
+    for (const auto& p : path)
+    {
+        CHECK_NEAR(p.z, 0.0f, 0.6);
+        aroundWall |= p.x > TestWorld::WALL_Z_MAX - 5.0f; // WoW x = RD z
+    }
+
+    CHECK(aroundWall);
+
+    // Every point of the area is within the spacing of a route point.
+    for (float rdX = -385.0f; rdX < -210.0f; rdX += 10.0f)
+    {
+        for (float rdZ = -445.0f; rdZ < -150.0f; rdZ += 10.0f)
+        {
+            const Vector3 probe = Wow(rdX, 0.0f, rdZ);
+            float nearest = 1e9f;
+
+            for (const auto& p : path)
+            {
+                nearest = std::min(nearest, std::hypot(p.x - probe.x, p.y - probe.y));
+            }
+
+            CHECK(nearest <= spacing);
+        }
+    }
+}
+
+TEST_CASE(Navigation_ExplorePolygonSkipsUnreachableWaypoints)
+{
+    EnsureClient();
+
+    // The deck is an island: its waypoints (outline at deck height) can't be reached from the ground.
+    const float y = TestWorld::PLATFORM_Y;
+    const Vector3 deck[] = {Wow(-447.0f, y, -447.0f), Wow(-403.0f, y, -447.0f), Wow(-403.0f, y, -403.0f),
+                            Wow(-447.0f, y, -403.0f)};
+
+    Path path(256);
+    ExploreResult result;
+    CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, Wow(-600.0f, 0.0f, -425.0f), deck, 10.0f, path,
+                                       &result));
+    CHECK(result.waypoints > 5);
+    CHECK_EQ(result.reached, 0);
+    CHECK_EQ(path.pointCount, 0);
+
+    REQUIRE(Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, Wow(-425.0f, y, -425.0f), deck, 10.0f, path,
+                                        &result));
+    CHECK_EQ(result.reached, result.waypoints);
+
+    for (const auto& p : path)
+    {
+        CHECK_NEAR(p.z, y, 0.6);
+    }
+}
+
+TEST_CASE(Navigation_ExplorePolygonLimits)
+{
+    EnsureClient();
+    Path path(256);
+    ExploreResult result;
+    const Vector3 start = Wow(-700.0f, 0.0f, -300.0f);
+
+    // Both ADTs with a 2 yard spacing: the spacing grows to stay below MAX_EXPLORE_WAYPOINTS, the route is cut.
+    const Vector3 all[] = {Wow(-1060.0f, 0.0f, -530.0f), Wow(-10.0f, 0.0f, -530.0f), Wow(-10.0f, 0.0f, -10.0f),
+                           Wow(-1060.0f, 0.0f, -10.0f)};
+    REQUIRE(Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, start, all, 2.0f, path, &result));
+    CHECK(result.spacing > 20.0f);
+    CHECK(result.waypoints <= MAX_EXPLORE_WAYPOINTS);
+    CHECK(result.truncated);
+    CHECK_EQ(path.pointCount, path.maxSize);
+
+    // Invalid polygons.
+    CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, start, std::span<const Vector3>(all, 2), 10.0f,
+                                       path));
+    const Vector3 nan[] = {all[0], all[1], Wow(std::nanf(""), 0.0f, 0.0f)};
+    CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, start, nan, 10.0f, path));
+    CHECK(!Navigation().ExplorePolygon(CLIENT, 999, start, all, 10.0f, path));
+}

@@ -8,6 +8,7 @@
 
 #include "AmeisenNavigation.hpp"
 #include "Helpers/Polygon.hpp"
+#include "Helpers/Tour.hpp"
 
 namespace {
 std::filesystem::path TempDir(const char* name)
@@ -276,4 +277,110 @@ TEST_CASE(Polygon_PoissonSamplingStaysInsideAndSpaced)
     // Respects small capacities.
     PolygonMath::BridsonsPoissonDiskSampling(square, 4, points.data(), &count, temp.data(), 5, 1.0f);
     CHECK(count <= 5);
+}
+
+TEST_CASE(Polygon_HexGridCoversConcavePolygon)
+{
+    // L shape, 6400 square yards.
+    const Vector3 shape[] = {{0, 0, 0}, {100, 0, 0}, {100, 40, 0}, {40, 40, 0}, {40, 100, 0}, {0, 100, 0}};
+    constexpr float spacing = 10.0f;
+
+    const auto points = PolygonMath::HexGridSampling(shape, spacing, 1024);
+
+    // One point per hexagon cell of spacing^2 * sqrt(3) / 2.
+    CHECK(points.size() > 60 && points.size() < 90);
+
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        CHECK(PolygonMath::IsInside2D(shape, 6, points[i]));
+
+        for (size_t j = i + 1; j < points.size(); ++j)
+        {
+            CHECK(points[i].DistanceTo(points[j]) >= spacing - 1e-3f);
+        }
+    }
+
+    // Every point of the polygon is close to a sample.
+    for (float x = 0.5f; x < 100.0f; x += 3.0f)
+    {
+        for (float y = 0.5f; y < 100.0f; y += 3.0f)
+        {
+            const Vector3 probe(x, y, 0.0f);
+
+            if (!PolygonMath::IsInside2D(shape, 6, probe))
+            {
+                continue;
+            }
+
+            float nearest = 1e9f;
+
+            for (const auto& p : points)
+            {
+                nearest = std::min(nearest, p.DistanceTo(probe));
+            }
+
+            CHECK(nearest <= spacing);
+        }
+    }
+
+    // Deterministic.
+    const auto again = PolygonMath::HexGridSampling(shape, spacing, 1024);
+    REQUIRE(again.size() == points.size());
+
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        CHECK(again[i] == points[i]);
+    }
+
+    // Too many points needed, degenerate input.
+    CHECK(PolygonMath::HexGridSampling(shape, spacing, 10).empty());
+    CHECK(PolygonMath::HexGridSampling(shape, 0.0f, 1024).empty());
+    CHECK(PolygonMath::HexGridSampling(std::span<const Vector3>(shape, 2), spacing, 1024).empty());
+
+    // Smaller than one cell: its center.
+    const Vector3 small[] = {{0, 0, 0}, {4, 0, 0}, {4, 4, 0}, {0, 4, 0}};
+    const auto single = PolygonMath::HexGridSampling(small, spacing, 1024);
+    REQUIRE(single.size() == 1);
+    CHECK_NEAR(single[0].x, 2.0f, 1e-4);
+    CHECK_NEAR(single[0].y, 2.0f, 1e-4);
+}
+
+TEST_CASE(Tour_OrderIsAShortPermutation)
+{
+    const Vector3 start(0.0f, 0.0f, 0.0f);
+
+    // Shuffled points on a line: the optimal open tour walks them in order.
+    std::vector<Vector3> line;
+
+    for (const int i : {5, 2, 9, 1, 7, 3, 8, 4, 6})
+    {
+        line.emplace_back(static_cast<float>(i) * 10.0f, 0.0f, 0.0f);
+    }
+
+    const auto lineOrder = Tour::Order(start, line);
+    REQUIRE(lineOrder.size() == line.size());
+    CHECK_NEAR(Tour::Length(start, line, lineOrder), 90.0f, 1e-3);
+
+    // 10x10 grid in scrambled order, optimum from the corner is 99 steps (+ 0 to reach the first point).
+    std::vector<Vector3> grid;
+
+    for (int i = 0; i < 100; ++i)
+    {
+        const int k = (i * 37) % 100;
+        grid.emplace_back(static_cast<float>(k % 10) * 10.0f, static_cast<float>(k / 10) * 10.0f, 0.0f);
+    }
+
+    const auto order = Tour::Order(start, grid);
+    REQUIRE(order.size() == grid.size());
+
+    std::vector<int> sorted = order;
+    std::sort(sorted.begin(), sorted.end());
+
+    for (int i = 0; i < 100; ++i)
+    {
+        CHECK_EQ(sorted[static_cast<size_t>(i)], i);
+    }
+
+    CHECK(Tour::Length(start, grid, order) <= 990.0f * 1.25f);
+    CHECK(Tour::Order(start, std::span<const Vector3>()).empty());
 }

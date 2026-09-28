@@ -6,6 +6,7 @@
     <ClInclude Include="src\NavSources\Mmap\335a\NavArea335a.hpp" />
     <ClInclude Include="src\NavSources\Mmap\548\NavArea548.hpp" />
     <ClInclude Include="src\Helpers\Polygon.hpp" />
+    <ClInclude Include="src\Helpers\Tour.hpp" />
     <ClInclude Include="src\NavSources\Mmap\MmapFormat.hpp" />
     <ClInclude Include="src\NavSources\Mmap\MmapTileHeader.hpp" />
     <ClInclude Include="src\Utils\VectorUtils.hpp" />

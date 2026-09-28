@@ -59,6 +59,7 @@ private:
     void HandleConfigureFilter(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
     void HandleGetHeight(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
     void HandleGetConfig(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleExplorePoly(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
 
     /// Apply smoothing/validation flags to a raw path. Returns the buffer holding the final result.
     Path* ApplyPathFlags(size_t clientId, int mapId, int flags, PathType pathType, Path& path, Path& scratch);

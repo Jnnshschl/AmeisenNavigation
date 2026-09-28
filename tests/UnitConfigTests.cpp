@@ -24,6 +24,9 @@ TEST_CASE(Config_SaveLoadRoundTrip)
     out.useAnpFileFormat = true;
     out.mmapsPath = "/some/path with spaces/";
     out.preloadMaps = "0,1";
+    out.waterCost = 2.5f;
+    out.roadCost = 0.5f;
+    out.badLiquidCost = 9.0f;
     REQUIRE(out.Save(file));
 
     AmeisenNavConfig in;
@@ -35,6 +38,9 @@ TEST_CASE(Config_SaveLoadRoundTrip)
     CHECK(in.useAnpFileFormat);
     CHECK_EQ(in.mmapsPath, std::string("/some/path with spaces/"));
     CHECK_EQ(in.preloadMaps, std::string("0,1"));
+    CHECK_NEAR(in.waterCost, 2.5f, 1e-6);
+    CHECK_NEAR(in.roadCost, 0.5f, 1e-6);
+    CHECK_NEAR(in.badLiquidCost, 9.0f, 1e-6);
 }
 
 TEST_CASE(Config_ToleratesCrlfCommentsAndBadValues)
@@ -85,11 +91,13 @@ TEST_CASE(Config_ValidationClampsAndRejects)
     cfg.bezierCurvePoints = 0;
     cfg.catmullRomSplineAlpha = 3.0f;
     cfg.factionDangerCost = -1.0f;
+    cfg.waterCost = 0.0f;
 
     std::vector<std::string> errors, warnings;
     NavServer::ValidateConfig(cfg, errors, warnings);
     CHECK(errors.empty());
-    CHECK_EQ(warnings.size(), size_t{3});
+    CHECK_EQ(warnings.size(), size_t{4});
+    CHECK(cfg.waterCost > 0.0f);
     CHECK_EQ(cfg.bezierCurvePoints, 2);
     CHECK_NEAR(cfg.catmullRomSplineAlpha, 1.0f, 1e-6);
     CHECK(cfg.factionDangerCost > 0.0f);

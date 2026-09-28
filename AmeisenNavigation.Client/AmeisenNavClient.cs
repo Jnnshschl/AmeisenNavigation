@@ -1,7 +1,9 @@
 using AnTCP.Client;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -149,6 +151,55 @@ namespace AmeisenNavigation.Client
             return SendPathRequest(MessageType.RandomPath, mapId, start, end, flags);
         }
 
+        /// <summary>Maximum number of polygon vertices accepted by <see cref="ExplorePolygon"/>.</summary>
+        public const int MaxExplorePolygonPoints = 256;
+
+        /// <summary>
+        /// Generate a route that explores an area: waypoints on a hexagonal grid <paramref name="spacing"/>
+        /// apart inside the polygon (x/y outline, its z picks the floor on stacked geometry), visited in a short
+        /// tour from <paramref name="start"/> and connected by navmesh paths. Unreachable waypoints are skipped,
+        /// the route is cut at the server's maximum path length. Returns null on failure.
+        /// Requires protocol version 2 (server 1.9+).
+        /// </summary>
+        /// <param name="spacing">Distance between waypoints, e.g. twice the sight/gather range (min 2).</param>
+        public Vector3[]? ExplorePolygon(int mapId, Vector3 start, IReadOnlyList<Vector3> polygon, float spacing,
+                                         PathFlags flags = PathFlags.None)
+        {
+            if (polygon == null || polygon.Count < 3 || polygon.Count > MaxExplorePolygonPoints
+                || !float.IsFinite(spacing))
+                return null;
+
+            var header = new ExplorePolyRequestHeader
+            {
+                MapId = mapId,
+                Flags = (int)flags,
+                Start = start,
+                Spacing = spacing,
+                PointCount = polygon.Count,
+            };
+
+            int headerSize = Marshal.SizeOf<ExplorePolyRequestHeader>();
+            int pointSize = Marshal.SizeOf<Vector3>();
+            byte[] buffer = new byte[headerSize + polygon.Count * pointSize];
+
+            MemoryMarshal.Write(buffer.AsSpan(0, headerSize), in header);
+
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                Vector3 point = polygon[i];
+                MemoryMarshal.Write(buffer.AsSpan(headerSize + i * pointSize, pointSize), in point);
+            }
+
+            lock (_lock)
+            {
+                return SendWithReconnect(() =>
+                {
+                    var points = _client.SendBytes((byte)MessageType.ExplorePoly, buffer).AsArray<Vector3>();
+                    return points.Length == 0 || (points.Length == 1 && points[0].IsZero) ? null : points;
+                }, null);
+            }
+        }
+
         /// <summary>
         /// Move along the navmesh surface by a small delta. Useful for preventing
         /// falling off edges during incremental movement.
@@ -265,20 +316,7 @@ namespace AmeisenNavigation.Client
                 return SendWithReconnect<ServerConfig?>(() =>
                 {
                     var response = _client.SendBytes((byte)MessageType.GetConfig, ReadOnlySpan<byte>.Empty);
-                    var data = response.Data;
-
-                    // Header: mmapFormat(4) + useAnpFileFormat(4) + pathLength(4)
-                    if (data.Length < 12) return null;
-
-                    int mmapFormat = BitConverter.ToInt32(data.Slice(0, 4));
-                    bool useAnp = BitConverter.ToInt32(data.Slice(4, 4)) != 0;
-                    int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
-
-                    string meshesPath = "";
-                    if (pathLen > 0 && data.Length >= 12 + pathLen)
-                        meshesPath = System.Text.Encoding.UTF8.GetString(data.Slice(12, pathLen));
-
-                    _serverConfig = new ServerConfig(mmapFormat, useAnp, meshesPath);
+                    _serverConfig = ParseConfig(response.Data);
                     return _serverConfig;
                 }, null);
             }
@@ -535,22 +573,44 @@ namespace AmeisenNavigation.Client
             try
             {
                 var response = _client.SendBytes((byte)MessageType.GetConfig, ReadOnlySpan<byte>.Empty);
-                var data = response.Data;
-
-                if (data.Length < 12)
-                    return null;
-
-                int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
-                string meshesPath = pathLen > 0 && data.Length >= 12 + pathLen
-                    ? Encoding.UTF8.GetString(data.Slice(12, pathLen))
-                    : "";
-
-                return new ServerConfig(BitConverter.ToInt32(data.Slice(0, 4)), BitConverter.ToInt32(data.Slice(4, 4)) != 0, meshesPath);
+                return ParseConfig(response.Data);
             }
             catch (Exception ex) when (!IsNetworkError(ex))
             {
                 return null;
             }
+        }
+
+        /// <summary>
+        /// GET_CONFIG response: mmapFormat(4) useAnp(4) pathLength(4) path[pathLength], then (protocol 2+)
+        /// protocolVersion(4) maxPointPath(4) versionLength(4) version[versionLength].
+        /// </summary>
+        private static ServerConfig? ParseConfig(ReadOnlySpan<byte> data)
+        {
+            if (data.Length < 12)
+                return null;
+
+            int mmapFormat = BitConverter.ToInt32(data.Slice(0, 4));
+            bool useAnp = BitConverter.ToInt32(data.Slice(4, 4)) != 0;
+            int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
+
+            if (pathLen < 0 || data.Length < 12 + pathLen)
+                return new ServerConfig(mmapFormat, useAnp, "");
+
+            string meshesPath = Encoding.UTF8.GetString(data.Slice(12, pathLen));
+            var trailer = data.Slice(12 + pathLen);
+
+            if (trailer.Length < 12)
+                return new ServerConfig(mmapFormat, useAnp, meshesPath);
+
+            int protocolVersion = BitConverter.ToInt32(trailer.Slice(0, 4));
+            int maxPointPath = BitConverter.ToInt32(trailer.Slice(4, 4));
+            int versionLen = BitConverter.ToInt32(trailer.Slice(8, 4));
+            string version = versionLen > 0 && trailer.Length >= 12 + versionLen
+                ? Encoding.UTF8.GetString(trailer.Slice(12, versionLen))
+                : "";
+
+            return new ServerConfig(mmapFormat, useAnp, meshesPath, protocolVersion, maxPointPath, version);
         }
 
         private void OnDisconnected()
