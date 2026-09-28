@@ -493,3 +493,54 @@ TEST_CASE(Navigation_ExplorePolygonLimits)
     CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, start, nan, 10.0f, path));
     CHECK(!Navigation().ExplorePolygon(CLIENT, 999, start, all, 10.0f, path));
 }
+
+TEST_CASE(Navigation_RejectsInvalidCoordinatesAndMaps)
+{
+    EnsureClient();
+
+    // Non-finite and out-of-world values must never reach Detour (float -> int tile math is UB for them).
+    const Vector3 valid = Wow(-700.0f, 0.0f, -300.0f);
+    const Vector3 invalid[] = {Vector3(std::nanf(""), 0.0f, 0.0f), Vector3(0.0f, INFINITY, 0.0f),
+                               Vector3(1e30f, -1e30f, 0.0f), Vector3(0.0f, 0.0f, -2e5f)};
+    Path path(64);
+    Vector3 out;
+
+    for (const Vector3& bad : invalid)
+    {
+        CHECK(!Navigation().GetPath(CLIENT, TestWorld::MAP_ID, valid, bad, path));
+        CHECK(!Navigation().GetPath(CLIENT, TestWorld::MAP_ID, bad, valid, path));
+        CHECK(!Navigation().GetRandomPath(CLIENT, TestWorld::MAP_ID, valid, bad, path, 1.0f));
+        CHECK(!Navigation().MoveAlongSurface(CLIENT, TestWorld::MAP_ID, valid, bad, out));
+        CHECK(!Navigation().MoveAlongSurface(CLIENT, TestWorld::MAP_ID, bad, valid, out));
+        CHECK(!Navigation().CastMovementRay(CLIENT, TestWorld::MAP_ID, valid, bad));
+        CHECK(!Navigation().CastMovementRay(CLIENT, TestWorld::MAP_ID, bad, valid));
+        CHECK(!Navigation().GetHeight(CLIENT, TestWorld::MAP_ID, bad, out));
+        CHECK(!Navigation().GetRandomPointAround(CLIENT, TestWorld::MAP_ID, bad, 5.0f, out));
+
+        const Vector3 polygon[] = {valid, Wow(-650.0f, 0.0f, -300.0f), bad};
+        CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, valid, polygon, 10.0f, path));
+        CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, bad, polygon, 10.0f, path));
+
+        Path input(4);
+        input.TryAppend(valid);
+        input.TryAppend(bad);
+        Path validated(16);
+        CHECK(Navigation().PostProcessMoveAlongSurface(CLIENT, TestWorld::MAP_ID, input, validated));
+        CHECK_EQ(validated.pointCount, 1); // stops at the invalid point
+    }
+
+    CHECK(!Navigation().GetRandomPointAround(CLIENT, TestWorld::MAP_ID, valid, INFINITY, out));
+    CHECK(!Navigation().GetRandomPointAround(CLIENT, TestWorld::MAP_ID, valid, MAX_QUERY_RADIUS * 2.0f, out));
+
+    // Polygons larger than MAX_EXPLORE_EXTENT.
+    const Vector3 huge[] = {Wow(-20000.0f, 0.0f, 0.0f), Wow(20000.0f, 0.0f, 0.0f), Wow(0.0f, 0.0f, 20000.0f)};
+    CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, valid, huge, 1000.0f, path));
+
+    // Map ids outside the accepted range never touch the nav source.
+    CHECK(!Navigation().GetPath(CLIENT, -1, valid, valid, path));
+    CHECK(!Navigation().GetPath(CLIENT, MAX_MAP_ID + 1, valid, valid, path));
+    CHECK(!Navigation().PreloadMap(-5));
+
+    // Still fine afterwards.
+    CHECK(Navigation().GetPath(CLIENT, TestWorld::MAP_ID, valid, Wow(-200.0f, 0.0f, -300.0f), path));
+}

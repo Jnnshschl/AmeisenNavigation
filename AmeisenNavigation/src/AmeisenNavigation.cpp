@@ -111,7 +111,10 @@ size_t AmeisenNavigation::GetClientCount() const
     return Clients.size();
 }
 
-bool AmeisenNavigation::PreloadMap(int mapId) noexcept { return NavSource->Get(mapId) != nullptr; }
+bool AmeisenNavigation::PreloadMap(int mapId) noexcept
+{
+    return IsValidMapId(mapId) && NavSource->Get(mapId) != nullptr;
+}
 
 bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const Vector3& startPosition, const Vector3& endPosition,
                                 Path& path, bool* partial)
@@ -204,6 +207,11 @@ bool AmeisenNavigation::MoveAlongSurface(size_t clientId, int mapId, const Vecto
         return false;
     }
 
+    if (!IsValidPosition(endPosition))
+    {
+        return false;
+    }
+
     Vector3 rdEnd;
     endPosition.CopyToRDCoords(rdEnd);
 
@@ -260,7 +268,7 @@ bool AmeisenNavigation::GetRandomPointAround(size_t clientId, int mapId, const V
 {
     const auto ctx = GetQueryContext(clientId, mapId);
 
-    if (!ctx || !std::isfinite(radius) || radius < 0.0f)
+    if (!ctx || !std::isfinite(radius) || radius < 0.0f || radius > MAX_QUERY_RADIUS)
     {
         return false;
     }
@@ -289,7 +297,7 @@ bool AmeisenNavigation::GetHeight(size_t clientId, int mapId, const Vector3& pos
 {
     const auto ctx = GetQueryContext(clientId, mapId);
 
-    if (!ctx)
+    if (!ctx || !IsValidPosition(position))
     {
         return false;
     }
@@ -360,6 +368,11 @@ bool AmeisenNavigation::CastMovementRay(size_t clientId, int mapId, const Vector
     PolyPosition start;
 
     if (!FindNearestPolyWow(ctx.query, ctx.filter, startPosition, start))
+    {
+        return false;
+    }
+
+    if (!IsValidPosition(endPosition))
     {
         return false;
     }
@@ -448,6 +461,11 @@ bool AmeisenNavigation::PostProcessMoveAlongSurface(size_t clientId, int mapId, 
 
     for (int i = 1; i < input.pointCount && !output.IsFull(); ++i)
     {
+        if (!IsValidPosition(input[i]))
+        {
+            break;
+        }
+
         Vector3 target;
         input[i].CopyToRDCoords(target);
 
@@ -504,8 +522,18 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     res = ExploreResult{};
 
     if (polygon.size() < 3 || polygon.size() > static_cast<size_t>(MAX_EXPLORE_POLYGON_POINTS)
-        || !startPosition.IsFinite() || !std::isfinite(spacing)
-        || std::any_of(polygon.begin(), polygon.end(), [](const Vector3& v) { return !v.IsFinite(); }))
+        || !IsValidPosition(startPosition) || !std::isfinite(spacing)
+        || std::any_of(polygon.begin(), polygon.end(), [](const Vector3& v) { return !IsValidPosition(v); }))
+    {
+        return false;
+    }
+
+    const auto [minX, maxX] = std::minmax_element(polygon.begin(), polygon.end(),
+                                                   [](const Vector3& a, const Vector3& b) { return a.x < b.x; });
+    const auto [minY, maxY] = std::minmax_element(polygon.begin(), polygon.end(),
+                                                   [](const Vector3& a, const Vector3& b) { return a.y < b.y; });
+
+    if (maxX->x - minX->x > MAX_EXPLORE_EXTENT || maxY->y - minY->y > MAX_EXPLORE_EXTENT)
     {
         return false;
     }
@@ -518,7 +546,7 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     }
 
     // Grid points inside the polygon, grow the spacing until they fit.
-    spacing = std::max(spacing, MIN_EXPLORE_SPACING);
+    spacing = std::clamp(spacing, MIN_EXPLORE_SPACING, MAX_EXPLORE_EXTENT);
     std::vector<Vector3> samples;
 
     for (int attempt = 0; attempt < 32; ++attempt)
@@ -544,7 +572,8 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     }
 
     // Snap to the navmesh, keep points still inside the polygon and not too close to another one.
-    const float snapExtents[3]{spacing * 0.5f, HEIGHT_QUERY_EXTENTS[1], spacing * 0.5f};
+    const float snapDistance = std::min(spacing * 0.5f, MAX_EXPLORE_SNAP_DISTANCE);
+    const float snapExtents[3]{snapDistance, HEIGHT_QUERY_EXTENTS[1], snapDistance};
     const float minDistance = spacing * 0.25f;
     std::vector<Vector3> waypoints;
     std::vector<dtPolyRef> waypointPolys;
@@ -668,6 +697,13 @@ void AmeisenNavigation::SmoothPathBezier(const Path& input, Path& output, int po
 AmeisenNavigation::QueryContext AmeisenNavigation::GetQueryContext(size_t clientId, int mapId)
 {
     QueryContext ctx;
+
+    if (!IsValidMapId(mapId))
+    {
+        LogD("[", clientId, "] Invalid map id ", mapId);
+        return {};
+    }
+
     ctx.client = GetClient(clientId);
 
     if (!ctx.client)
@@ -693,7 +729,7 @@ AmeisenNavigation::QueryContext AmeisenNavigation::GetQueryContext(size_t client
 
     if (!navMesh)
     {
-        LogE("[", clientId, "] No navmesh available for map ", mapId);
+        LogD("[", clientId, "] No navmesh available for map ", mapId); // the nav source warned once
         return {};
     }
 
@@ -730,7 +766,7 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
         *partial = false;
     }
 
-    if (!startPosition.IsFinite() || !endPosition.IsFinite())
+    if (!IsValidPosition(startPosition) || !IsValidPosition(endPosition))
     {
         return false;
     }

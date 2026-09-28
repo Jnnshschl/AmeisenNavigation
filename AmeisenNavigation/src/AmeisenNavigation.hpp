@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <filesystem>
 #include <memory>
 #include <random>
@@ -49,10 +51,29 @@ constexpr float MOVE_ALONG_SURFACE_MAX_CHUNK = 25.0f;
 /// Size of the visited polygon buffer for moveAlongSurface calls.
 constexpr int MOVE_ALONG_SURFACE_VISITED_SIZE = 32;
 
-/// ExplorePolygon limits: outline vertices, waypoints (the spacing grows to stay below it), minimum spacing.
+/// ExplorePolygon limits: outline vertices, waypoints (the spacing grows to stay below it), minimum spacing,
+/// size of the polygon's bounding box and how far a waypoint may move when it is snapped to the navmesh.
 constexpr int MAX_EXPLORE_POLYGON_POINTS = 256;
 constexpr int MAX_EXPLORE_WAYPOINTS = 1024;
 constexpr float MIN_EXPLORE_SPACING = 2.0f;
+constexpr float MAX_EXPLORE_EXTENT = 10000.0f;
+constexpr float MAX_EXPLORE_SNAP_DISTANCE = 32.0f;
+
+/// Request limits. The WoW world spans +-17067 yards; bigger or non-finite coordinates are rejected before they
+/// reach Detour, whose float -> int tile conversions are undefined for them (and loop for ages on ARM64).
+/// Map ids are bounded so arbitrary ids can't grow the per-map caches without limit.
+constexpr float MAX_COORDINATE = 100000.0f;
+constexpr float MAX_QUERY_RADIUS = 5000.0f;
+constexpr int MAX_MAP_ID = 65535;
+
+/// True for finite positions inside the accepted coordinate range.
+inline bool IsValidPosition(const Vector3& v) noexcept
+{
+    return v.IsFinite() && std::fabs(v.x) <= MAX_COORDINATE && std::fabs(v.y) <= MAX_COORDINATE
+           && std::fabs(v.z) <= MAX_COORDINATE;
+}
+
+constexpr bool IsValidMapId(int mapId) noexcept { return mapId >= 0 && mapId <= MAX_MAP_ID; }
 
 struct AmeisenNavigationSettings
 {
@@ -172,10 +193,17 @@ private:
 
     QueryContext GetQueryContext(size_t clientId, int mapId);
 
+    /// Every position that reaches Detour goes through here or is checked with IsValidPosition first.
     static bool FindNearestPoly(const dtNavMeshQuery* query, const dtQueryFilter* filter, const Vector3& rdPosition,
                                 PolyPosition& result, const float* extents = NEAREST_POLY_EXTENTS) noexcept
     {
         result.poly = 0;
+
+        if (!IsValidPosition(rdPosition))
+        {
+            return false;
+        }
+
         const dtStatus status = query->findNearestPoly(rdPosition, extents, filter, &result.poly, result.pos);
         return dtStatusSucceed(status) && result.poly != 0;
     }

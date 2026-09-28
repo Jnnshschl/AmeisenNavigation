@@ -62,8 +62,11 @@ else()
 endif()
 
 if(ANAV_SANITIZE AND NOT MSVC)
-    target_compile_options(anav_options INTERFACE -fsanitize=address,undefined -fno-omit-frame-pointer)
-    target_link_options(anav_options INTERFACE -fsanitize=address,undefined)
+    # float-cast-overflow isn't part of "undefined" with GCC: out of range float -> int is UB Detour relies on
+    # never seeing (see IsValidPosition).
+    target_compile_options(anav_options INTERFACE -fsanitize=address,undefined,float-cast-overflow
+        -fno-omit-frame-pointer)
+    target_link_options(anav_options INTERFACE -fsanitize=address,undefined,float-cast-overflow)
 endif()
 
 if(OpenMP_CXX_FOUND)
@@ -88,8 +91,8 @@ if(ANAV_SANITIZE AND NOT MSVC)
     # Detour's tile layout (header, verts, polys, links, ... packed with dtAlign4) is part of the ANP/MMAP file
     # format. With 64 bit poly refs the dtLink array is only 4 byte aligned for half of the tiles, which x86 and
     # ARMv8 handle natively. Changing the layout would break every existing navmesh, so don't flag it.
-    target_compile_options(anav_recast PRIVATE -fsanitize=address,undefined -fno-sanitize=alignment
-        -fno-omit-frame-pointer)
+    target_compile_options(anav_recast PRIVATE -fsanitize=address,undefined,float-cast-overflow
+        -fno-sanitize=alignment -fno-omit-frame-pointer)
 endif()
 
 # ── AmeisenNavigation.Pack (ANP file format: miniz + tile container) ──
