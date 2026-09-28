@@ -29,7 +29,7 @@ jobs:
             cc: clang
             cxx: clang++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build libomp-dev
@@ -48,7 +48,7 @@ jobs:
 
       - name: Upload binaries
         if: matrix.compiler == 'gcc'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AmeisenNavigation-linux-x64
           path: |
@@ -59,7 +59,7 @@ jobs:
     name: Linux (ASan + UBSan)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install dependencies
         run: sudo apt-get update && sudo apt-get install -y ninja-build
@@ -81,7 +81,7 @@ jobs:
     name: Windows (MSVC)
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Configure
         # StormLib is built from source here, the prebuilt dep/ library may come from a newer toolset.
@@ -94,7 +94,7 @@ jobs:
         run: ctest --test-dir build -C Release --output-on-failure
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: AmeisenNavigation-windows-x64
           path: |
@@ -105,9 +105,9 @@ jobs:
     name: .NET client and tester
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
@@ -125,7 +125,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -136,7 +136,7 @@ jobs:
           tar -czf AmeisenNavigation-linux-x64.tar.gz -C AmeisenNavigation-linux-x64 .
           (cd AmeisenNavigation-windows-x64 && zip -r ../AmeisenNavigation-windows-x64.zip .)
 
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           files: |
             artifacts/AmeisenNavigation-linux-x64.tar.gz

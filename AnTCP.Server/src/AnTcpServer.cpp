@@ -67,6 +67,7 @@ struct NetworkSession
 
 namespace {
 constexpr int ACCEPT_POLL_INTERVAL_MS = 100;
+constexpr int CLIENT_POLL_INTERVAL_MS = 100;
 constexpr size_t HEADER_SIZE = sizeof(AnTcpSizeType);
 constexpr size_t RECEIVE_BUFFER_SIZE = 2 * (HEADER_SIZE + ANTCP_MAX_PACKET_SIZE);
 
@@ -142,8 +143,9 @@ void ClientHandler::Start()
 
 void ClientHandler::Disconnect() noexcept
 {
-    // shutdown() wakes up the blocking recv() in Listen(), the socket itself is closed in the destructor
-    // after the thread was joined, so the descriptor can't be reused while the thread still uses it.
+    // Listen() notices Running == false within one poll interval. shutdown() tells the peer right away (and wakes a
+    // pending recv() on POSIX). The socket itself is closed in the destructor after the thread was joined, so the
+    // descriptor can't be reused while the thread still uses it.
     if (Running.exchange(false, std::memory_order_acq_rel) && Socket != ANTCP_INVALID_SOCKET)
     {
         ShutdownSocket(Socket);
@@ -253,6 +255,24 @@ void ClientHandler::Listen() noexcept
 
         while (ok && Running.load(std::memory_order_acquire) && !Server->IsStopping())
         {
+            // Wait for data with a timeout instead of blocking in recv(): on Windows shutdown() does not wake up
+            // a blocked recv() while the peer keeps the connection open, polling lets Disconnect()/Stop() work
+            // on every platform within CLIENT_POLL_INTERVAL_MS.
+            PollFd pfd{};
+            pfd.fd = Socket;
+            pfd.events = POLL_READ;
+            const int ready = PollSockets(&pfd, 1, CLIENT_POLL_INTERVAL_MS);
+
+            if (ready == 0 || (ready < 0 && IsInterrupted()))
+            {
+                continue;
+            }
+
+            if (ready < 0 || (pfd.revents & (POLLERR | POLLNVAL)))
+            {
+                break;
+            }
+
             const auto received =
                 recv(Socket, buffer.data() + filled, static_cast<int>(buffer.size() - filled), 0);
 

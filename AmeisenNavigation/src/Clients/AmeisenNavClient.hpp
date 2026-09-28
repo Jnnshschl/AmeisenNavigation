@@ -38,6 +38,7 @@ class AmeisenNavClient
 
     // Reusable buffers for path calculation.
     int PolyPathBufferSize;
+    int StraightPathRefsSize;
     std::unique_ptr<dtPolyRef[]> PolyPathBuffer;
     std::unique_ptr<dtPolyRef[]> StraightPathRefs;
     Path PrimaryPath;
@@ -52,8 +53,9 @@ public:
           CustomFilter(),
           NavMeshQueries(),
           PolyPathBufferSize(std::max(polyPathBufferSize, 1)),
+          StraightPathRefsSize(std::max(pointPathBufferSize, 1)),
           PolyPathBuffer(std::make_unique<dtPolyRef[]>(static_cast<size_t>(PolyPathBufferSize))),
-          StraightPathRefs(std::make_unique<dtPolyRef[]>(static_cast<size_t>(std::max(pointPathBufferSize, 1)))),
+          StraightPathRefs(std::make_unique<dtPolyRef[]>(static_cast<size_t>(StraightPathRefsSize))),
           PrimaryPath(pointPathBufferSize),
           SecondaryPath(pointPathBufferSize)
     {
@@ -85,6 +87,7 @@ public:
 
     /// Poly refs of the straight path corners, sized like the path buffers.
     dtPolyRef* GetStraightPathRefBuffer() noexcept { return StraightPathRefs.get(); }
+    int GetStraightPathRefBufferSize() const noexcept { return StraightPathRefsSize; }
 
     /// Two reusable path buffers (result + scratch for smoothing/validation).
     Path& GetPathBuffer() noexcept { return PrimaryPath; }

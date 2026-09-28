@@ -275,6 +275,17 @@ TEST_CASE(Navigation_RandomPathKeepsEndpoints)
     CHECK_NEAR(path[path.pointCount - 1].y, end.y, 1.5);
 }
 
+TEST_CASE(Navigation_RandomPathWithOversizedCallerBuffer)
+{
+    EnsureClient();
+
+    // The client's corner ref buffer holds maxPointPath (256) entries, a bigger caller buffer must not overflow it.
+    Path path(4096);
+    REQUIRE(Navigation().GetRandomPath(CLIENT, TestWorld::MAP_ID, Wow(-700.0f, 0.0f, -300.0f),
+                                       Wow(-200.0f, 0.0f, -300.0f), path, 2.0f));
+    CHECK(path.pointCount <= 256);
+}
+
 TEST_CASE(Navigation_ValidationSnapsSmoothedPathToMesh)
 {
     EnsureClient();

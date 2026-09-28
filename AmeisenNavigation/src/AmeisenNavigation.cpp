@@ -608,9 +608,13 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
         query->closestPointOnPoly(polyPath[polyPathCount - 1], end.pos, endPos, nullptr);
     }
 
+    // Corner refs go into the client's buffer, never write more corners than it holds.
+    const int maxCorners =
+        straightPathRefs ? std::min(path.maxSize, client.GetStraightPathRefBufferSize()) : path.maxSize;
+
     const dtStatus straightPathStatus =
         SafeFindStraightPath(query, start.pos, endPos, polyPath, polyPathCount, reinterpret_cast<float*>(path.points),
-                             nullptr, straightPathRefs, &path.pointCount, path.maxSize);
+                             nullptr, straightPathRefs, &path.pointCount, maxCorners);
 
     if (dtStatusFailed(straightPathStatus) || path.pointCount <= 0)
     {

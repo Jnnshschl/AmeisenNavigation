@@ -56,8 +56,12 @@ struct AmeisenNavConfig
 
         out << "# AmeisenNavigation.Server configuration (key=value), see README.md for all options\n";
 
-        for (const auto& [key, ref] : GetFieldMap())
+        // No structured bindings here: Clang with OpenMP can't capture them in the lambda below.
+        for (const auto& field : GetFieldMap())
         {
+            const std::string& key = field.first;
+            const ConfigRef& ref = field.second;
+
             std::visit(
                 [&](auto&& r) {
                     using T = std::decay_t<decltype(r.get())>;
