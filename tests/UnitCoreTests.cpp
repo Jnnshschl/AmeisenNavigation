@@ -500,3 +500,12 @@ TEST_CASE(Anp_TilesOutsideTheirCellAreRejected)
     CHECK(loaded.navMesh->getTileAt(1, 2, 0) != nullptr);
     CHECK(loaded.navMesh->getTileAt(3, 3, 0) == nullptr);
 }
+
+TEST_CASE(Vector3_HashMatchesEquality)
+{
+    // Equal vectors must hash equal (unordered_map contract, vertex deduplication): -0 == +0.
+    const Vector3 positive(0.0f, 5.0f, 0.0f);
+    const Vector3 negative(-0.0f, 5.0f, -0.0f);
+    REQUIRE(positive == negative);
+    CHECK_EQ(Vector3::Hash{}(positive), Vector3::Hash{}(negative));
+}

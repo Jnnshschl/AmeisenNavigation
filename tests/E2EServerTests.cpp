@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstring>
 #include <functional>
+#include <future>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -725,4 +726,31 @@ TEST_CASE(Server_StatsSummary)
 
     // Counters were reset.
     CHECK(server.Get().TakeStatsSummary(1.0).empty());
+}
+
+TEST_CASE(Server_StopBeforeRunIsNotLost)
+{
+    // SIGTERM while maps are still being preloaded calls Stop() before Run(): Run() must return right away.
+    AmeisenNavConfig config;
+    config.mmapsPath = TestWorld::Get().meshDir.string();
+    config.useAnpFileFormat = true;
+    config.port = 0;
+    NavServer server(config);
+    server.Stop();
+
+    // Run on a thread so a regression fails the test instead of hanging it.
+    std::promise<AnTcpError> result;
+    auto future = result.get_future();
+    std::thread runner([&] { result.set_value(server.Run()); });
+
+    const bool returned = future.wait_for(std::chrono::seconds(3)) == std::future_status::ready;
+
+    if (!returned)
+    {
+        server.Stop();
+    }
+
+    runner.join();
+    CHECK(returned);
+    CHECK(future.get() == AnTcpError::Success);
 }

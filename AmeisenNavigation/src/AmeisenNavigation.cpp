@@ -224,12 +224,13 @@ bool AmeisenNavigation::MoveAlongSurface(size_t clientId, int mapId, const Vecto
 
     if (dtStatusFailed(status))
     {
-        LogE("[", clientId, "] moveAlongSurface failed: 0x", std::format("{:08X}", status));
+        LogD("[", clientId, "] moveAlongSurface failed: 0x", std::format("{:08X}", status));
         return false;
     }
 
     // moveAlongSurface doesn't project the result onto the surface, fix the height.
-    const dtPolyRef resultPoly = visitedCount > 0 ? visited[visitedCount - 1] : start.poly;
+    const dtPolyRef resultPoly =
+        MoveResultPoly(ctx.query, ctx.filter, status, visited, visitedCount, result, start.poly);
     float height = 0.0f;
 
     if (dtStatusSucceed(ctx.query->getPolyHeight(resultPoly, result, &height)))
@@ -255,7 +256,7 @@ bool AmeisenNavigation::GetRandomPoint(size_t clientId, int mapId, Vector3& posi
 
     if (dtStatusFailed(status) || !polyRef)
     {
-        LogE("[", clientId, "] findRandomPoint failed: 0x", std::format("{:08X}", status));
+        LogD("[", clientId, "] findRandomPoint failed: 0x", std::format("{:08X}", status));
         return false;
     }
 
@@ -389,7 +390,7 @@ bool AmeisenNavigation::CastMovementRay(size_t clientId, int mapId, const Vector
 
     if (dtStatusFailed(status))
     {
-        LogE("[", clientId, "] raycast failed: 0x", std::format("{:08X}", status));
+        LogD("[", clientId, "] raycast failed: 0x", std::format("{:08X}", status));
         return false;
     }
 
@@ -490,10 +491,7 @@ bool AmeisenNavigation::PostProcessMoveAlongSurface(size_t clientId, int mapId, 
                 return output.pointCount > 0;
             }
 
-            if (visitedCount > 0)
-            {
-                current.poly = visited[visitedCount - 1];
-            }
+            current.poly = MoveResultPoly(ctx.query, ctx.filter, status, visited, visitedCount, result, current.poly);
 
             float height = 0.0f;
 
@@ -636,8 +634,9 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
         if (partial)
         {
             // If the search neither found the target nor ran out of nodes, A* closed every polygon reachable
-            // from here, which (links are symmetric) is the component the whole route lives in. Waypoints
-            // outside of it can't be reached from anywhere on the route: skip them without searching again.
+            // from here. The route only continues to waypoints reached from here, so everything reachable from
+            // them is reachable from here too (transitivity, also with one-way off-mesh links): waypoints outside
+            // the closed list can't be reached from anywhere later on the route, skip them without searching.
             const dtNodePool* pool = ctx.query->getNodePool();
 
             if (pool && pool->getNodeCount() < pool->getMaxNodes()
@@ -817,7 +816,7 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
 
     if (dtStatusFailed(polyPathStatus) || polyPathCount <= 0)
     {
-        LogE("findPath failed: 0x", std::format("{:08X}", polyPathStatus));
+        LogD("findPath failed: 0x", std::format("{:08X}", polyPathStatus));
         return false;
     }
 
@@ -850,7 +849,7 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
 
     if (dtStatusFailed(straightPathStatus) || path.pointCount <= 0)
     {
-        LogE("findStraightPath failed: 0x", std::format("{:08X}", straightPathStatus));
+        LogD("findStraightPath failed: 0x", std::format("{:08X}", straightPathStatus));
         path.Clear();
         return false;
     }

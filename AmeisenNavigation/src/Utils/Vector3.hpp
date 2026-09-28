@@ -92,7 +92,9 @@ struct Vector3
 
             for (const float f : v.pos)
             {
-                h ^= static_cast<uint64_t>(std::bit_cast<uint32_t>(f)) + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+                // + 0.0f turns -0.0f into +0.0f: equal vectors (operator==) must hash equal.
+                h ^= static_cast<uint64_t>(std::bit_cast<uint32_t>(f + 0.0f)) + 0x9E3779B97F4A7C15ull + (h << 6)
+                     + (h >> 2);
             }
 
             return static_cast<size_t>(h);

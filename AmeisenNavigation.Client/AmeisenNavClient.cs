@@ -540,9 +540,10 @@ namespace AmeisenNavigation.Client
         /// </summary>
         private bool ApplyFilterInternal()
         {
-            // ANP area ids mean nothing on MMAP servers, only send the state there.
+            // ANP area ids mean different areas on MMAP servers (e.g. 8/9 are lava/water in TrinityCore meshes),
+            // only send the costs when the server confirmed it uses ANP navmeshes, otherwise just the state.
             _serverConfig ??= QueryConfigInternal();
-            int entryCount = _serverConfig is { UseAnpFileFormat: false } ? 0 : 27;
+            int entryCount = _serverConfig is { UseAnpFileFormat: true } ? 27 : 0;
 
             // Wire format: [state(1)+pad(3)][count(4)][entries: {areaId(1)+pad(3)+cost(4)} x N]
             const int headerSize = 8;
@@ -594,7 +595,8 @@ namespace AmeisenNavigation.Client
             bool useAnp = BitConverter.ToInt32(data.Slice(4, 4)) != 0;
             int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
 
-            if (pathLen < 0 || data.Length < 12 + pathLen)
+            // long: 12 + pathLen must not wrap for a corrupt length.
+            if (pathLen < 0 || data.Length < 12L + pathLen)
                 return new ServerConfig(mmapFormat, useAnp, "");
 
             string meshesPath = Encoding.UTF8.GetString(data.Slice(12, pathLen));
@@ -606,7 +608,7 @@ namespace AmeisenNavigation.Client
             int protocolVersion = BitConverter.ToInt32(trailer.Slice(0, 4));
             int maxPointPath = BitConverter.ToInt32(trailer.Slice(4, 4));
             int versionLen = BitConverter.ToInt32(trailer.Slice(8, 4));
-            string version = versionLen > 0 && trailer.Length >= 12 + versionLen
+            string version = versionLen > 0 && trailer.Length >= 12L + versionLen
                 ? Encoding.UTF8.GetString(trailer.Slice(12, versionLen))
                 : "";
 

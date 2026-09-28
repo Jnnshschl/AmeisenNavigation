@@ -49,8 +49,9 @@ constexpr float HEIGHT_QUERY_EXTENTS[3] = {6.0f, 2500.0f, 6.0f};
 /// Maximum distance per step in PostProcessMoveAlongSurface before subdividing.
 constexpr float MOVE_ALONG_SURFACE_MAX_CHUNK = 25.0f;
 
-/// Size of the visited polygon buffer for moveAlongSurface calls.
-constexpr int MOVE_ALONG_SURFACE_VISITED_SIZE = 32;
+/// Size of the visited polygon buffer for moveAlongSurface calls. Detour's search uses its 64 node tiny pool, with
+/// a smaller buffer the list is cut and its last entry isn't the polygon holding the result.
+constexpr int MOVE_ALONG_SURFACE_VISITED_SIZE = 64;
 
 /// ExplorePolygon limits: outline vertices, waypoints (the spacing grows to stay below it), minimum spacing,
 /// size of the polygon's bounding box and how far a waypoint may move when it is snapped to the navmesh.
@@ -228,6 +229,21 @@ private:
         Vector3 rd;
         wowPosition.CopyToRDCoords(rd);
         return FindNearestPoly(query, filter, rd, result);
+    }
+
+    /// Polygon holding a moveAlongSurface result: the last visited one, or (if the list was cut) looked up.
+    static dtPolyRef MoveResultPoly(const dtNavMeshQuery* query, const dtQueryFilter* filter, dtStatus status,
+                                    const dtPolyRef* visited, int visitedCount, const Vector3& rdResult,
+                                    dtPolyRef fallback) noexcept
+    {
+        if (visitedCount > 0 && !dtStatusDetail(status, DT_BUFFER_TOO_SMALL))
+        {
+            return visited[visitedCount - 1];
+        }
+
+        constexpr float extents[3]{0.5f, 2.0f, 0.5f};
+        PolyPosition nearest;
+        return FindNearestPoly(query, filter, rdResult, nearest, extents) ? nearest.poly : fallback;
     }
 
     /// Straight path in RD coordinates, optionally storing the poly ref of each corner. *partial is set when

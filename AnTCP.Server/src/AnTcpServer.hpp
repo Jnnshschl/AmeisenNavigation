@@ -207,7 +207,8 @@ public:
 
     size_t GetClientCount();
 
-    /// Starts the server (blocking). Returns an error code if the server couldn't be started.
+    /// Starts the server (blocking). Returns an error code if the server couldn't be started. Returns right away
+    /// if Stop() was already called.
     AnTcpError Run() noexcept;
 
     /// Process one packet (type byte + payload) for a client exactly like the receive loop does: calls the

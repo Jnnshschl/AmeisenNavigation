@@ -97,6 +97,15 @@ inline void ConfigureClientSocket(AnTcpSocket socket) noexcept
     setsockopt(socket, SOL_SOCKET, SO_NOSIGPIPE, reinterpret_cast<const char*>(&flag), sizeof(flag));
 #endif
 
+    // A peer that stops reading would block send() forever once the buffers are full (keepalive doesn't help, the
+    // peer still ACKs with a zero window): give up after 30s and drop the client.
+#ifdef _WIN32
+    const DWORD sendTimeout = 30000;
+#else
+    const timeval sendTimeout{30, 0};
+#endif
+    setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&sendTimeout), sizeof(sendTimeout));
+
     // Probe after 60s of silence, every 10s, give up after 6 unanswered probes: a vanished peer frees its thread
     // after ~2 minutes instead of the OS default of ~2 hours.
     const int keepIdle = 60;
@@ -466,7 +475,7 @@ AnTcpError AnTcpServer::Run() noexcept
         return AnTcpError::Win32WsaStartupFailed;
     }
 
-    ShouldExit.store(false, std::memory_order_release);
+    // ShouldExit isn't reset here: a Stop() (e.g. SIGTERM while maps are preloaded) before Run() must not be lost.
 
     addrinfo hints{};
     hints.ai_family = AF_UNSPEC;
