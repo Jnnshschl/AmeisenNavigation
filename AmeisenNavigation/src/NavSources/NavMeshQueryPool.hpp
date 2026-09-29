@@ -2,9 +2,9 @@
 
 #include <algorithm>
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <thread>
-#include <utility>
 #include <vector>
 
 #include <DetourNavMeshQuery.h>
@@ -26,51 +26,16 @@ class NavMeshQueryPool
     std::vector<NavMeshQueryPtr> Idle;
     std::atomic<size_t> Created{0};
 
-public:
-    /// Returns the query to its pool when destroyed.
-    class Lease
+    /// Hands a leased query back to its pool.
+    struct Returner
     {
-        NavMeshQueryPool* Pool = nullptr;
-        NavMeshQueryPtr Query;
-
-    public:
-        Lease() noexcept = default;
-        Lease(NavMeshQueryPool* pool, NavMeshQueryPtr query) noexcept : Pool(pool), Query(std::move(query)) {}
-
-        Lease(Lease&& other) noexcept : Pool(std::exchange(other.Pool, nullptr)), Query(std::move(other.Query)) {}
-
-        Lease& operator=(Lease&& other) noexcept
-        {
-            if (this != &other)
-            {
-                Release();
-                Pool = std::exchange(other.Pool, nullptr);
-                Query = std::move(other.Query);
-            }
-
-            return *this;
-        }
-
-        Lease(const Lease&) = delete;
-        Lease& operator=(const Lease&) = delete;
-
-        ~Lease() { Release(); }
-
-        dtNavMeshQuery* Get() const noexcept { return Query.get(); }
-        explicit operator bool() const noexcept { return Query != nullptr; }
-
-    private:
-        void Release() noexcept
-        {
-            if (Pool && Query)
-            {
-                Pool->Return(std::move(Query));
-            }
-
-            Pool = nullptr;
-            Query.reset();
-        }
+        NavMeshQueryPool* pool = nullptr;
+        void operator()(dtNavMeshQuery* query) const noexcept { pool->Return(NavMeshQueryPtr(query)); }
     };
+
+public:
+    /// A borrowed query, returned to its pool when destroyed.
+    using Lease = std::unique_ptr<dtNavMeshQuery, Returner>;
 
     /// maxIdle: queries kept for reuse when no request needs them (0 = automatic, based on the core count).
     NavMeshQueryPool(const dtNavMesh* navMesh, int maxNodes, size_t maxIdle = 0) noexcept
@@ -91,9 +56,9 @@ public:
 
             if (!Idle.empty())
             {
-                NavMeshQueryPtr query = std::move(Idle.back());
+                dtNavMeshQuery* query = Idle.back().release();
                 Idle.pop_back();
-                return {this, std::move(query)};
+                return Lease(query, Returner{this});
             }
         }
 
@@ -105,17 +70,11 @@ public:
         }
 
         Created.fetch_add(1, std::memory_order_relaxed);
-        return {this, std::move(query)};
+        return Lease(query.release(), Returner{this});
     }
 
     /// Number of queries created so far (peak concurrency, minus reuse).
     size_t GetCreatedCount() const noexcept { return Created.load(std::memory_order_relaxed); }
-
-    size_t GetIdleCount() noexcept
-    {
-        const std::lock_guard lock(Mutex);
-        return Idle.size();
-    }
 
 private:
     void Return(NavMeshQueryPtr query) noexcept

@@ -5,6 +5,7 @@
 #include <cstring>
 #include <filesystem>
 #include <format>
+#include <functional>
 #include <span>
 #include <thread>
 #include <vector>
@@ -196,12 +197,33 @@ void NavServer::ValidateConfig(AmeisenNavConfig& config, std::vector<std::string
 
 void NavServer::PreloadMaps()
 {
-    for (const int mapId : Cfg.GetPreloadMaps())
-    {
+    const auto load = [this](int mapId) {
         if (!Navigation->PreloadMap(mapId))
         {
             LogW("Preload: no navmesh for map ", mapId);
         }
+    };
+
+    // Maps load concurrently: every load has a single-threaded phase (dtNavMesh::addTile) that would add up.
+    const auto maps = Cfg.GetPreloadMaps();
+    std::vector<std::thread> loaders;
+    loaders.reserve(maps.size());
+
+    for (const int mapId : maps)
+    {
+        try
+        {
+            loaders.emplace_back(load, mapId);
+        }
+        catch (...)
+        {
+            load(mapId); // no thread available
+        }
+    }
+
+    for (auto& loader : loaders)
+    {
+        loader.join();
     }
 }
 
@@ -225,42 +247,35 @@ void NavServer::RegisterCallbacks()
         }
     });
 
-    // Every handler is timed for the stats log.
-    const auto timed = [this](auto&& handler) {
-        return [this, handler](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
-            const auto start = std::chrono::steady_clock::now();
-            handler(h, t, d, sz);
-            RecordRequest(t, static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
-                                                       std::chrono::steady_clock::now() - start)
-                                                       .count()));
-        };
-    };
-
-    const auto add = [&](MessageType type, auto member) {
+    // Every handler is timed for the stats and the debug log.
+    const auto add = [&](MessageType type, auto handler) {
         s.AddCallback(static_cast<AnTcpMessageType>(type),
-                      timed([this, member](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
-                          (this->*member)(h, t, d, sz);
-                      }));
+                      [this, handler](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+                          const auto start = std::chrono::steady_clock::now();
+                          handler(h, t, d, sz);
+                          const auto micros = std::chrono::duration_cast<std::chrono::microseconds>(
+                                                  std::chrono::steady_clock::now() - start)
+                                                  .count();
+                          RecordRequest(t, static_cast<uint64_t>(micros));
+                          LogD("[", h->GetId(), "] ", MessageName(t), " took ", micros, "us");
+                      });
     };
 
-    s.AddCallback(static_cast<AnTcpMessageType>(MessageType::PATH),
-                  timed([this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
-                      HandlePath(h, t, d, sz, PathType::STRAIGHT);
-                  }));
-    s.AddCallback(static_cast<AnTcpMessageType>(MessageType::RANDOM_PATH),
-                  timed([this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
-                      HandlePath(h, t, d, sz, PathType::RANDOM);
-                  }));
-
-    add(MessageType::MOVE_ALONG_SURFACE, &NavServer::HandleMoveAlongSurface);
-    add(MessageType::CAST_RAY, &NavServer::HandleCastRay);
-    add(MessageType::CAST_RAY_EX, &NavServer::HandleCastRayEx);
-    add(MessageType::RANDOM_POINT, &NavServer::HandleRandomPoint);
-    add(MessageType::RANDOM_POINT_AROUND, &NavServer::HandleRandomPointAround);
-    add(MessageType::CONFIGURE_FILTER, &NavServer::HandleConfigureFilter);
-    add(MessageType::GET_HEIGHT, &NavServer::HandleGetHeight);
-    add(MessageType::GET_CONFIG, &NavServer::HandleGetConfig);
-    add(MessageType::EXPLORE_POLY, &NavServer::HandleExplorePoly);
+    add(MessageType::PATH, [this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+        HandlePath(h, t, d, sz, PathType::STRAIGHT);
+    });
+    add(MessageType::RANDOM_PATH, [this](ClientHandler* h, AnTcpMessageType t, const void* d, int sz) {
+        HandlePath(h, t, d, sz, PathType::RANDOM);
+    });
+    add(MessageType::MOVE_ALONG_SURFACE, std::bind_front(&NavServer::HandleMoveAlongSurface, this));
+    add(MessageType::CAST_RAY, std::bind_front(&NavServer::HandleCastRay, this));
+    add(MessageType::CAST_RAY_EX, std::bind_front(&NavServer::HandleCastRayEx, this));
+    add(MessageType::RANDOM_POINT, std::bind_front(&NavServer::HandleRandomPoint, this));
+    add(MessageType::RANDOM_POINT_AROUND, std::bind_front(&NavServer::HandleRandomPointAround, this));
+    add(MessageType::CONFIGURE_FILTER, std::bind_front(&NavServer::HandleConfigureFilter, this));
+    add(MessageType::GET_HEIGHT, std::bind_front(&NavServer::HandleGetHeight, this));
+    add(MessageType::GET_CONFIG, std::bind_front(&NavServer::HandleGetConfig, this));
+    add(MessageType::EXPLORE_POLY, std::bind_front(&NavServer::HandleExplorePoly, this));
 }
 
 AnTcpError NavServer::Run() noexcept
@@ -442,7 +457,6 @@ void NavServer::HandlePath(ClientHandler* handler, AnTcpMessageType type, const 
         return;
     }
 
-    const auto start = std::chrono::steady_clock::now();
     const auto client = Navigation->GetClient(handler->GetId());
 
     if (!client)
@@ -480,9 +494,7 @@ void NavServer::HandlePath(ClientHandler* handler, AnTcpMessageType type, const 
     }
 
     LogD("[", handler->GetId(), "] ", MessageName(type), " map=", request.mapId, ok ? " ok" : " FAIL",
-         " pts=", pointCount, " ",
-         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count(),
-         "us");
+         " pts=", pointCount);
 }
 
 void NavServer::HandleMoveAlongSurface(ClientHandler* handler, AnTcpMessageType type, const void* data, int size)
@@ -708,7 +720,6 @@ void NavServer::HandleExplorePoly(ClientHandler* handler, AnTcpMessageType type,
         return;
     }
 
-    const auto start = std::chrono::steady_clock::now();
     const auto client = Navigation->GetClient(handler->GetId());
 
     if (!client)
@@ -739,7 +750,5 @@ void NavServer::HandleExplorePoly(ClientHandler* handler, AnTcpMessageType type,
     }
 
     LogD("[", handler->GetId(), "] ExplorePoly map=", request.mapId, ok ? " ok" : " FAIL", " waypoints=",
-         result.reached, "/", result.waypoints, " pts=", path.pointCount, " ",
-         std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - start).count(),
-         "us");
+         result.reached, "/", result.waypoints, " pts=", path.pointCount);
 }

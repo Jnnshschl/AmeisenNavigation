@@ -673,8 +673,8 @@ namespace
 		if (!pmin)
 		{
 			// AmeisenNavigation: no candidate edge. Tiles built without detail edge flags have no triangle marked as
-			// boundary, a corrupt tile may have no detail triangles at all. Dereferencing pmin crashed here, fall back to
-			// all detail edges and then to the polygon's own edges.
+			// boundary, degenerate or non-finite detail triangles never become the closest edge. Dereferencing pmin
+			// crashed here, fall back to all detail edges and then to the polygon's own edges.
 			if (onlyBoundary)
 			{
 				closestPointOnDetailEdges<false>(tile, poly, pos, closest);

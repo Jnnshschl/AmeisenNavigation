@@ -25,6 +25,11 @@ public:
 /// maps that are already loaded. Failed loads are remembered and not retried.
 class NavMeshCache
 {
+public:
+    /// Map ids are bounded so arbitrary ids (from requests) can't grow the cache without limit.
+    static constexpr int MAX_MAP_ID = 65535;
+
+private:
     struct Slot
     {
         std::mutex loadMutex;
@@ -39,6 +44,11 @@ public:
     template <typename Loader>
     dtNavMesh* GetOrLoad(int mapId, Loader&& loader) noexcept
     {
+        if (mapId < 0 || mapId > MAX_MAP_ID)
+        {
+            return nullptr;
+        }
+
         Slot* slot = nullptr;
 
         try

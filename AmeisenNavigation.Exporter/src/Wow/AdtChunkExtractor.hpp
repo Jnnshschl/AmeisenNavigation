@@ -165,7 +165,7 @@ inline void ExtractLiquid(Adt* adt, unsigned int x, unsigned int y, WaterMap* wa
     // ── MH2O liquid format (WotLK+) ──
     // Only use MH2O if this cell has instances, otherwise fall through to MCLQ (classic maps in WotLK
     // clients may have an MH2O chunk but no instances for some cells).
-    if (const MH2O* mh2o = adt->Mh2o(); mh2o && adt->ChunkInBounds(mh2o) && mh2o->liquid[y][x].used > 0)
+    if (const MH2O* mh2o = adt->Mh2o(); mh2o && mh2o->liquid[y][x].used > 0)
     {
         const auto* mh2oData = reinterpret_cast<const unsigned char*>(mh2o) + 8;
         const auto* mh2oEnd = mh2oData + mh2o->size;
@@ -392,7 +392,7 @@ inline void ExtractWmoPlacement(const MODF::Entry& entry, const char* wmoRootFil
 {
     const Wmo* wmo = reader.GetFileContent<Wmo>(wmoRootFilename);
 
-    if (!wmo || !wmo->IsValid())
+    if (!wmo)
     {
         return;
     }
@@ -607,7 +607,7 @@ inline void ExtractWmoGeometry(Adt* adt, CachedFileReader& reader, Structure* st
 {
     const MODF* modf = adt->Modf();
 
-    if (!adt->ChunkInBounds(modf))
+    if (!modf)
     {
         return;
     }
@@ -682,7 +682,7 @@ inline void ExtractDoodadGeometry(Adt* adt, CachedFileReader& reader, Structure*
 {
     const MDDF* mddf = adt->Mddf();
 
-    if (!adt->ChunkInBounds(mddf))
+    if (!mddf)
     {
         return;
     }

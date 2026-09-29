@@ -252,36 +252,6 @@ TEST_CASE(MmapNavSource_DetectsFormatFromFileNames)
     CHECK(source.Get(0) == nullptr);
 }
 
-TEST_CASE(Polygon_PoissonSamplingStaysInsideAndSpaced)
-{
-    const Vector3 square[] = {{0, 0, 0}, {100, 0, 0}, {100, 100, 0}, {0, 100, 0}};
-    constexpr int capacity = 512;
-    std::vector<Vector3> points(capacity);
-    std::vector<Vector3> temp(capacity);
-    int count = 0;
-
-    PolygonMath::BridsonsPoissonDiskSampling(square, 4, points.data(), &count, temp.data(), capacity, 10.0f);
-
-    CHECK(count > 20);
-    CHECK(count <= capacity);
-
-    for (int i = 0; i < count; ++i)
-    {
-        CHECK(PolygonMath::IsInside2D(square, 4, points[i]));
-
-        for (int j = i + 1; j < count; ++j)
-        {
-            const float dx = points[i].x - points[j].x;
-            const float dy = points[i].y - points[j].y;
-            CHECK(dx * dx + dy * dy >= 100.0f - 1e-3f);
-        }
-    }
-
-    // Respects small capacities.
-    PolygonMath::BridsonsPoissonDiskSampling(square, 4, points.data(), &count, temp.data(), 5, 1.0f);
-    CHECK(count <= 5);
-}
-
 TEST_CASE(Polygon_HexGridCoversConcavePolygon)
 {
     // L shape, 6400 square yards.
@@ -392,14 +362,6 @@ TEST_CASE(Polygon_SamplingRejectsHugeOrInvalidPolygons)
 {
     const Vector3 huge[] = {{-1e30f, -1e30f, 0}, {1e30f, -1e30f, 0}, {0, 1e30f, 0}};
     const Vector3 nan[] = {{0, 0, 0}, {std::nanf(""), 0, 0}, {0, 10, 0}};
-    std::vector<Vector3> points(64);
-    std::vector<Vector3> temp(64);
-    int count = -1;
-
-    PolygonMath::BridsonsPoissonDiskSampling(huge, 3, points.data(), &count, temp.data(), 64, 1.0f);
-    CHECK_EQ(count, 0);
-    PolygonMath::BridsonsPoissonDiskSampling(nan, 3, points.data(), &count, temp.data(), 64, 1.0f);
-    CHECK_EQ(count, 0);
 
     CHECK(PolygonMath::HexGridSampling(huge, 1.0f, 1024).empty());
     CHECK(PolygonMath::HexGridSampling(nan, 1.0f, 1024).empty());
@@ -483,17 +445,41 @@ TEST_CASE(Anp_TilesOutsideTheirCellAreRejected)
     params.maxTiles = 16;
     params.maxPolys = 1 << 16;
 
+    const auto good = MakeQuadTile(1, 2, 0);
+    const auto other = MakeQuadTile(3, 3, 0);
+
+    // The writer stores tiles under the cell in their header.
     const auto dir = TempDir("anp_cells");
     Anp::AnpWriter writer(77, params);
-
-    // Correct: tile (1, 2) stored as entry "01_02". Wrong: tile (3, 3) stored as entry "00_00".
-    const auto good = MakeQuadTile(1, 2, 0);
-    const auto misplaced = MakeQuadTile(3, 3, 0);
-    REQUIRE(writer.AddTile(1, 2, good.data(), static_cast<int>(good.size())));
-    REQUIRE(writer.AddTile(0, 0, misplaced.data(), static_cast<int>(misplaced.size())));
+    REQUIRE(writer.AddTile(good.data(), static_cast<int>(good.size())));
+    REQUIRE(writer.AddTile(other.data(), static_cast<int>(other.size())));
     REQUIRE(writer.Save(dir));
 
-    const auto loaded = Anp::Load(dir / Anp::FileName(77));
+    const auto written = Anp::Load(dir / Anp::FileName(77));
+    REQUIRE(written.navMesh);
+    CHECK_EQ(written.tilesLoaded, 2);
+    CHECK_EQ(written.tilesRejected, 0);
+
+    // A foreign archive with tile (3, 3) stored as entry "00_00": rejected, the rest loads.
+    mz_zip_archive zip;
+    mz_zip_zero_struct(&zip);
+    const int mapId = 77;
+    REQUIRE(mz_zip_writer_init_heap(&zip, 0, 0));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::MAP_ID_ENTRY, &mapId, sizeof(mapId), MZ_NO_COMPRESSION));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::PARAMS_ENTRY, &params, sizeof(params), MZ_NO_COMPRESSION));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::TileEntryName(1, 2).c_str(), good.data(), good.size(),
+                                  MZ_DEFAULT_LEVEL));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::TileEntryName(0, 0).c_str(), other.data(), other.size(),
+                                  MZ_DEFAULT_LEVEL));
+
+    void* archive = nullptr;
+    size_t archiveSize = 0;
+    REQUIRE(mz_zip_writer_finalize_heap_archive(&zip, &archive, &archiveSize));
+
+    const auto loaded = Anp::LoadFromMemory(static_cast<const unsigned char*>(archive), archiveSize, "misplaced");
+    mz_free(archive);
+    mz_zip_writer_end(&zip);
+
     REQUIRE(loaded.navMesh);
     CHECK_EQ(loaded.tilesLoaded, 1);
     CHECK_EQ(loaded.tilesRejected, 1);

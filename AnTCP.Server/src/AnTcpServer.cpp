@@ -67,7 +67,13 @@ struct NetworkSession
 
 namespace {
 constexpr int ACCEPT_POLL_INTERVAL_MS = 100;
-constexpr int CLIENT_POLL_INTERVAL_MS = 100;
+#ifdef _WIN32
+// shutdown() doesn't wake a WSAPoll()/recv() that is already waiting, Disconnect()/Stop() rely on this interval.
+constexpr long long CLIENT_POLL_INTERVAL_MS = 100;
+#else
+// shutdown() wakes a waiting poll() right away, the interval only bounds how late a changed idle timeout applies.
+constexpr long long CLIENT_POLL_INTERVAL_MS = 1000;
+#endif
 constexpr size_t HEADER_SIZE = sizeof(AnTcpSizeType);
 constexpr size_t RECEIVE_BUFFER_SIZE = 2 * (HEADER_SIZE + ANTCP_MAX_PACKET_SIZE);
 
@@ -84,6 +90,21 @@ inline void WriteLittleEndian32(char* out, uint32_t value) noexcept
     out[1] = static_cast<char>((value >> 8) & 0xFF);
     out[2] = static_cast<char>((value >> 16) & 0xFF);
     out[3] = static_cast<char>((value >> 24) & 0xFF);
+}
+
+inline unsigned short PortOf(const sockaddr_storage& address) noexcept
+{
+    if (address.ss_family == AF_INET)
+    {
+        return ntohs(reinterpret_cast<const sockaddr_in*>(&address)->sin_port);
+    }
+
+    if (address.ss_family == AF_INET6)
+    {
+        return ntohs(reinterpret_cast<const sockaddr_in6*>(&address)->sin6_port);
+    }
+
+    return 0;
 }
 
 inline void ConfigureClientSocket(AnTcpSocket socket) noexcept
@@ -172,8 +193,8 @@ void ClientHandler::Start()
 
 void ClientHandler::Disconnect() noexcept
 {
-    // Listen() notices Running == false within one poll interval. shutdown() tells the peer right away (and wakes a
-    // pending recv() on POSIX). The socket itself is closed in the destructor after the thread was joined, so the
+    // shutdown() tells the peer right away and wakes a waiting poll() on POSIX, on Windows Listen() notices
+    // Running == false within one poll interval. The socket itself is closed in the destructor after the thread was joined, so the
     // descriptor can't be reused while the thread still uses it.
     if (Running.exchange(false, std::memory_order_acq_rel) && Socket != ANTCP_INVALID_SOCKET)
     {
@@ -199,20 +220,7 @@ std::string ClientHandler::GetIpAddress() const
     return buffer;
 }
 
-unsigned short ClientHandler::GetPort() const noexcept
-{
-    if (Address.ss_family == AF_INET)
-    {
-        return ntohs(reinterpret_cast<const sockaddr_in*>(&Address)->sin_port);
-    }
-
-    if (Address.ss_family == AF_INET6)
-    {
-        return ntohs(reinterpret_cast<const sockaddr_in6*>(&Address)->sin6_port);
-    }
-
-    return 0;
-}
+unsigned short ClientHandler::GetPort() const noexcept { return PortOf(Address); }
 
 bool ClientHandler::SendAll(const char* data, size_t size) noexcept
 {
@@ -247,6 +255,8 @@ bool ClientHandler::SendData(AnTcpMessageType type, const void* data, size_t siz
         return false;
     }
 
+    bool sent = false;
+
     try
     {
         const std::lock_guard lock(SendMutex);
@@ -261,12 +271,20 @@ bool ClientHandler::SendData(AnTcpMessageType type, const void* data, size_t siz
             std::memcpy(SendBuffer.data() + HEADER_SIZE + sizeof(AnTcpMessageType), data, size);
         }
 
-        return SendAll(SendBuffer.data(), SendBuffer.size());
+        sent = SendAll(SendBuffer.data(), SendBuffer.size());
     }
     catch (...)
     {
-        return false;
     }
+
+    // The client never gets this response (or only part of it, the stream is out of sync) and a peer that stopped
+    // reading would hold its thread forever: drop it. Handlers don't need to check the result.
+    if (!sent)
+    {
+        Disconnect();
+    }
+
+    return sent;
 }
 
 void ClientHandler::Listen() noexcept
@@ -285,21 +303,28 @@ void ClientHandler::Listen() noexcept
 
         while (ok && Running.load(std::memory_order_acquire) && !Server->IsStopping())
         {
-            const long long idleTimeoutMs = Server->IdleTimeoutMs.load(std::memory_order_relaxed);
+            long long timeoutMs = CLIENT_POLL_INTERVAL_MS;
 
-            if (idleTimeoutMs > 0
-                && std::chrono::steady_clock::now() - lastActivity > std::chrono::milliseconds(idleTimeoutMs))
+            if (const long long idleTimeoutMs = Server->IdleTimeoutMs.load(std::memory_order_relaxed);
+                idleTimeoutMs > 0)
             {
-                break; // idle for too long
+                const long long idleMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                             std::chrono::steady_clock::now() - lastActivity)
+                                             .count();
+
+                if (idleMs >= idleTimeoutMs)
+                {
+                    break; // idle for too long
+                }
+
+                timeoutMs = std::min(timeoutMs, idleTimeoutMs - idleMs);
             }
 
-            // Wait for data with a timeout instead of blocking in recv(): on Windows shutdown() does not wake up
-            // a blocked recv() while the peer keeps the connection open, polling lets Disconnect()/Stop() work
-            // on every platform within CLIENT_POLL_INTERVAL_MS.
+            // Wait for data with a timeout instead of blocking in recv(), see CLIENT_POLL_INTERVAL_MS.
             PollFd pfd{};
             pfd.fd = Socket;
             pfd.events = POLL_READ;
-            const int ready = PollSockets(&pfd, 1, CLIENT_POLL_INTERVAL_MS);
+            const int ready = PollSockets(&pfd, 1, static_cast<int>(timeoutMs));
 
             if (ready == 0 || (ready < 0 && IsInterrupted()))
             {
@@ -428,7 +453,7 @@ bool AnTcpServer::Dispatch(ClientHandler* handler, const char* packet, AnTcpSize
     {
         it->second(handler, type, packet + sizeof(AnTcpMessageType),
                    static_cast<int>(size - static_cast<AnTcpSizeType>(sizeof(AnTcpMessageType))));
-        return true;
+        return handler->Running.load(std::memory_order_acquire); // false if sending the response failed
     }
     catch (...)
     {
@@ -538,10 +563,7 @@ AnTcpError AnTcpServer::Run() noexcept
 
     if (getsockname(ListenSocket, reinterpret_cast<sockaddr*>(&bound), &boundLen) == 0)
     {
-        const unsigned short port = bound.ss_family == AF_INET6
-                                        ? ntohs(reinterpret_cast<sockaddr_in6*>(&bound)->sin6_port)
-                                        : ntohs(reinterpret_cast<sockaddr_in*>(&bound)->sin_port);
-        BoundPort.store(port, std::memory_order_release);
+        BoundPort.store(PortOf(bound), std::memory_order_release);
     }
 
     while (!ShouldExit.load(std::memory_order_acquire))
@@ -572,15 +594,7 @@ AnTcpError AnTcpServer::Run() noexcept
 
         if (const size_t maxClients = MaxClients.load(std::memory_order_relaxed); maxClients > 0)
         {
-            size_t active = 0;
-
-            {
-                const std::lock_guard lock(ClientsMutex);
-                active = static_cast<size_t>(std::count_if(Clients.begin(), Clients.end(),
-                                                           [](const auto& c) { return !c->IsDisconnected(); }));
-            }
-
-            if (active >= maxClients)
+            if (const size_t active = GetClientCount(); active >= maxClients)
             {
                 RejectedClients.fetch_add(1, std::memory_order_relaxed);
 

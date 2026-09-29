@@ -45,36 +45,41 @@ public:
         return offset && InBounds(absolute, minSize) ? reinterpret_cast<T*>(Data + absolute) : nullptr;
     }
 
-    const MCIN* Mcin() const noexcept { return GetSub<MCIN>(Mhdr()->offsetMcin, sizeof(MCIN)); }
-    const MH2O* Mh2o() const noexcept { return GetSub<MH2O>(Mhdr()->offsetMh2o, sizeof(MH2O)); }
-    const MTEX* Mtex() const noexcept { return GetSub<MTEX>(Mhdr()->offsetMtex); }
-
-    const MMDX* Mmdx() const noexcept { return GetSub<MMDX>(Mhdr()->offsetMmdx); }
-    const MMID* Mmid() const noexcept { return GetSub<MMID>(Mhdr()->offsetMmid); }
-    const MDDF* Mddf() const noexcept { return GetSub<MDDF>(Mhdr()->offsetMddf); }
-
-    const MWMO* Mwmo() const noexcept { return GetSub<MWMO>(Mhdr()->offsetMwmo); }
-    const MWID* Mwid() const noexcept { return GetSub<MWID>(Mhdr()->offsetMwid); }
-    const MODF* Modf() const noexcept { return GetSub<MODF>(Mhdr()->offsetModf); }
-
-    /// True if a chunk's declared payload lies inside the file.
+    /// Sub-chunk at an MHDR offset whose declared payload (chunk->size) lies inside the file too, nullptr otherwise.
     template <typename T>
-    bool ChunkInBounds(const T* chunk) const noexcept
+    T* GetChunk(unsigned int offset, size_t minSize = 8) const noexcept
     {
+        T* chunk = GetSub<T>(offset, minSize);
+
         if (!chunk)
         {
-            return false;
+            return nullptr;
         }
 
-        const size_t offset = reinterpret_cast<const unsigned char*>(chunk) - Data;
-        return InBounds(offset, 8) && InBounds(offset + 8, chunk->size);
+        const size_t chunkOffset = reinterpret_cast<const unsigned char*>(chunk) - Data;
+        return InBounds(chunkOffset + 8, chunk->size) ? chunk : nullptr;
     }
+
+    const MCIN* Mcin() const noexcept { return GetSub<MCIN>(Mhdr()->offsetMcin, sizeof(MCIN)); }
+
+    // The chunk accessors below only return chunks whose whole payload lies inside the file.
+
+    const MH2O* Mh2o() const noexcept { return GetChunk<MH2O>(Mhdr()->offsetMh2o, sizeof(MH2O)); }
+    const MTEX* Mtex() const noexcept { return GetChunk<MTEX>(Mhdr()->offsetMtex); }
+
+    const MMDX* Mmdx() const noexcept { return GetChunk<MMDX>(Mhdr()->offsetMmdx); }
+    const MMID* Mmid() const noexcept { return GetChunk<MMID>(Mhdr()->offsetMmid); }
+    const MDDF* Mddf() const noexcept { return GetChunk<MDDF>(Mhdr()->offsetMddf); }
+
+    const MWMO* Mwmo() const noexcept { return GetChunk<MWMO>(Mhdr()->offsetMwmo); }
+    const MWID* Mwid() const noexcept { return GetChunk<MWID>(Mhdr()->offsetMwid); }
+    const MODF* Modf() const noexcept { return GetChunk<MODF>(Mhdr()->offsetModf); }
 
     /// Filename (e.g. of an MMDX/MWMO entry) by its MMID/MWID index, nullptr if invalid.
     template <typename Names, typename Offsets>
     const char* GetFilename(const Names* names, const Offsets* offsets, unsigned int index) const noexcept
     {
-        if (!ChunkInBounds(names) || !ChunkInBounds(offsets) || index >= offsets->size / sizeof(uint32_t))
+        if (!names || !offsets || index >= offsets->size / sizeof(uint32_t))
         {
             return nullptr;
         }

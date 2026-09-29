@@ -117,7 +117,8 @@ public:
         return SendData(type, data, sizeof(T));
     }
 
-    /// Send one framed packet (header + payload in a single send call). Thread-safe.
+    /// Send one framed packet (header + payload in a single send call). Thread-safe. A failed send (peer gone or
+    /// not reading for 30s) disconnects the client.
     bool SendData(AnTcpMessageType type, const void* data, size_t size) noexcept;
 
     /// Close the connection. The receive thread ends and the disconnect callback fires on it.

@@ -128,7 +128,4 @@ public:
 
         return true;
     }
-
-    /// Drop all overrides and go back to the provider's default filter for the current state.
-    void ResetQueryFilter() noexcept { CustomFilter.reset(); }
 };

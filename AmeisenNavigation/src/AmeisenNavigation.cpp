@@ -113,7 +113,7 @@ size_t AmeisenNavigation::GetClientCount() const
 
 bool AmeisenNavigation::PreloadMap(int mapId) noexcept
 {
-    return IsValidMapId(mapId) && NavSource->Get(mapId) != nullptr;
+    return NavSource->Get(mapId) != nullptr;
 }
 
 bool AmeisenNavigation::GetPath(size_t clientId, int mapId, const Vector3& startPosition, const Vector3& endPosition,
@@ -207,38 +207,20 @@ bool AmeisenNavigation::MoveAlongSurface(size_t clientId, int mapId, const Vecto
         return false;
     }
 
-    if (!IsValidPosition(endPosition))
+    Vector3 rdEnd;
+
+    if (!ToValidRdCoords(endPosition, rdEnd))
     {
         return false;
     }
 
-    Vector3 rdEnd;
-    endPosition.CopyToRDCoords(rdEnd);
-
-    int visitedCount = 0;
-    dtPolyRef visited[MOVE_ALONG_SURFACE_VISITED_SIZE]{};
-    Vector3 result;
-
-    const dtStatus status = ctx.query->moveAlongSurface(start.poly, start.pos, rdEnd, ctx.filter, result, visited,
-                                                        &visitedCount, MOVE_ALONG_SURFACE_VISITED_SIZE);
-
-    if (dtStatusFailed(status))
+    if (const dtStatus status = MoveAlong(ctx.query, ctx.filter, start, rdEnd); dtStatusFailed(status))
     {
         LogD("[", clientId, "] moveAlongSurface failed: 0x", std::format("{:08X}", status));
         return false;
     }
 
-    // moveAlongSurface doesn't project the result onto the surface, fix the height.
-    const dtPolyRef resultPoly =
-        MoveResultPoly(ctx.query, ctx.filter, status, visited, visitedCount, result, start.poly);
-    float height = 0.0f;
-
-    if (dtStatusSucceed(ctx.query->getPolyHeight(resultPoly, result, &height)))
-    {
-        result.y = height;
-    }
-
-    positionToGoTo = result.ToWowCoords();
+    positionToGoTo = start.pos.ToWowCoords();
     return true;
 }
 
@@ -298,13 +280,12 @@ bool AmeisenNavigation::GetHeight(size_t clientId, int mapId, const Vector3& pos
 {
     const auto ctx = GetQueryContext(clientId, mapId);
 
-    if (!ctx || !IsValidPosition(position))
+    Vector3 rdPos;
+
+    if (!ctx || !ToValidRdCoords(position, rdPos))
     {
         return false;
     }
-
-    Vector3 rdPos;
-    position.CopyToRDCoords(rdPos);
 
     // Collect every polygon in the vertical column and pick the surface closest to the input height.
     // This handles stacked floors (bridges, buildings) better than a plain nearest poly query.
@@ -373,13 +354,12 @@ bool AmeisenNavigation::CastMovementRay(size_t clientId, int mapId, const Vector
         return false;
     }
 
-    if (!IsValidPosition(endPosition))
+    Vector3 rdEnd;
+
+    if (!ToValidRdCoords(endPosition, rdEnd))
     {
         return false;
     }
-
-    Vector3 rdEnd;
-    endPosition.CopyToRDCoords(rdEnd);
 
     // dtRaycastHit has no constructor, path/maxPath MUST be initialized or Detour writes through garbage.
     dtRaycastHit hit{};
@@ -458,17 +438,14 @@ bool AmeisenNavigation::PostProcessMoveAlongSurface(size_t clientId, int mapId, 
     Vector3 wowStart = current.pos;
     output.TryAppend(wowStart.ToWowCoords());
 
-    dtPolyRef visited[MOVE_ALONG_SURFACE_VISITED_SIZE]{};
-
     for (int i = 1; i < input.pointCount && !output.IsFull(); ++i)
     {
-        if (!IsValidPosition(input[i]))
+        Vector3 target;
+
+        if (!ToValidRdCoords(input[i], target))
         {
             break;
         }
-
-        Vector3 target;
-        input[i].CopyToRDCoords(target);
 
         const Vector3 segmentStart = current.pos;
         const float distance = dtVdist(segmentStart, target);
@@ -479,30 +456,12 @@ bool AmeisenNavigation::PostProcessMoveAlongSurface(size_t clientId, int mapId, 
             Vector3 stepTarget;
             dtVlerp(stepTarget, segmentStart, target, static_cast<float>(s) / static_cast<float>(steps));
 
-            int visitedCount = 0;
-            Vector3 result;
-
-            const dtStatus status = ctx.query->moveAlongSurface(current.poly, current.pos, stepTarget, ctx.filter,
-                                                                result, visited, &visitedCount,
-                                                                MOVE_ALONG_SURFACE_VISITED_SIZE);
-
-            if (dtStatusFailed(status))
+            if (dtStatusFailed(MoveAlong(ctx.query, ctx.filter, current, stepTarget)))
             {
                 return output.pointCount > 0;
             }
 
-            current.poly = MoveResultPoly(ctx.query, ctx.filter, status, visited, visitedCount, result, current.poly);
-
-            float height = 0.0f;
-
-            if (dtStatusSucceed(ctx.query->getPolyHeight(current.poly, result, &height)))
-            {
-                result.y = height;
-            }
-
-            current.pos = result;
-
-            Vector3 wow = result;
+            Vector3 wow = current.pos;
             output.TryAppendUnique(wow.ToWowCoords());
         }
     }
@@ -574,7 +533,7 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     const float snapExtents[3]{snapDistance, HEIGHT_QUERY_EXTENTS[1], snapDistance};
     const float minDistance = spacing * 0.25f;
     std::vector<Vector3> waypoints;
-    std::vector<dtPolyRef> waypointPolys;
+    std::vector<PolyPosition> waypointPolys; // same waypoints on the navmesh (RD coordinates)
     waypoints.reserve(samples.size());
     waypointPolys.reserve(samples.size());
 
@@ -587,7 +546,8 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
             continue;
         }
 
-        const Vector3 wow = snapped.pos.ToWowCoords();
+        Vector3 wow = snapped.pos;
+        wow.ToWowCoords();
 
         if (!PolygonMath::IsInside2D(polygon.data(), static_cast<int>(polygon.size()), wow)
             || std::any_of(waypoints.begin(), waypoints.end(),
@@ -597,12 +557,13 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
         }
 
         waypoints.push_back(wow);
-        waypointPolys.push_back(snapped.poly);
+        waypointPolys.push_back(snapped);
     }
 
     res.waypoints = static_cast<int>(waypoints.size());
+    PolyPosition current;
 
-    if (waypoints.empty())
+    if (waypoints.empty() || !FindNearestPolyWow(ctx.query, ctx.filter, startPosition, current))
     {
         return false;
     }
@@ -610,7 +571,6 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
     // Connect the waypoints in tour order with navmesh paths. Segments use their own buffer, the client's
     // path buffers may be the output.
     Path segment(Settings.maxPointPath);
-    Vector3 current = startPosition;
     const std::vector<int> order = Tour::Order(startPosition, waypoints);
     std::vector<bool> unreachable(waypoints.size(), false);
 
@@ -623,7 +583,7 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
             continue;
         }
 
-        const Vector3& target = waypoints[index];
+        const PolyPosition& target = waypointPolys[index];
         bool partial = false;
 
         if (!CalculateNormalPath(ctx.query, ctx.filter, *ctx.client, current, target, segment, nullptr, &partial))
@@ -640,12 +600,12 @@ bool AmeisenNavigation::ExplorePolygon(size_t clientId, int mapId, const Vector3
             const dtNodePool* pool = ctx.query->getNodePool();
 
             if (pool && pool->getNodeCount() < pool->getMaxNodes()
-                && !ctx.query->isInClosedList(waypointPolys[index]))
+                && !ctx.query->isInClosedList(target.poly))
             {
                 for (size_t k = o + 1; k < order.size(); ++k)
                 {
                     const auto other = static_cast<size_t>(order[k]);
-                    unreachable[other] = unreachable[other] || !ctx.query->isInClosedList(waypointPolys[other]);
+                    unreachable[other] = unreachable[other] || !ctx.query->isInClosedList(waypointPolys[other].poly);
                 }
             }
 
@@ -696,13 +656,6 @@ void AmeisenNavigation::SmoothPathBezier(const Path& input, Path& output, int po
 AmeisenNavigation::QueryContext AmeisenNavigation::GetQueryContext(size_t clientId, int mapId)
 {
     QueryContext ctx;
-
-    if (!IsValidMapId(mapId))
-    {
-        LogD("[", clientId, "] Invalid map id ", mapId);
-        return {};
-    }
-
     ctx.client = GetClient(clientId);
 
     if (!ctx.client)
@@ -734,7 +687,7 @@ AmeisenNavigation::QueryContext AmeisenNavigation::GetQueryContext(size_t client
         return {};
     }
 
-    ctx.query = ctx.lease.Get();
+    ctx.query = ctx.lease.get();
     return ctx;
 }
 
@@ -788,12 +741,7 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
         *partial = false;
     }
 
-    if (!IsValidPosition(startPosition) || !IsValidPosition(endPosition))
-    {
-        return false;
-    }
-
-    PolyPosition start;
+    PolyPosition start; // FindNearestPoly rejects invalid positions
     PolyPosition end;
 
     if (!FindNearestPolyWow(query, filter, startPosition, start))
@@ -806,6 +754,21 @@ bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQuery
     {
         LogD("No poly near end position ", endPosition);
         return false;
+    }
+
+    return CalculateNormalPath(query, filter, client, start, end, path, straightPathRefs, partial);
+}
+
+bool AmeisenNavigation::CalculateNormalPath(dtNavMeshQuery* query, const dtQueryFilter* filter,
+                                            AmeisenNavClient& client, const PolyPosition& start,
+                                            const PolyPosition& end, Path& path, dtPolyRef* straightPathRefs,
+                                            bool* partial) noexcept
+{
+    path.Clear();
+
+    if (partial)
+    {
+        *partial = false;
     }
 
     dtPolyRef* polyPath = client.GetPolyPathBuffer();

@@ -178,10 +178,8 @@ struct RectMap
     /// Rects from corrupt data (non-finite or absurd coordinates) are dropped, the grid math converts them to ints.
     void Add(const Rect& rect)
     {
-        constexpr float limit = 1e6f;
-        const auto ok = [](float v) { return std::isfinite(v) && std::fabs(v) <= limit; };
-
-        if (!ok(rect.minX) || !ok(rect.maxX) || !ok(rect.minZ) || !ok(rect.maxZ))
+        if (!IsPlausibleCoordinate(rect.minX) || !IsPlausibleCoordinate(rect.maxX)
+            || !IsPlausibleCoordinate(rect.minZ) || !IsPlausibleCoordinate(rect.maxZ))
         {
             return;
         }

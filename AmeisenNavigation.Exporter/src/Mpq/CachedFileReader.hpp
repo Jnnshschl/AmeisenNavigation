@@ -26,6 +26,29 @@ struct CachedFileEntry
     unsigned int Size;
 };
 
+/// The entry reinterpreted as T*, nullptr if it is empty or T has an IsValid() check that fails. Callers only
+/// ever see files that passed their format's basic checks.
+template <typename T>
+T* AsValid(CachedFileEntry& entry) noexcept
+{
+    if (!entry.Data || entry.Size == 0)
+    {
+        return nullptr;
+    }
+
+    T* file = reinterpret_cast<T*>(&entry);
+
+    if constexpr (requires(const T& t) { t.IsValid(); })
+    {
+        if (!file->IsValid())
+        {
+            return nullptr;
+        }
+    }
+
+    return file;
+}
+
 /// A file read without caching (e.g. ADTs, each is only needed once). Keeps the buffer alive.
 struct UncachedFile
 {
@@ -35,7 +58,7 @@ struct UncachedFile
     template <typename T>
     T* As() noexcept
     {
-        return entry.Data && entry.Size > 0 ? reinterpret_cast<T*>(&entry) : nullptr;
+        return AsValid<T>(entry);
     }
 };
 
@@ -57,7 +80,7 @@ public:
     explicit CachedFileReader(MpqManager* mpqManager) noexcept : Mpq(mpqManager) {}
 
     /// Returns the cached file reinterpreted as T* (T must start with `unsigned char* Data; unsigned int Size;`),
-    /// or nullptr if the file doesn't exist. Pointers stay valid until Clear().
+    /// or nullptr if the file doesn't exist or fails T::IsValid(). Pointers stay valid until Clear().
     template <typename T>
     T* GetFileContent(const char* filename) noexcept
     {
@@ -65,31 +88,32 @@ public:
         {
             const auto hash = XXH3_64bits(filename, std::strlen(filename));
 
+            if (Slot* cached = Find(hash))
             {
-                std::shared_lock readLock(CacheMutex);
-                const auto it = Cache.find(hash);
-
-                if (it != Cache.end())
-                {
-                    return AsType<T>(*it->second);
-                }
+                return AsType<T>(*cached);
             }
 
-            // Read outside the cache lock so cache hits of other threads aren't blocked by MPQ I/O.
-            auto slot = std::make_unique<Slot>();
+            // Read outside the cache lock so cache hits of other threads aren't blocked by MPQ I/O. Threads missing
+            // the same file (neighbouring ADTs share most models) queue on the MPQ lock: check again once it's ours,
+            // so the file is read and decompressed only once.
+            const std::lock_guard mpqLock(MpqMutex);
 
+            if (Slot* cached = Find(hash))
             {
-                MpqFile file = ReadFromMpq(filename);
+                return AsType<T>(*cached);
+            }
 
-                if (file)
-                {
-                    slot->entry = {file.data.get(), file.size};
-                    slot->buffer = std::move(file.data);
-                }
-                else
-                {
-                    LogD("File not found in MPQs: ", filename);
-                }
+            auto slot = std::make_unique<Slot>();
+            MpqFile file = Mpq->ReadFile(filename);
+
+            if (file)
+            {
+                slot->entry = {file.data.get(), file.size};
+                slot->buffer = std::move(file.data);
+            }
+            else
+            {
+                LogD("File not found in MPQs: ", filename);
             }
 
             std::unique_lock writeLock(CacheMutex);
@@ -102,7 +126,8 @@ public:
         }
     }
 
-    /// Put a file into the cache as if it had been read from the MPQs, replacing a cached one (tests, fuzzing).
+    /// Put a file into the cache as if it had been read from the MPQs (tests, fuzzing). A file that is already
+    /// cached is kept (pointers to it stay valid until Clear()), returns false then.
     bool Insert(const char* filename, const unsigned char* data, size_t size) noexcept
     {
         try
@@ -118,8 +143,7 @@ public:
 
             const auto hash = XXH3_64bits(filename, std::strlen(filename));
             std::unique_lock writeLock(CacheMutex);
-            Cache[hash] = std::move(slot);
-            return true;
+            return Cache.try_emplace(hash, std::move(slot)).second;
         }
         catch (...)
         {
@@ -144,10 +168,17 @@ public:
     }
 
 private:
+    Slot* Find(XXH64_hash_t hash)
+    {
+        std::shared_lock readLock(CacheMutex);
+        const auto it = Cache.find(hash);
+        return it != Cache.end() ? it->second.get() : nullptr;
+    }
+
     template <typename T>
     static T* AsType(Slot& slot) noexcept
     {
-        return slot.entry.Data && slot.entry.Size > 0 ? reinterpret_cast<T*>(&slot.entry) : nullptr;
+        return AsValid<T>(slot.entry);
     }
 
     MpqFile ReadFromMpq(const char* filename) noexcept

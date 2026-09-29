@@ -541,9 +541,9 @@ TEST_CASE(Navigation_RejectsInvalidCoordinatesAndMaps)
     const Vector3 huge[] = {Wow(-20000.0f, 0.0f, 0.0f), Wow(20000.0f, 0.0f, 0.0f), Wow(0.0f, 0.0f, 20000.0f)};
     CHECK(!Navigation().ExplorePolygon(CLIENT, TestWorld::MAP_ID, valid, huge, 1000.0f, path));
 
-    // Map ids outside the accepted range never touch the nav source.
+    // Map ids outside the accepted range are rejected by the navmesh cache (no slot, no load attempt).
     CHECK(!Navigation().GetPath(CLIENT, -1, valid, valid, path));
-    CHECK(!Navigation().GetPath(CLIENT, MAX_MAP_ID + 1, valid, valid, path));
+    CHECK(!Navigation().GetPath(CLIENT, NavMeshCache::MAX_MAP_ID + 1, valid, valid, path));
     CHECK(!Navigation().PreloadMap(-5));
 
     // Still fine afterwards.

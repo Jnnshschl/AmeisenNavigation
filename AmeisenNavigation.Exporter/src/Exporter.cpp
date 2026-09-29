@@ -99,7 +99,7 @@ bool LoadClientData(CachedFileReader& reader, ClientData& data, bool mapsOnly)
     // Map.dbc: field 0 = id, field 1 = internal name (directory)
     const Dbc* mapDbc = reader.GetFileContent<Dbc>("DBFilesClient\\Map.dbc");
 
-    if (!mapDbc || !mapDbc->IsValid())
+    if (!mapDbc)
     {
         LogE("Map.dbc is missing or invalid - cannot proceed");
         return false;
@@ -116,8 +116,7 @@ bool LoadClientData(CachedFileReader& reader, ClientData& data, bool mapsOnly)
     }
 
     // LiquidType.dbc: field 0 = id, field 3 = type (0 water, 1 ocean, 2 magma, 3 slime)
-    if (const Dbc* liquidTypeDbc = reader.GetFileContent<Dbc>("DBFilesClient\\LiquidType.dbc");
-        liquidTypeDbc && liquidTypeDbc->IsValid())
+    if (const Dbc* liquidTypeDbc = reader.GetFileContent<Dbc>("DBFilesClient\\LiquidType.dbc"))
     {
         for (unsigned int i = 0u; i < liquidTypeDbc->GetRecordCount(); ++i)
         {
@@ -151,8 +150,7 @@ void ExtractAdt(Adt* adt, CachedFileReader& reader, MapData& map, const ClientDa
 {
     Structure geometry;
 
-    const MTEX* mtex = adt->Mtex();
-    const auto roadTextureIds = FindRoadTextureIds(adt->ChunkInBounds(mtex) ? mtex : nullptr);
+    const auto roadTextureIds = FindRoadTextureIds(adt->Mtex());
 
     for (int a = 0; a < ADT_CELLS_PER_GRID * ADT_CELLS_PER_GRID; ++a)
     {
@@ -225,7 +223,7 @@ MapExportStats ExportMap(unsigned int mapId, const std::string& mapName, const E
     const auto mapsPath = std::format("World\\Maps\\{}\\{}", mapName, mapName);
     const Wdt* wdt = reader.GetFileContent<Wdt>(std::format("{}.wdt", mapsPath).c_str());
 
-    if (!wdt || !wdt->IsValid())
+    if (!wdt)
     {
         LogD("[", mapName, "] no WDT, skipping");
         stats.skipped = true;
@@ -292,7 +290,7 @@ MapExportStats ExportMap(unsigned int mapId, const std::string& mapName, const E
             UncachedFile file = reader.ReadUncached(adtPath.c_str());
             Adt* adt = file.As<Adt>();
 
-            if (!adt || !adt->IsValid())
+            if (!adt)
             {
                 LogW("[", mapName, "] Missing or invalid ADT: ", adtPath);
                 continue;

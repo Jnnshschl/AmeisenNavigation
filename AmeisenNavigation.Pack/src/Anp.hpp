@@ -2,12 +2,14 @@
 
 #include <atomic>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <system_error>
@@ -26,11 +28,9 @@
 ///   "params"  -> dtNavMeshParams
 ///   "XX_YY"   -> one serialized Detour tile (DT_NAVMESH_VERSION), XX/YY = tile grid coordinates
 ///
-/// The entry names are opaque to the loader: tiles position themselves through their dtMeshHeader.
+/// A tile's entry name has to match the cell in its dtMeshHeader, the loader rejects tiles stored under another
+/// cell's name.
 namespace Anp {
-/// WoW's tile grid dimension (64x64 ADTs per map).
-constexpr int WOW_TILE_GRID_SIZE = 64;
-
 constexpr const char* MAP_ID_ENTRY = "mapId";
 constexpr const char* PARAMS_ENTRY = "params";
 
@@ -93,7 +93,6 @@ class AnpWriter
     bool Valid;
     bool Finalized;
     std::atomic<int> TileCount;
-    std::atomic<size_t> RawBytes;
     std::atomic<size_t> StoredBytes;
 
 public:
@@ -105,7 +104,6 @@ public:
           Valid(false),
           Finalized(false),
           TileCount(0),
-          RawBytes(0),
           StoredBytes(0)
     {
         mz_zip_zero_struct(&Zip);
@@ -128,11 +126,11 @@ public:
     int GetMapId() const noexcept { return MapId; }
     const dtNavMeshParams& GetParams() const noexcept { return Params; }
     int GetTileCount() const noexcept { return TileCount.load(); }
-    size_t GetRawBytes() const noexcept { return RawBytes.load(); }
     size_t GetStoredBytes() const noexcept { return StoredBytes.load(); }
 
-    /// Add a serialized Detour tile. Does not take ownership of navData. Thread-safe.
-    bool AddTile(int x, int y, const unsigned char* navData, int navDataSize) noexcept
+    /// Add a serialized Detour tile, stored under the cell in its header. Does not take ownership of navData.
+    /// Thread-safe.
+    bool AddTile(const unsigned char* navData, int navDataSize) noexcept
     {
         if (!Valid || !navData || navDataSize <= 0)
         {
@@ -141,11 +139,13 @@ public:
 
         if (!ValidateTileData(navData, static_cast<size_t>(navDataSize)))
         {
-            LogE("Refusing to store invalid tile ", x, "_", y, " for mapId=", MapId);
+            LogE("Refusing to store an invalid tile for mapId=", MapId);
             return false;
         }
 
-        const auto name = TileEntryName(x, y);
+        dtMeshHeader header;
+        std::memcpy(&header, navData, sizeof(header));
+        const auto name = TileEntryName(header.x, header.y);
         const auto crc = static_cast<mz_uint32>(mz_crc32(MZ_CRC32_INIT, navData, static_cast<size_t>(navDataSize)));
 
         // Raw deflate (negative window bits = no zlib header), as expected inside ZIP archives.
@@ -192,7 +192,6 @@ public:
         }
 
         TileCount.fetch_add(1, std::memory_order_relaxed);
-        RawBytes.fetch_add(static_cast<size_t>(navDataSize), std::memory_order_relaxed);
         StoredBytes.fetch_add(stored, std::memory_order_relaxed);
         return true;
     }
@@ -289,9 +288,17 @@ struct LoadResult
     int tilesRejected = 0;
 };
 
+/// True if the (validated) tile's header says it belongs to cell (x, y).
+inline bool IsInCell(const unsigned char* tileData, int x, int y) noexcept
+{
+    dtMeshHeader header;
+    std::memcpy(&header, tileData, sizeof(header));
+    return header.x == x && header.y == y;
+}
+
 /// Load an .anp archive from memory into a ready-to-query dtNavMesh. `name` is only used for log messages.
 /// Every tile is validated (ValidateTileData) before Detour sees it, broken tiles are counted as rejected.
-/// Tiles are decompressed in parallel (OpenMP), then added sequentially (dtNavMesh::addTile is not thread-safe).
+/// Tiles are decompressed and validated in parallel (OpenMP), then added sequentially (addTile isn't thread-safe).
 inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSize, const std::string& name) noexcept
 {
     LoadResult result;
@@ -341,12 +348,13 @@ inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSiz
             return result;
         }
 
-        // Archive entry and the grid cell its name ("XX_YY") says the tile belongs to.
+        // Archive entry, the grid cell its name ("XX_YY") says the tile belongs to and its uncompressed size.
         struct TileEntry
         {
             mz_uint index;
             int x;
             int y;
+            size_t size;
         };
 
         std::vector<TileEntry> tileEntries;
@@ -368,7 +376,7 @@ inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSiz
                 && stat.m_uncomp_size <= MAX_TILE_DATA_SIZE
                 && tileEntries.size() < static_cast<size_t>(params.maxTiles))
             {
-                tileEntries.push_back({i, x, y});
+                tileEntries.push_back({i, x, y, static_cast<size_t>(stat.m_uncomp_size)});
                 declaredBytes += stat.m_uncomp_size;
             }
             else if (ParseTileEntryName(entryName, x, y))
@@ -384,69 +392,52 @@ inline LoadResult LoadFromMemory(const unsigned char* archive, size_t archiveSiz
             return result;
         }
 
-        struct Extracted
-        {
-            void* data = nullptr;
-            size_t size = 0;
-        };
+        static_assert(MAX_TILE_DATA_SIZE <= static_cast<size_t>(INT32_MAX), "addTile takes the tile size as int");
 
-        std::vector<Extracted> extracted(tileEntries.size());
+        // Decompress straight into Detour's allocation and validate in parallel, only addTile (not thread-safe)
+        // runs sequentially. Reading from an in-memory archive is thread-safe in miniz (no shared read state).
+        std::vector<unsigned char*> tiles(tileEntries.size(), nullptr);
 
-        // Reading from an in-memory archive is thread-safe in miniz (no shared read state).
 #pragma omp parallel for schedule(dynamic, 4)
         for (int i = 0; i < static_cast<int>(tileEntries.size()); ++i)
         {
-            size_t size = 0;
-            void* data =
-                mz_zip_reader_extract_to_heap(&zip, tileEntries[static_cast<size_t>(i)].index, &size, 0);
-            extracted[static_cast<size_t>(i)] = {data, size};
-        }
+            const TileEntry& entry = tileEntries[static_cast<size_t>(i)];
 
-        for (size_t i = 0; i < extracted.size(); ++i)
-        {
-            // No structured binding: Clang can't capture those in lambdas when OpenMP is enabled.
-            void* data = extracted[i].data;
-            const size_t size = extracted[i].size;
+            if (entry.size == 0)
+            {
+                continue;
+            }
+
+            auto* data = static_cast<unsigned char*>(dtAlloc(entry.size, DT_ALLOC_PERM));
 
             // A tile has to sit in the cell its entry name says, otherwise it would occupy another tile's cell
             // (that one then fails with DT_ALREADY_OCCUPIED) or be linked to the wrong neighbours.
-            const auto inOwnCell = [&]() {
-                dtMeshHeader header;
-                std::memcpy(&header, data, sizeof(header));
-                return header.x == tileEntries[i].x && header.y == tileEntries[i].y;
-            };
-
-            // miniz allocates with malloc, Detour's default allocator frees with free: DT_TILE_FREE_DATA is
-            // compatible. Copy into a dtAlloc buffer anyway so custom Detour allocators keep working.
-            if (!data || !ValidateTileData(static_cast<const unsigned char*>(data), size) || size > INT32_MAX
-                || !inOwnCell())
+            if (data && mz_zip_reader_extract_to_mem(&zip, entry.index, data, entry.size, 0)
+                && ValidateTileData(data, entry.size) && IsInCell(data, entry.x, entry.y))
             {
-                result.tilesRejected++;
-                mz_free(data);
-                continue;
+                tiles[static_cast<size_t>(i)] = data;
             }
-
-            auto* tileData = static_cast<unsigned char*>(dtAlloc(size, DT_ALLOC_PERM));
-
-            if (!tileData)
+            else if (data)
             {
-                result.tilesRejected++;
-                mz_free(data);
-                continue;
+                dtFree(data);
             }
+        }
 
-            std::memcpy(tileData, data, size);
-            mz_free(data);
-
-            if (dtStatusSucceed(
-                    navMesh->addTile(tileData, static_cast<int>(size), DT_TILE_FREE_DATA, 0, nullptr)))
+        for (size_t i = 0; i < tiles.size(); ++i)
+        {
+            if (tiles[i]
+                && dtStatusSucceed(navMesh->addTile(tiles[i], static_cast<int>(tileEntries[i].size),
+                                                    DT_TILE_FREE_DATA, 0, nullptr)))
             {
                 result.tilesLoaded++;
+                continue;
             }
-            else
+
+            result.tilesRejected++;
+
+            if (tiles[i])
             {
-                result.tilesRejected++;
-                dtFree(tileData);
+                dtFree(tiles[i]);
             }
         }
 
@@ -488,9 +479,10 @@ inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
             return {};
         }
 
-        std::vector<unsigned char> fileData(static_cast<size_t>(size));
+        // No zero fill, every byte is read.
+        const auto fileData = std::make_unique_for_overwrite<unsigned char[]>(static_cast<size_t>(size));
         file.seekg(0);
-        file.read(reinterpret_cast<char*>(fileData.data()), size);
+        file.read(reinterpret_cast<char*>(fileData.get()), size);
 
         if (!file.good())
         {
@@ -498,7 +490,7 @@ inline LoadResult Load(const std::filesystem::path& anpFilePath) noexcept
             return {};
         }
 
-        return LoadFromMemory(fileData.data(), fileData.size(), anpFilePath.string());
+        return LoadFromMemory(fileData.get(), static_cast<size_t>(size), anpFilePath.string());
     }
     catch (const std::exception& e)
     {

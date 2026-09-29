@@ -754,3 +754,30 @@ TEST_CASE(Server_StopBeforeRunIsNotLost)
     CHECK(returned);
     CHECK(future.get() == AnTcpError::Success);
 }
+
+#ifndef _WIN32
+TEST_CASE(AnTcp_FailedSendDropsTheClient)
+{
+    // Handlers ignore SendData's result: a failed send (peer gone, or not reading until the send timeout) has to
+    // drop the client by itself, and pipelined requests behind it must not be processed.
+    AnTcpServer server("127.0.0.1", 0);
+    server.AddCallback(1, [](ClientHandler* handler, AnTcpMessageType type, const void*, int) {
+        handler->SendData(type, nullptr, 0);
+    });
+
+    int sv[2]{};
+    REQUIRE(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+
+    sockaddr_storage address{};
+    ClientHandler client(1, sv[0], address, &server);
+    const char request = 1;
+
+    CHECK(server.Dispatch(&client, &request, 1));
+
+    close(sv[1]);
+    CHECK(!server.Dispatch(&client, &request, 1));
+
+    const char unknown = 2; // answered by Dispatch itself
+    CHECK(!server.Dispatch(&client, &unknown, 1));
+}
+#endif

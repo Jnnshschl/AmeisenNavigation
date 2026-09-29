@@ -309,8 +309,9 @@ private:
             float bmin[3], bmax[3];
             TriangleBounds(s, tri, bmin, bmax);
 
-            if (!std::isfinite(bmin[0]) || !std::isfinite(bmax[0]) || !std::isfinite(bmin[2])
-                || !std::isfinite(bmax[2]))
+            // Clean() dropped such triangles already, the int conversions below must never see them.
+            if (!IsPlausibleCoordinate(bmin[0]) || !IsPlausibleCoordinate(bmax[0]) || !IsPlausibleCoordinate(bmin[2])
+                || !IsPlausibleCoordinate(bmax[2]))
             {
                 return;
             }
@@ -669,7 +670,7 @@ private:
             return BuildResult::TooDetailed;
         }
 
-        const bool stored = Writer->AddTile(tile.x, tile.y, navData, navDataSize);
+        const bool stored = Writer->AddTile(navData, navDataSize);
         dtFree(navData);
         return stored ? BuildResult::Built : BuildResult::Failed;
     }

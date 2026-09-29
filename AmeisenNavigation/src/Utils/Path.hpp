@@ -37,7 +37,6 @@ public:
     const Vector3* begin() const noexcept { return points; }
     const Vector3* end() const noexcept { return points + pointCount; }
 
-    int Size() const noexcept { return pointCount; }
     bool Empty() const noexcept { return pointCount == 0; }
     int GetSpace() const noexcept { return maxSize - pointCount; }
     bool IsFull() const noexcept { return pointCount >= maxSize; }

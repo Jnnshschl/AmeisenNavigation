@@ -51,10 +51,10 @@ positions with `TestWorld::Wow(rdX, rdY, rdZ)`.
 
 **Request flow (server).** `AnTcpServer` (one thread per connection; frame = `int32 size | uint8 type | payload`)
 → `AnTcpServer::Dispatch` → `NavServer::Handle*` (`Protocol.hpp` structs copied with memcpy; every request gets
-exactly one response, a zero vector on failure) → `AmeisenNavigation` methods → `GetQueryContext` (validates the
-map id and client, leases a `dtNavMeshQuery` from the map's `NavMeshQueryPool`) → Detour. Every position must pass
-`IsValidPosition` before reaching Detour (its float→int tile math is UB for NaN/huge values); `FindNearestPoly`
-enforces it. `AmeisenNavClient` holds per-connection state (query filter, path buffers) and is used by one thread
+exactly one response, a zero vector on failure) → `AmeisenNavigation` methods → `GetQueryContext` (looks up the
+client, leases a `dtNavMeshQuery` from the map's `NavMeshQueryPool`; map ids are bounded in `NavMeshCache`) → Detour.
+Every position must pass `IsValidPosition` before reaching Detour (its float→int tile math is UB for NaN/huge
+values); `FindNearestPoly` and `ToValidRdCoords` enforce it. `AmeisenNavClient` holds per-connection state (query filter, path buffers) and is used by one thread
 at a time. `Protocol.hpp` must stay byte-compatible with `AmeisenNavigation.Client/WireFormat.cs` (static_asserts);
 bump `PROTOCOL_VERSION` when adding or extending messages.
 

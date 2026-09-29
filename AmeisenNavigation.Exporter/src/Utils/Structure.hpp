@@ -15,9 +15,6 @@
 /// Triangle soup (RD coordinates) with one area id per triangle. Used for per-ADT extraction and the merged map.
 struct Structure
 {
-    /// Coordinates beyond this are garbage (the world spans +-17067 yards) and dropped by Clean().
-    static constexpr float MAX_COORDINATE = 1e6f;
-
     std::mutex mutex;
     std::vector<Vector3> verts;
     std::vector<Tri> tris;
@@ -66,8 +63,7 @@ struct Structure
                 }
 
                 const Vector3& v = verts[static_cast<size_t>(index)];
-                return v.IsFinite() && std::fabs(v.x) <= MAX_COORDINATE && std::fabs(v.y) <= MAX_COORDINATE
-                       && std::fabs(v.z) <= MAX_COORDINATE;
+                return IsPlausibleCoordinate(v.x) && IsPlausibleCoordinate(v.y) && IsPlausibleCoordinate(v.z);
             };
 
             size_t kept = 0;

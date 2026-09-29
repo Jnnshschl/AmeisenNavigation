@@ -98,8 +98,7 @@ void FuzzAdt(const uint8_t* data, size_t size)
     PlacementSet wmos;
     PlacementSet doodads;
 
-    const MTEX* mtex = adt->Mtex();
-    const auto roadTextures = FindRoadTextureIds(adt->ChunkInBounds(mtex) ? mtex : nullptr);
+    const auto roadTextures = FindRoadTextureIds(adt->Mtex());
 
     for (unsigned int y = 0; y < 16; ++y)
     {

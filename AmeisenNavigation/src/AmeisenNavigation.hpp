@@ -49,9 +49,10 @@ constexpr float HEIGHT_QUERY_EXTENTS[3] = {6.0f, 2500.0f, 6.0f};
 /// Maximum distance per step in PostProcessMoveAlongSurface before subdividing.
 constexpr float MOVE_ALONG_SURFACE_MAX_CHUNK = 25.0f;
 
-/// Size of the visited polygon buffer for moveAlongSurface calls. Detour's search uses its 64 node tiny pool, with
-/// a smaller buffer the list is cut and its last entry isn't the polygon holding the result.
-constexpr int MOVE_ALONG_SURFACE_VISITED_SIZE = 64;
+/// Size of the visited polygon buffer for moveAlongSurface calls. Detour's search runs in its 64 node tiny pool, so
+/// the visited path has at most 64 polygons: with room for one more the list is never cut (Detour flags a full
+/// buffer as too small) and its last entry is always the polygon holding the result.
+constexpr int MOVE_ALONG_SURFACE_VISITED_SIZE = 64 + 1;
 
 /// ExplorePolygon limits: outline vertices, waypoints (the spacing grows to stay below it), minimum spacing,
 /// size of the polygon's bounding box and how far a waypoint may move when it is snapped to the navmesh.
@@ -63,10 +64,9 @@ constexpr float MAX_EXPLORE_SNAP_DISTANCE = 32.0f;
 
 /// Request limits. The WoW world spans +-17067 yards; bigger or non-finite coordinates are rejected before they
 /// reach Detour, whose float -> int tile conversions are undefined for them (and loop for ages on ARM64).
-/// Map ids are bounded so arbitrary ids can't grow the per-map caches without limit.
+/// Map ids are bounded by NavMeshCache::MAX_MAP_ID.
 constexpr float MAX_COORDINATE = 100000.0f;
 constexpr float MAX_QUERY_RADIUS = 5000.0f;
-constexpr int MAX_MAP_ID = 65535;
 
 /// True for finite positions inside the accepted coordinate range.
 inline bool IsValidPosition(const Vector3& v) noexcept
@@ -75,7 +75,17 @@ inline bool IsValidPosition(const Vector3& v) noexcept
            && std::fabs(v.z) <= MAX_COORDINATE;
 }
 
-constexpr bool IsValidMapId(int mapId) noexcept { return mapId >= 0 && mapId <= MAX_MAP_ID; }
+/// WoW position -> RD coordinates, false (and rd untouched) if the position isn't valid.
+inline bool ToValidRdCoords(const Vector3& wow, Vector3& rd) noexcept
+{
+    if (!IsValidPosition(wow))
+    {
+        return false;
+    }
+
+    wow.CopyToRDCoords(rd);
+    return true;
+}
 
 struct AmeisenNavigationSettings
 {
@@ -132,7 +142,6 @@ public:
     AmeisenNavigation(const AmeisenNavigation&) = delete;
     AmeisenNavigation& operator=(const AmeisenNavigation&) = delete;
 
-    const AmeisenNavigationSettings& GetSettings() const noexcept { return Settings; }
 
     /// MMAP format in use (UNKNOWN for ANP navmeshes or when detection failed).
     MmapFormat GetMmapFormat() const noexcept;
@@ -208,7 +217,7 @@ private:
     /// The map's query pool, nullptr if the map has no navmesh.
     NavMeshQueryPool* GetQueryPool(int mapId);
 
-    /// Every position that reaches Detour goes through here or is checked with IsValidPosition first.
+    /// Every position that reaches Detour goes through here or ToValidRdCoords first.
     static bool FindNearestPoly(const dtNavMeshQuery* query, const dtQueryFilter* filter, const Vector3& rdPosition,
                                 PolyPosition& result, const float* extents = NEAREST_POLY_EXTENTS) noexcept
     {
@@ -231,24 +240,42 @@ private:
         return FindNearestPoly(query, filter, rd, result);
     }
 
-    /// Polygon holding a moveAlongSurface result: the last visited one, or (if the list was cut) looked up.
-    static dtPolyRef MoveResultPoly(const dtNavMeshQuery* query, const dtQueryFilter* filter, dtStatus status,
-                                    const dtPolyRef* visited, int visitedCount, const Vector3& rdResult,
-                                    dtPolyRef fallback) noexcept
+    /// moveAlongSurface from `position` towards rdTarget. On success `position` is the result, projected onto the
+    /// surface (moveAlongSurface doesn't fix the height), and the polygon holding it.
+    static dtStatus MoveAlong(const dtNavMeshQuery* query, const dtQueryFilter* filter, PolyPosition& position,
+                              const Vector3& rdTarget) noexcept
     {
-        if (visitedCount > 0 && !dtStatusDetail(status, DT_BUFFER_TOO_SMALL))
+        dtPolyRef visited[MOVE_ALONG_SURFACE_VISITED_SIZE];
+        int visitedCount = 0;
+        Vector3 result;
+
+        const dtStatus status = query->moveAlongSurface(position.poly, position.pos, rdTarget, filter, result, visited,
+                                                        &visitedCount, MOVE_ALONG_SURFACE_VISITED_SIZE);
+
+        if (dtStatusFailed(status) || visitedCount <= 0)
         {
-            return visited[visitedCount - 1];
+            return status | DT_FAILURE;
         }
 
-        constexpr float extents[3]{0.5f, 2.0f, 0.5f};
-        PolyPosition nearest;
-        return FindNearestPoly(query, filter, rdResult, nearest, extents) ? nearest.poly : fallback;
+        position.poly = visited[visitedCount - 1];
+
+        if (float height = 0.0f; dtStatusSucceed(query->getPolyHeight(position.poly, result, &height)))
+        {
+            result.y = height;
+        }
+
+        position.pos = result;
+        return status;
     }
 
     /// Straight path in RD coordinates, optionally storing the poly ref of each corner. *partial is set when
     /// the end isn't reachable (the path then leads to the closest reachable point).
     bool CalculateNormalPath(dtNavMeshQuery* query, const dtQueryFilter* filter, AmeisenNavClient& client,
                              const Vector3& startPosition, const Vector3& endPosition, Path& path,
+                             dtPolyRef* straightPathRefs = nullptr, bool* partial = nullptr) noexcept;
+
+    /// Same for positions already on the navmesh.
+    bool CalculateNormalPath(dtNavMeshQuery* query, const dtQueryFilter* filter, AmeisenNavClient& client,
+                             const PolyPosition& start, const PolyPosition& end, Path& path,
                              dtPolyRef* straightPathRefs = nullptr, bool* partial = nullptr) noexcept;
 };
