@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Text;
 
 namespace AmeisenNavigation.Tester.Services
@@ -20,7 +21,7 @@ namespace AmeisenNavigation.Tester.Services
         /// <summary>
         /// Try to look up a hash filename for a given trs key.
         /// </summary>
-        public bool TryGetValue(string key, out string? value)
+        public bool TryGetValue(string key, [NotNullWhen(true)] out string? value)
             => _entries.TryGetValue(key, out value);
 
         /// <summary>

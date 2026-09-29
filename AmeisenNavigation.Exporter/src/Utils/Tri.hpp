@@ -1,70 +1,13 @@
 #pragma once
 
-/// Area IDs for navmesh triangles and compact heightfield spans.
-///
-/// IMPORTANT: The numeric ordering matters because Recast's span merge uses
-/// rcMax(area1, area2) when two spans overlap. Higher values win. Liquid types
-/// are placed AFTER terrain types so that water surfaces always take priority
-/// over terrain during heightfield rasterization. This ensures correct water
-/// coverage without relying solely on post-hoc MarkWaterAreas() fixup.
-///
-/// All values must be <= RC_WALKABLE_AREA (63).
-enum TriAreaId : unsigned char
-{
-    NO_TYPE,
+#include <cstddef>
+#include <functional>
+#include <tuple>
 
-    // ── Terrain / structure types (lower priority in span merge) ──
+// Area ids and poly flags are part of the ANP format, shared with the server.
+#include "../../../AmeisenNavigation.Pack/src/AnpFormat.hpp"
 
-    TERRAIN_GROUND,
-    ALLIANCE_TERRAIN_GROUND,
-    HORDE_TERRAIN_GROUND,
-
-    TERRAIN_ROAD,
-    ALLIANCE_TERRAIN_ROAD,
-    HORDE_TERRAIN_ROAD,
-
-    TERRAIN_CITY,
-    ALLIANCE_TERRAIN_CITY,
-    HORDE_TERRAIN_CITY,
-
-    WMO,
-    ALLIANCE_WMO,
-    HORDE_WMO,
-
-    DOODAD,
-    ALLIANCE_DOODAD,
-    HORDE_DOODAD,
-
-    // ── Liquid types (higher priority - wins over terrain in span merge) ──
-
-    LIQUID_WATER,
-    ALLIANCE_LIQUID_WATER,
-    HORDE_LIQUID_WATER,
-
-    LIQUID_OCEAN,
-    ALLIANCE_LIQUID_OCEAN,
-    HORDE_LIQUID_OCEAN,
-
-    LIQUID_LAVA,
-    ALLIANCE_LIQUID_LAVA,
-    HORDE_LIQUID_LAVA,
-
-    LIQUID_SLIME,
-    ALLIANCE_LIQUID_SLIME,
-    HORDE_LIQUID_SLIME,
-};
-
-enum TriFlag : unsigned char
-{
-    NAV_EMPTY = 0,
-    NAV_LAVA_SLIME = 1 << 0,
-    NAV_WATER = 1 << 1,
-    NAV_GROUND = 1 << 2,
-    NAV_ROAD = 1 << 3,
-    NAV_ALLIANCE = 1 << 4,
-    NAV_HORDE = 1 << 5,
-};
-
+/// Triangle as three vertex indices.
 struct Tri
 {
     union
@@ -78,24 +21,22 @@ struct Tri
         int points[3];
     };
 
-    Tri() noexcept
-        : points{ 0, 0, 0 }
-    {}
+    constexpr Tri() noexcept : points{0, 0, 0} {}
 
-    Tri(int a, int b, int c) noexcept
-        : points{ a, b, c }
-    {}
+    constexpr Tri(int a, int b, int c) noexcept : points{a, b, c} {}
 
-    Tri(size_t a, size_t b, size_t c) noexcept
-        : points{ static_cast<int>(a), static_cast<int>(b), static_cast<int>(c) }
-    {}
+    constexpr Tri(size_t a, size_t b, size_t c) noexcept
+        : points{static_cast<int>(a), static_cast<int>(b), static_cast<int>(c)}
+    {
+    }
 
-    constexpr inline bool operator==(const Tri & other) const noexcept
+    constexpr bool operator==(const Tri& other) const noexcept
     {
         return a == other.a && b == other.b && c == other.c;
     }
-    
-    constexpr inline bool operator<(const Tri& other) const {
+
+    constexpr bool operator<(const Tri& other) const noexcept
+    {
         return std::tie(a, b, c) < std::tie(other.a, other.b, other.c);
     }
 
@@ -111,3 +52,5 @@ struct Tri
         }
     };
 };
+
+static_assert(sizeof(Tri) == sizeof(int) * 3, "Tri must be layout compatible with int[3] (Recast index format)");

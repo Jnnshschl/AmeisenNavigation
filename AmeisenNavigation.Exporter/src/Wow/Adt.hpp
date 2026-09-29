@@ -1,13 +1,14 @@
 #pragma once
 
+#include <cstring>
+
 #include "AdtStructs.hpp"
 #include "Mver.hpp"
 
 // ─────────────────────────────────────────────
 // Adt - thin accessor class for ADT file data.
-// Provides typed access to ADT sub-chunks via MHDR offsets.
-// All data extraction logic lives in AdtChunkExtractor.hpp
-// and RoadDetector.hpp as free functions.
+// Provides typed, bounds checked access to ADT sub-chunks via MHDR offsets.
+// All data extraction logic lives in AdtChunkExtractor.hpp and RoadDetector.hpp.
 // ─────────────────────────────────────────────
 
 class Adt
@@ -15,49 +16,125 @@ class Adt
     unsigned char* Data;
     unsigned int Size;
 
+    /// True if [offset, offset + length) lies inside the file.
+    bool InBounds(size_t offset, size_t length) const noexcept { return offset <= Size && length <= Size - offset; }
+
 public:
+    /// Basic sanity check: MVER + MHDR present and the MCIN table inside the file.
+    bool IsValid() const noexcept
+    {
+        if (!Data || Size < sizeof(MVER) + sizeof(MHDR) || std::memcmp(Data, "REVM", 4) != 0
+            || std::memcmp(Data + sizeof(MVER), "RDHM", 4) != 0)
+        {
+            return false;
+        }
+
+        return Mcin() != nullptr;
+    }
+
     // ── Top-level chunk accessors ──
 
-    inline const MVER* Mver() const noexcept { return reinterpret_cast<MVER*>(Data); };
-    inline const MHDR* Mhdr() const noexcept { return reinterpret_cast<MHDR*>(Data + sizeof(MVER)); };
+    const MVER* Mver() const noexcept { return reinterpret_cast<const MVER*>(Data); }
+    const MHDR* Mhdr() const noexcept { return reinterpret_cast<const MHDR*>(Data + sizeof(MVER)); }
 
+    /// Sub-chunk at an MHDR offset (relative to the MHDR data), nullptr if missing or out of bounds.
     template <typename T>
-    inline T* GetSub(unsigned int offset) const noexcept
+    T* GetSub(unsigned int offset, size_t minSize = 8) const noexcept
     {
-        return offset ? reinterpret_cast<T*>(Data + sizeof(MVER) + 8 + offset) : nullptr;
-    };
+        const size_t absolute = sizeof(MVER) + 8 + static_cast<size_t>(offset);
+        return offset && InBounds(absolute, minSize) ? reinterpret_cast<T*>(Data + absolute) : nullptr;
+    }
 
-    inline const auto Mcin() const noexcept { return GetSub<MCIN>(Mhdr()->offsetMcin); };
-    inline const auto Mh2o() const noexcept { return GetSub<MH2O>(Mhdr()->offsetMh2o); };
-    inline const auto Mtex() const noexcept { return GetSub<MTEX>(Mhdr()->offsetMtex); };
+    /// Sub-chunk at an MHDR offset whose declared payload (chunk->size) lies inside the file too, nullptr otherwise.
+    template <typename T>
+    T* GetChunk(unsigned int offset, size_t minSize = 8) const noexcept
+    {
+        T* chunk = GetSub<T>(offset, minSize);
 
-    inline const auto Mmdx() const noexcept { return GetSub<MMDX>(Mhdr()->offsetMmdx); };
-    inline const auto Mmid() const noexcept { return GetSub<MMID>(Mhdr()->offsetMmid); };
-    inline auto Mddf() const noexcept { return GetSub<MDDF>(Mhdr()->offsetMddf); };
+        if (!chunk)
+        {
+            return nullptr;
+        }
 
-    inline const auto Mwmo() const noexcept { return GetSub<MWMO>(Mhdr()->offsetMwmo); };
-    inline const auto Mwid() const noexcept { return GetSub<MWID>(Mhdr()->offsetMwid); };
-    inline const auto Modf() const noexcept { return GetSub<MODF>(Mhdr()->offsetModf); };
+        const size_t chunkOffset = reinterpret_cast<const unsigned char*>(chunk) - Data;
+        return InBounds(chunkOffset + 8, chunk->size) ? chunk : nullptr;
+    }
+
+    const MCIN* Mcin() const noexcept { return GetSub<MCIN>(Mhdr()->offsetMcin, sizeof(MCIN)); }
+
+    // The chunk accessors below only return chunks whose whole payload lies inside the file.
+
+    const MH2O* Mh2o() const noexcept { return GetChunk<MH2O>(Mhdr()->offsetMh2o, sizeof(MH2O)); }
+    const MTEX* Mtex() const noexcept { return GetChunk<MTEX>(Mhdr()->offsetMtex); }
+
+    const MMDX* Mmdx() const noexcept { return GetChunk<MMDX>(Mhdr()->offsetMmdx); }
+    const MMID* Mmid() const noexcept { return GetChunk<MMID>(Mhdr()->offsetMmid); }
+    const MDDF* Mddf() const noexcept { return GetChunk<MDDF>(Mhdr()->offsetMddf); }
+
+    const MWMO* Mwmo() const noexcept { return GetChunk<MWMO>(Mhdr()->offsetMwmo); }
+    const MWID* Mwid() const noexcept { return GetChunk<MWID>(Mhdr()->offsetMwid); }
+    const MODF* Modf() const noexcept { return GetChunk<MODF>(Mhdr()->offsetModf); }
+
+    /// Filename (e.g. of an MMDX/MWMO entry) by its MMID/MWID index, nullptr if invalid.
+    template <typename Names, typename Offsets>
+    const char* GetFilename(const Names* names, const Offsets* offsets, unsigned int index) const noexcept
+    {
+        if (!names || !offsets || index >= offsets->size / sizeof(uint32_t))
+        {
+            return nullptr;
+        }
+
+        const uint32_t offset = offsets->offsets[index];
+
+        if (offset >= names->size || !std::memchr(names->filenames + offset, 0, names->size - offset))
+        {
+            return nullptr;
+        }
+
+        return names->filenames + offset;
+    }
 
     // ── MCNK-level chunk accessors ──
 
-    inline const MCNK* Mcnk(unsigned int x, unsigned int y) noexcept
+    const MCNK* Mcnk(unsigned int x, unsigned int y) const noexcept
     {
-        unsigned int offset = Mcin()->cells[y][x].offsetMcnk;
-        return offset ? reinterpret_cast<MCNK*>(Data + offset) : nullptr;
-    };
+        const MCIN* mcin = Mcin();
 
-    inline const MCVT* Mcvt(const MCNK* mcnk) noexcept
-    {
-        unsigned int offset = mcnk->offsMcvt;
-        return offset ? reinterpret_cast<const MCVT*>(reinterpret_cast<const unsigned char*>(mcnk) + offset) : nullptr;
-    };
+        if (!mcin || x >= ADT_CELLS_PER_GRID || y >= ADT_CELLS_PER_GRID)
+        {
+            return nullptr;
+        }
 
-    inline const MCLY_Entry* Mcly(const MCNK* mcnk) noexcept
+        const unsigned int offset = mcin->cells[y][x].offsetMcnk;
+        return offset && InBounds(offset, sizeof(MCNK)) ? reinterpret_cast<const MCNK*>(Data + offset) : nullptr;
+    }
+
+    const MCVT* Mcvt(const MCNK* mcnk) const noexcept
     {
-        unsigned int offset = mcnk->offsMcly;
-        // offsMcly points to the sub-chunk header (magic+size), skip 8 bytes to get data
-        return offset ? reinterpret_cast<const MCLY_Entry*>(reinterpret_cast<const unsigned char*>(mcnk) + offset + 8)
-                      : nullptr;
-    };
+        const size_t offset = reinterpret_cast<const unsigned char*>(mcnk) - Data + mcnk->offsMcvt;
+        return mcnk->offsMcvt && InBounds(offset, sizeof(MCVT)) ? reinterpret_cast<const MCVT*>(Data + offset)
+                                                                : nullptr;
+    }
+
+    const MCLY_Entry* Mcly(const MCNK* mcnk) const noexcept
+    {
+        // offsMcly points to the sub-chunk header (magic+size), skip 8 bytes to get to the entries.
+        const size_t offset = reinterpret_cast<const unsigned char*>(mcnk) - Data + mcnk->offsMcly + 8;
+        return mcnk->offsMcly && InBounds(offset, sizeof(MCLY_Entry) * mcnk->nLayers)
+                   ? reinterpret_cast<const MCLY_Entry*>(Data + offset)
+                   : nullptr;
+    }
+
+    const MCLQ* Mclq(const MCNK* mcnk) const noexcept
+    {
+        const MCLQ* mclq = mcnk->Mclq();
+
+        if (!mclq)
+        {
+            return nullptr;
+        }
+
+        const size_t offset = reinterpret_cast<const unsigned char*>(mclq) - Data;
+        return InBounds(offset, sizeof(MCLQ)) ? mclq : nullptr;
+    }
 };

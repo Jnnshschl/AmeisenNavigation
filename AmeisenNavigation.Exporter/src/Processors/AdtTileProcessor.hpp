@@ -1,18 +1,25 @@
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
+#include <filesystem>
+#include <format>
+#include <limits>
+#include <string>
 #include <vector>
 
+#ifdef _OPENMP
 #include <omp.h>
+#endif
 
-#include <Utils/Logger.hpp>
-
-#include "../../../recastnavigation/Detour/Include/DetourNavMesh.h"
-#include "../../../recastnavigation/Detour/Include/DetourNavMeshBuilder.h"
-#include "../../../recastnavigation/Recast/Include/Recast.h"
+#include <DetourNavMesh.h>
+#include <DetourNavMeshBuilder.h>
+#include <Recast.h>
 
 #include "../../../AmeisenNavigation.Pack/src/Anp.hpp"
+#include "../../../AmeisenNavigation/src/Utils/Logger.hpp"
 
 #include "../Utils/CityMap.hpp"
 #include "../Utils/FactionMap.hpp"
@@ -25,723 +32,881 @@
 #include "BmpRenderer.hpp"
 
 // ─────────────────────────────────────────────
-// AdtTileProcessor - orchestrates the navmesh
-// generation pipeline for a single ADT tile.
+// AdtTileProcessor - builds one Detour tile per ADT from the merged map geometry.
 //
-// Pipeline per sub-tile (two-pass rasterization):
-//   1a. Rasterize TERRAIN triangles → heightfield
+// Every tile is built from 80x80 cell sub-tiles (small heightfields, low memory) which are merged
+// into one poly mesh per tile. Pipeline per sub-tile (two-pass rasterization):
+//   1a. Rasterize TERRAIN triangles -> heightfield
 //   2.  Filter walkable spans (ledge, low-height, etc.)
-//   1b. Rasterize WATER triangles → same heightfield (AFTER filters)
+//   1b. Rasterize WATER triangles -> same heightfield (AFTER the filters: water has no ledges)
 //   3.  Build compact heightfield
 //   4.  Erode + median filter
-//   5.  Mark water areas (AreaMarker - rect-to-cell)
-//   6.  Mark road areas (AreaMarker)
-//   6b. Mark city areas (AreaMarker - upgrades TERRAIN_GROUND → TERRAIN_CITY)
-//   6c. Mark faction areas (AreaMarker - upgrades neutral → Alliance/Horde)
-//   7.  Render to BMP (BmpRenderer, debug only)
-//   8.  Build regions → contours → polymesh
+//   5.  Mark water / road / city / faction areas
+//   6.  Render to BMP (debug only)
+//   7.  Build regions -> contours -> polymesh + detail mesh
 //
-// Water triangles are rasterized AFTER terrain filters
-// because Recast's ledge/height filters are designed for
-// terrain and incorrectly clear water surface spans (water
-// doesn't have ledges - agents can swim at any depth).
+// Performance: triangles are bucketed per tile and per sub-tile up front, so each sub-tile only
+// rasterizes the handful of triangles that overlap it (instead of the whole map), and the area
+// markers use spatial indices. Total cost is O(triangles + cells) instead of O(sub-tiles x triangles).
 //
-// Parallelism strategy:
-//   - Many tiles (full map): OpenMP parallel over tiles, sub-tiles sequential per thread
-//   - Few tiles (single ADT debug): OpenMP parallel over sub-tiles within each tile
+// Parallelism: tiles are built in parallel; when there are fewer tiles than threads (single ADT
+// exports) the sub-tiles of each tile are built in parallel instead.
 // ─────────────────────────────────────────────
 
-/// Holds terrain-only and water-only triangle data, split from
-/// the main Structure so they can be rasterized in separate passes.
-struct SplitGeometry
+/// Detour tile coordinates of an ADT inside the navmesh grid.
+struct TileCoord
 {
-    // Terrain triangles (indices into the shared vertex array)
-    std::vector<int> terrainTris;
-    std::vector<unsigned char> terrainAreas;
-
-    // Water surface triangles (indices into the shared vertex array)
-    std::vector<int> waterTris;
-    std::vector<unsigned char> waterAreas;
-
-    int TerrainTriCount() const noexcept { return static_cast<int>(terrainAreas.size()); }
-    int WaterTriCount() const noexcept { return static_cast<int>(waterAreas.size()); }
+    int x;    // Detour tile x
+    int y;    // Detour tile y
+    int adtX; // WoW ADT x (for logging/debug output)
+    int adtY; // WoW ADT y
 };
 
-/// Lightweight per-thread rcContext for parallel Recast operations.
-/// Logging is disabled to avoid thread-safety issues with rcContext's internal buffer.
-struct ThreadRcContext : rcContext
+/// Recast build settings. Defaults reproduce the historic AmeisenNavigation meshes.
+struct TileBuildConfig
 {
-    ThreadRcContext() noexcept { enableLog(false); }
+    int meshResolution = 2560; // heightfield cells per ADT edge (cs = TILESIZE / meshResolution)
+    int subTileSize = 80;      // cells per sub-tile edge
+    float walkableSlopeAngle = 55.0f;
+    float agentHeight = 2.0f;
+    float agentRadius = 0.6f;
+    float agentClimb = 1.2f;
+    int minRegionSize = 10;          // in cells (squared for the area)
+    int mergeRegionSize = 25;        // in cells (squared for the area)
+    float maxEdgeLength = 12.0f;     // world units
+    float maxSimplificationError = 1.0f;
+    float detailSampleDistance = 8.0f; // in cells
+    float detailSampleMaxError = 0.5f; // in cell heights
+    int maxRetries = 3;                // coarser rebuilds when a tile exceeds Detour's vertex limit
+    int maxTileVertices = 0xfffe;      // Detour's per tile vertex limit (only lowered by tests)
+    bool debugBmp = false;             // write area debug images per tile
 };
 
-class AdtTileProcessor : public rcContext
+/// Recast context forwarding messages to the Logger. One instance per thread (log toggling is per context).
+/// Recast warnings are mostly benign geometry notes (e.g. "delaunayHull: Removing dangling face") that would
+/// flood a full map export, they are only shown with debug logging. Errors are always shown.
+class RecastLogContext : public rcContext
 {
-    rcConfig RcCfg;
-    Anp* Navmesh;
-    std::string OutputDir;
-    std::string MapName;
-    int MapId;
-    bool IsDebug;
-
 public:
-    AdtTileProcessor(Anp* anp, const std::string& outputDir, const std::string& mapName, bool isDebug) noexcept
-        : Navmesh(anp), OutputDir(outputDir), MapName(mapName), MapId(anp->GetMapId()), IsDebug(isDebug), RcCfg{0}
+    RecastLogContext() noexcept : rcContext(false) { enableLog(true); }
+
+protected:
+    void doLog(const rcLogCategory category, const char* msg, const int /*len*/) override
     {
-        enableLog(true);
-        const int meshResolution = 2560;
-
-        RcCfg.cs = TILESIZE / meshResolution;
-        RcCfg.ch = TILESIZE / meshResolution;
-        RcCfg.maxVertsPerPoly = DT_VERTS_PER_POLYGON;
-
-        RcCfg.walkableSlopeAngle = 55.0f;
-        RcCfg.walkableClimb = static_cast<int>(ceilf(1.2f / RcCfg.ch));
-        RcCfg.walkableHeight = static_cast<int>(floorf(2.0f / RcCfg.ch));
-        RcCfg.walkableRadius = static_cast<int>(ceilf(0.6f / RcCfg.cs));
-
-        RcCfg.minRegionArea = static_cast<int>(rcSqr(10));
-        RcCfg.mergeRegionArea = static_cast<int>(rcSqr(25));
-        RcCfg.maxEdgeLen = static_cast<int>(12.0f / RcCfg.cs);
-        RcCfg.maxSimplificationError = 1.0f;
-        RcCfg.detailSampleDist = RcCfg.cs * 8.0f;
-        RcCfg.detailSampleMaxError = RcCfg.ch * 0.5f;
-
-        RcCfg.tileSize = 80;
-        RcCfg.borderSize = RcCfg.walkableRadius + 3;
-        RcCfg.width = RcCfg.tileSize + RcCfg.borderSize * 2;
-        RcCfg.height = RcCfg.tileSize + RcCfg.borderSize * 2;
-    }
-
-    virtual void doLog(const rcLogCategory category, const char* msg, const int /*len*/) noexcept
-    {
-        switch (category)
+        if (category == RC_LOG_ERROR)
         {
-            case RC_LOG_WARNING: LogW("[Recast] ", msg); break;
-            case RC_LOG_ERROR:   LogE("[Recast] ", msg); break;
-            default:             LogD("[Recast] ", msg); break;
-        }
-    }
-
-    // ── Main processing pipeline ──
-
-    inline void Process(Structure* structure, const WaterMap* waterMap, const RoadMap* roadMap,
-                        const FactionMap* factionMap = nullptr, const CityMap* cityMap = nullptr) noexcept
-    {
-        if (!structure || structure->verts.empty() || structure->tris.empty())
-            return;
-
-        // Clear steep triangles (sets area to RC_NULL_AREA for slopes > walkableSlopeAngle).
-        // Water surface triangles are flat (slope ≈ 0°) and always survive this step.
-        rcClearUnwalkableTriangles(this, RcCfg.walkableSlopeAngle, structure->Verts(),
-                                   static_cast<int>(structure->verts.size()), structure->Tris(),
-                                   static_cast<int>(structure->tris.size()), structure->AreaIds());
-
-        // Split triangles into terrain-only and water-only arrays.
-        // Water triangles are rasterized in a separate pass AFTER terrain filters
-        // to prevent the ledge/height filters from clearing water surface spans.
-        SplitGeometry split;
-        {
-            const int* allTris = structure->Tris();
-            const unsigned char* allAreas = structure->AreaIds();
-            const int triCount = static_cast<int>(structure->tris.size());
-
-            // Pre-reserve to avoid reallocations during the split loop.
-            // Most triangles are terrain; water is typically a small fraction.
-            split.terrainTris.reserve(static_cast<size_t>(triCount) * 3);
-            split.terrainAreas.reserve(triCount);
-            split.waterTris.reserve(static_cast<size_t>(triCount / 4) * 3);
-            split.waterAreas.reserve(triCount / 4);
-
-            for (int i = 0; i < triCount; ++i)
-            {
-                unsigned char a = allAreas[i];
-                if (a >= LIQUID_WATER && a <= HORDE_LIQUID_SLIME)
-                {
-                    split.waterTris.push_back(allTris[i * 3]);
-                    split.waterTris.push_back(allTris[i * 3 + 1]);
-                    split.waterTris.push_back(allTris[i * 3 + 2]);
-                    split.waterAreas.push_back(a);
-                }
-                else
-                {
-                    split.terrainTris.push_back(allTris[i * 3]);
-                    split.terrainTris.push_back(allTris[i * 3 + 1]);
-                    split.terrainTris.push_back(allTris[i * 3 + 2]);
-                    split.terrainAreas.push_back(a);
-                }
-            }
-
-            if (IsDebug)
-            {
-                log(RC_LOG_PROGRESS, "Split geometry: %d terrain tris, %d water tris", split.TerrainTriCount(),
-                    split.WaterTriCount());
-            }
-        }
-
-        int width = 0;
-        int height = 0;
-        rcCalcGridSize(structure->bbMin, structure->bbMax, TILESIZE, &width, &height);
-
-        const float borderPadding = RcCfg.borderSize * RcCfg.cs;
-        const float subTileSize = RcCfg.tileSize * RcCfg.cs;
-
-        const int tileCount = static_cast<int>(ceilf((TILESIZE / RcCfg.cs) / static_cast<float>(RcCfg.tileSize)));
-        const int subTilesPerTile = tileCount * tileCount;
-        const int totalTiles = width * height;
-
-        // Debug BMP only for single-tile mode (multi-tile would overwrite the same pixel buffer)
-        std::vector<uint8_t> adtPixels;
-        if (IsDebug && totalTiles == 1)
-        {
-            adtPixels.assign(2560 * 2560 * 3, 0);
-        }
-
-        // Choose parallelism strategy based on tile count vs available threads.
-        // Many tiles (full map): parallelize at tile level, sub-tiles sequential per thread.
-        // Few tiles (single ADT): parallelize at sub-tile level within each tile.
-        const int numThreads = omp_get_max_threads();
-        const bool parallelTiles = (totalTiles >= numThreads);
-
-        std::atomic<int> tilesCompleted{0};
-        auto buildStart = std::chrono::high_resolution_clock::now();
-
-        // Adaptive progress interval: ~20 updates total, at least every tile
-        const int tileProgressInterval = std::max(1, totalTiles / 20);
-
-        if (parallelTiles)
-        {
-            // ── Tile-level parallelism (full map export) ──
-            // Each thread processes one tile at a time, running all its sub-tiles sequentially.
-            // This avoids allocating millions of sub-meshes simultaneously.
-            LogI(std::format("[{}] Building {} tiles using {} threads ({} sub-tiles each)",
-                             MapName, totalTiles, numThreads, subTilesPerTile));
-
-#pragma omp parallel
-            {
-                ThreadRcContext ctx;
-
-#pragma omp for schedule(dynamic)
-                for (int tIdx = 0; tIdx < totalTiles; ++tIdx)
-                {
-                    const int tX = tIdx % width;
-                    const int tY = tIdx / width;
-
-                    float tbbMin[3]{structure->bbMin[0] + tX * TILESIZE, structure->bbMin[1],
-                                    structure->bbMin[2] + tY * TILESIZE};
-                    float tbbMax[3]{tbbMin[0] + TILESIZE, structure->bbMax[1], tbbMin[2] + TILESIZE};
-
-                    std::vector<rcPolyMesh*> spmeshes(subTilesPerTile, nullptr);
-                    std::vector<rcPolyMeshDetail*> sdmeshes(subTilesPerTile, nullptr);
-                    int meshIndex = 0;
-
-                    for (int s = 0; s < subTilesPerTile; ++s)
-                    {
-                        const int stX = s % tileCount;
-                        const int stY = s / tileCount;
-
-                        float stbbMin[3]{(tbbMin[0] + stX * subTileSize) - borderPadding, structure->bbMin[1],
-                                         (tbbMin[2] + stY * subTileSize) - borderPadding};
-                        float stbbMax[3]{(tbbMin[0] + (stX + 1) * subTileSize) + borderPadding, structure->bbMax[1],
-                                         (tbbMin[2] + (stY + 1) * subTileSize) + borderPadding};
-
-                        if (BuildSubTile(&ctx, stbbMin, stbbMax, structure, &spmeshes[meshIndex], &sdmeshes[meshIndex],
-                                         stX, stY, nullptr, waterMap, roadMap, factionMap, cityMap, split))
-                        {
-                            meshIndex++;
-                        }
-                    }
-
-                    if (meshIndex > 0)
-                    {
-                        MergeAndAddTile(&ctx, spmeshes.data(), sdmeshes.data(), meshIndex, subTilesPerTile, tX, tY,
-                                        tbbMin, tbbMax);
-                    }
-
-                    const int done = tilesCompleted.fetch_add(1, std::memory_order_relaxed) + 1;
-                    if (done % tileProgressInterval == 0 || done == totalTiles)
-                    {
-                        auto now = std::chrono::high_resolution_clock::now();
-                        double elapsed = std::chrono::duration<double>(now - buildStart).count();
-                        double eta = (elapsed / done) * (totalTiles - done);
-                        LogP(std::format("[{}] Building navmesh: {} / {} tiles ({:.1f}%) - ETA: {}",
-                                         MapName, done, totalTiles, 100.0 * done / totalTiles,
-                                         Logger::FormatDuration(eta)));
-                    }
-                }
-            }
-
-            Logger::EndProgress();
+            LogE("[Recast] ", msg);
         }
         else
         {
-            // ── Sub-tile-level parallelism (single tile / debug export) ──
-            // Few tiles: parallelize the sub-tile loop within each tile.
-            LogI(std::format("[{}] Building {} tiles ({} sub-tiles each, sub-tile parallel)",
-                             MapName, totalTiles, subTilesPerTile));
+            LogD("[Recast] ", msg);
+        }
+    }
+};
 
-            for (int tIdx = 0; tIdx < totalTiles; ++tIdx)
+class AdtTileProcessor
+{
+public:
+    struct Stats
+    {
+        std::atomic<int> built{0};
+        std::atomic<int> empty{0};
+        std::atomic<int> failed{0};
+        std::atomic<int> retried{0};
+    };
+
+private:
+    /// Compressed sparse row list: items of bucket i are items[offsets[i] .. offsets[i + 1]).
+    struct Buckets
+    {
+        std::vector<uint32_t> offsets;
+        std::vector<uint32_t> items;
+
+        size_t Count(size_t bucket) const noexcept { return offsets[bucket + 1] - offsets[bucket]; }
+        const uint32_t* Begin(size_t bucket) const noexcept { return items.data() + offsets[bucket]; }
+        const uint32_t* End(size_t bucket) const noexcept { return items.data() + offsets[bucket + 1]; }
+    };
+
+    /// Derived Recast parameters for one build attempt.
+    struct Params
+    {
+        float cs, ch;
+        int walkableClimb, walkableHeight, walkableRadius;
+        int borderSize, subTileSize, subTilesPerAxis, width;
+        int minRegionArea, mergeRegionArea, maxEdgeLen;
+        float maxSimplificationError, detailSampleDist, detailSampleMaxError;
+    };
+
+    /// Per-thread scratch buffers, reused between sub-tiles.
+    struct Scratch
+    {
+        std::vector<int> terrainTris;
+        std::vector<unsigned char> terrainAreas;
+        std::vector<int> waterTris;
+        std::vector<unsigned char> waterAreas;
+    };
+
+    Anp::AnpWriter* Writer;
+    std::filesystem::path OutputDir;
+    std::string MapName;
+    TileBuildConfig Config;
+    Stats Statistics;
+
+public:
+    AdtTileProcessor(Anp::AnpWriter* writer, const std::filesystem::path& outputDir, const std::string& mapName,
+                     const TileBuildConfig& config = {}) noexcept
+        : Writer(writer),
+          OutputDir(outputDir),
+          MapName(mapName),
+          Config(config)
+    {
+        Config.meshResolution = std::max(Config.meshResolution, 16);
+        Config.subTileSize = std::clamp(Config.subTileSize, 16, Config.meshResolution);
+        Config.maxRetries = std::max(Config.maxRetries, 0);
+        Config.maxTileVertices = std::clamp(Config.maxTileVertices, 3, 0xfffe);
+    }
+
+    const Stats& GetStats() const noexcept { return Statistics; }
+
+    /// Build all tiles and add them to the writer. The structure's area ids are modified (steep -> null area).
+    void Process(Structure* structure, const std::vector<TileCoord>& tiles, const WaterMap* waterMap,
+                 const RoadMap* roadMap, const FactionMap* factionMap = nullptr,
+                 const CityMap* cityMap = nullptr) noexcept
+    {
+        if (!Writer || !structure || structure->verts.empty() || structure->tris.empty() || tiles.empty())
+        {
+            return;
+        }
+
+        const auto buildStart = std::chrono::steady_clock::now();
+        const Params base = MakeParams(0);
+
+        // Mark steep triangles as unwalkable (they still rasterize as obstacles).
+        {
+            RecastLogContext ctx;
+            rcClearUnwalkableTriangles(&ctx, Config.walkableSlopeAngle, structure->Verts(),
+                                       static_cast<int>(structure->verts.size()), structure->Tris(),
+                                       static_cast<int>(structure->tris.size()), structure->AreaIds());
+        }
+
+        const Buckets tileBuckets = BucketTrianglesByTile(*structure, tiles, base.borderSize * base.cs);
+
+#ifdef _OPENMP
+        const int numThreads = omp_get_max_threads();
+#else
+        const int numThreads = 1;
+#endif
+        const int totalTiles = static_cast<int>(tiles.size());
+        const bool parallelTiles = totalTiles >= numThreads;
+        const int progressInterval = std::max(1, totalTiles / 50);
+        std::atomic<int> completed{0};
+
+        LogI(std::format("[{}] Building {} tiles ({}x{} sub-tiles each) using {} threads", MapName, totalTiles,
+                         base.subTilesPerAxis, base.subTilesPerAxis, numThreads));
+
+#pragma omp parallel for schedule(dynamic, 1) if (parallelTiles)
+        for (int t = 0; t < totalTiles; ++t)
+        {
+            BuildTile(*structure, tiles[static_cast<size_t>(t)], tileBuckets, static_cast<size_t>(t), waterMap,
+                      roadMap, factionMap, cityMap, !parallelTiles);
+
+            const int done = completed.fetch_add(1, std::memory_order_relaxed) + 1;
+
+            if (done % progressInterval == 0 || done == totalTiles)
             {
-                const int tX = tIdx % width;
-                const int tY = tIdx / width;
-
-                float tbbMin[3]{structure->bbMin[0] + tX * TILESIZE, structure->bbMin[1],
-                                structure->bbMin[2] + tY * TILESIZE};
-                float tbbMax[3]{tbbMin[0] + TILESIZE, structure->bbMax[1], tbbMin[2] + TILESIZE};
-
-                std::vector<rcPolyMesh*> spmeshes(subTilesPerTile, nullptr);
-                std::vector<rcPolyMeshDetail*> sdmeshes(subTilesPerTile, nullptr);
-
-                std::atomic<int> subTilesCompleted{0};
-                auto tileStart = std::chrono::high_resolution_clock::now();
-                const int subProgressInterval = std::max(1, subTilesPerTile / 20);
-
-                // Each sub-tile writes to its own slot [s] - no contention.
-                // BMP rendering also writes to non-overlapping pixel regions per (stX, stY).
-#pragma omp parallel
-                {
-                    ThreadRcContext ctx;
-
-#pragma omp for schedule(dynamic)
-                    for (int s = 0; s < subTilesPerTile; ++s)
-                    {
-                        const int stX = s % tileCount;
-                        const int stY = s / tileCount;
-
-                        float stbbMin[3]{(tbbMin[0] + stX * subTileSize) - borderPadding, structure->bbMin[1],
-                                         (tbbMin[2] + stY * subTileSize) - borderPadding};
-                        float stbbMax[3]{(tbbMin[0] + (stX + 1) * subTileSize) + borderPadding, structure->bbMax[1],
-                                         (tbbMin[2] + (stY + 1) * subTileSize) + borderPadding};
-
-                        BuildSubTile(&ctx, stbbMin, stbbMax, structure, &spmeshes[s], &sdmeshes[s], stX, stY,
-                                     adtPixels.empty() ? nullptr : adtPixels.data(), waterMap, roadMap, factionMap,
-                                     cityMap, split);
-
-                        const int done = subTilesCompleted.fetch_add(1, std::memory_order_relaxed) + 1;
-                        if (done % subProgressInterval == 0 || done == subTilesPerTile)
-                        {
-                            auto now = std::chrono::high_resolution_clock::now();
-                            double elapsed = std::chrono::duration<double>(now - tileStart).count();
-                            double eta = (elapsed / done) * (subTilesPerTile - done);
-                            LogP(std::format("[{}] Tile {}/{}: sub-tiles {} / {} ({:.1f}%) - ETA: {}",
-                                             MapName, tIdx + 1, totalTiles, done, subTilesPerTile,
-                                             100.0 * done / subTilesPerTile, Logger::FormatDuration(eta)));
-                        }
-                    }
-                }
-
-                Logger::EndProgress();
-
-                // Compact: pack non-null meshes to the front for merge
-                int meshIndex = 0;
-                for (int i = 0; i < subTilesPerTile; ++i)
-                {
-                    if (spmeshes[i])
-                    {
-                        if (meshIndex != i)
-                        {
-                            spmeshes[meshIndex] = spmeshes[i];
-                            sdmeshes[meshIndex] = sdmeshes[i];
-                            spmeshes[i] = nullptr;
-                            sdmeshes[i] = nullptr;
-                        }
-                        meshIndex++;
-                    }
-                }
-
-                if (meshIndex > 0)
-                {
-                    MergeAndAddTile(this, spmeshes.data(), sdmeshes.data(), meshIndex, subTilesPerTile, tX, tY,
-                                    tbbMin, tbbMax);
-                }
+                const double elapsed =
+                    std::chrono::duration<double>(std::chrono::steady_clock::now() - buildStart).count();
+                const double eta = (elapsed / done) * (totalTiles - done);
+                LogP(std::format("[{}] Building navmesh: {} / {} tiles ({:.1f}%) - ETA: {}", MapName, done,
+                                 totalTiles, 100.0 * done / totalTiles, Logger::FormatDuration(eta)));
             }
         }
 
-        {
-            auto now = std::chrono::high_resolution_clock::now();
-            double elapsed = std::chrono::duration<double>(now - buildStart).count();
-            LogS(std::format("[{}] Built {} tiles ({} sub-tiles each) in {}",
-                             MapName, totalTiles, subTilesPerTile, Logger::FormatDuration(elapsed)));
-        }
+        Logger::EndProgress();
 
-        if (IsDebug && !adtPixels.empty())
-        {
-            SaveDebugBmp(OutputDir, MapId, structure->bbMax, adtPixels.data());
-        }
+        const double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - buildStart).count();
+        Logger::Log(Statistics.failed.load() > 0 ? Logger::Level::Warning : Logger::Level::Success,
+                    std::format("[{}] Built {} tiles ({} empty, {} failed, {} needed coarser settings) in {}",
+                                MapName, Statistics.built.load(), Statistics.empty.load(), Statistics.failed.load(),
+                                Statistics.retried.load(), Logger::FormatDuration(elapsed)));
     }
 
 private:
-    // ── Sub-tile navmesh building (two-pass rasterization) ──
-    //
-    // Flattened with goto cleanup to ensure all Recast allocations
-    // are freed on every exit path (success or failure).
-    // Takes explicit rcContext* for thread-safe parallel execution.
-
-    inline bool BuildSubTile(rcContext* ctx, float* bbMin, float* bbMax, Structure* structure, rcPolyMesh** pmesh,
-                             rcPolyMeshDetail** dmesh, int stX, int stY, uint8_t* adtPixels, const WaterMap* waterMap,
-                             const RoadMap* roadMap, const FactionMap* factionMap, const CityMap* cityMap,
-                             const SplitGeometry& split) noexcept
+    Params MakeParams(int retry) const noexcept
     {
-        *pmesh = nullptr;
-        *dmesh = nullptr;
+        Params p{};
+        p.cs = TILESIZE / static_cast<float>(Config.meshResolution);
+        p.ch = p.cs;
+        p.walkableClimb = static_cast<int>(std::ceil(Config.agentClimb / p.ch));
+        p.walkableHeight = static_cast<int>(std::floor(Config.agentHeight / p.ch));
+        p.walkableRadius = static_cast<int>(std::ceil(Config.agentRadius / p.cs));
+        p.borderSize = p.walkableRadius + 3;
+        p.subTileSize = Config.subTileSize;
+        p.subTilesPerAxis = (Config.meshResolution + p.subTileSize - 1) / p.subTileSize;
+        p.width = p.subTileSize + p.borderSize * 2;
+        p.minRegionArea = Config.minRegionSize * Config.minRegionSize;
+        p.mergeRegionArea = Config.mergeRegionSize * Config.mergeRegionSize;
 
-        // ── Allocate heightfield and rasterize ──
-        rcHeightfield* heightField = rcAllocHeightfield();
-        if (!heightField)
-            return false;
-
-        if (!rcCreateHeightfield(ctx, *heightField, RcCfg.width, RcCfg.height, bbMin, bbMax, RcCfg.cs, RcCfg.ch))
-        {
-            rcFreeHeightField(heightField);
-            return false;
-        }
-
-        // Pass 1: Rasterize terrain-only triangles
-        if (split.TerrainTriCount() > 0)
-        {
-            rcRasterizeTriangles(ctx, structure->Verts(), static_cast<int>(structure->verts.size()),
-                                 split.terrainTris.data(), split.terrainAreas.data(), split.TerrainTriCount(),
-                                 *heightField, RcCfg.walkableClimb);
-        }
-
-        // Terrain filters - only see terrain spans. Water hasn't been rasterized yet,
-        // so ledge/height filters can't incorrectly clear water surfaces.
-        rcFilterLowHangingWalkableObstacles(ctx, RcCfg.walkableClimb, *heightField);
-        rcFilterLedgeSpans(ctx, RcCfg.walkableHeight, RcCfg.walkableClimb, *heightField);
-        rcFilterWalkableLowHeightSpans(ctx, RcCfg.walkableHeight, *heightField);
-
-        // Pass 2: Rasterize water-only triangles (AFTER filters).
-        // Water surface spans are added to the already-filtered heightfield.
-        if (split.WaterTriCount() > 0)
-        {
-            rcRasterizeTriangles(ctx, structure->Verts(), static_cast<int>(structure->verts.size()),
-                                 split.waterTris.data(), split.waterAreas.data(), split.WaterTriCount(),
-                                 *heightField, RcCfg.walkableClimb);
-        }
-
-        // ── Build compact heightfield ──
-        rcCompactHeightfield* chf = rcAllocCompactHeightfield();
-        if (!chf)
-        {
-            rcFreeHeightField(heightField);
-            return false;
-        }
-
-        if (!rcBuildCompactHeightfield(ctx, RcCfg.walkableHeight, RcCfg.walkableClimb, *heightField, *chf))
-        {
-            rcFreeCompactHeightfield(chf);
-            rcFreeHeightField(heightField);
-            return false;
-        }
-
-        // Heightfield no longer needed after compaction
-        rcFreeHeightField(heightField);
-
-        // ── Erode + median filter ──
-        if (!rcErodeWalkableArea(ctx, RcCfg.walkableRadius, *chf))
-        {
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        if (!rcMedianFilterWalkableArea(ctx, *chf))
-        {
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        // Mark water areas (rect-to-cell direct mapping).
-        // Restores water areas cleared by erosion/median at boundaries.
-        MarkWaterAreas(chf, waterMap, stX, stY, IsDebug, ctx);
-
-        // Mark road areas
-        MarkRoadAreas(chf, roadMap);
-
-        // Mark city areas (upgrades TERRAIN_GROUND → TERRAIN_CITY within city bounds).
-        // Runs after roads so that roads within cities stay TERRAIN_ROAD.
-        MarkCityAreas(chf, cityMap);
-
-        // Mark faction areas (upgrades neutral base IDs to Alliance/Horde variants).
-        // Must run after water, road, and city marking so all base area IDs are finalized.
-        MarkFactionAreas(chf, factionMap);
-
-        // Render to BMP (debug only)
-        if (IsDebug)
-        {
-            RenderSubTileToBmp(chf, adtPixels, stX, stY, RcCfg.tileSize, RcCfg.borderSize, RcCfg.width);
-        }
-
-        // ── Build regions → contours → polymesh ──
-        if (!rcBuildDistanceField(ctx, *chf))
-        {
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        if (!rcBuildRegions(ctx, *chf, RcCfg.borderSize, RcCfg.minRegionArea, RcCfg.mergeRegionArea))
-        {
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        rcContourSet* contourSet = rcAllocContourSet();
-        if (!contourSet)
-        {
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        if (!rcBuildContours(ctx, *chf, RcCfg.maxSimplificationError, RcCfg.maxEdgeLen, *contourSet))
-        {
-            rcFreeContourSet(contourSet);
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        // ── Build poly mesh ──
-        *pmesh = rcAllocPolyMesh();
-        if (!*pmesh)
-        {
-            rcFreeContourSet(contourSet);
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        if (!rcBuildPolyMesh(ctx, *contourSet, RcCfg.maxVertsPerPoly, **pmesh))
-        {
-            rcFreePolyMesh(*pmesh);
-            *pmesh = nullptr;
-            rcFreeContourSet(contourSet);
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        // Contour set no longer needed
-        rcFreeContourSet(contourSet);
-
-        // ── Build detail mesh ──
-        *dmesh = rcAllocPolyMeshDetail();
-        if (!*dmesh)
-        {
-            rcFreePolyMesh(*pmesh);
-            *pmesh = nullptr;
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        if (!rcBuildPolyMeshDetail(ctx, **pmesh, *chf, RcCfg.detailSampleDist, RcCfg.detailSampleMaxError, **dmesh))
-        {
-            rcFreePolyMeshDetail(*dmesh);
-            *dmesh = nullptr;
-            rcFreePolyMesh(*pmesh);
-            *pmesh = nullptr;
-            rcFreeCompactHeightfield(chf);
-            return false;
-        }
-
-        rcFreeCompactHeightfield(chf);
-        return true;
+        // Every retry trades detail for fewer vertices.
+        const float coarsen = 1.0f + static_cast<float>(retry);
+        p.maxEdgeLen = static_cast<int>(Config.maxEdgeLength * coarsen / p.cs);
+        p.maxSimplificationError = Config.maxSimplificationError * coarsen;
+        p.detailSampleDist = p.cs * Config.detailSampleDistance * coarsen;
+        p.detailSampleMaxError = p.ch * Config.detailSampleMaxError * coarsen;
+        return p;
     }
 
-    // ── Merge sub-tiles and add to navmesh ──
-
-    inline void MergeAndAddTile(rcContext* ctx, rcPolyMesh** spmeshes, rcPolyMeshDetail** sdmeshes, int meshIndex,
-                                int totalTileCount, int tX, int tY, const float* tbbMin, const float* tbbMax) noexcept
+    void TileBounds(const TileCoord& tile, float* bmin, float* bmax) const noexcept
     {
+        const float* orig = Writer->GetParams().orig;
+        bmin[0] = orig[0] + static_cast<float>(tile.x) * TILESIZE;
+        bmin[2] = orig[2] + static_cast<float>(tile.y) * TILESIZE;
+        bmax[0] = bmin[0] + TILESIZE;
+        bmax[2] = bmin[2] + TILESIZE;
+    }
+
+    static void TriangleBounds(const Structure& s, size_t tri, float* bmin, float* bmax) noexcept
+    {
+        const Tri& t = s.tris[tri];
+        const Vector3& a = s.verts[static_cast<size_t>(t.a)];
+        const Vector3& b = s.verts[static_cast<size_t>(t.b)];
+        const Vector3& c = s.verts[static_cast<size_t>(t.c)];
+
+        for (int i = 0; i < 3; ++i)
+        {
+            bmin[i] = std::min({a.pos[i], b.pos[i], c.pos[i]});
+            bmax[i] = std::max({a.pos[i], b.pos[i], c.pos[i]});
+        }
+    }
+
+    /// Assign each triangle to every tile its (padded) bounding box overlaps.
+    Buckets BucketTrianglesByTile(const Structure& s, const std::vector<TileCoord>& tiles, float padding) const
+    {
+        int minX = tiles[0].x, maxX = tiles[0].x, minY = tiles[0].y, maxY = tiles[0].y;
+
+        for (const auto& t : tiles)
+        {
+            minX = std::min(minX, t.x);
+            maxX = std::max(maxX, t.x);
+            minY = std::min(minY, t.y);
+            maxY = std::max(maxY, t.y);
+        }
+
+        const int gridW = maxX - minX + 1;
+        const int gridH = maxY - minY + 1;
+
+        // Grid cell -> index in `tiles` (or -1 if that tile isn't built).
+        std::vector<int> lookup(static_cast<size_t>(gridW) * gridH, -1);
+
+        for (size_t i = 0; i < tiles.size(); ++i)
+        {
+            lookup[static_cast<size_t>((tiles[i].x - minX) + (tiles[i].y - minY) * gridW)] = static_cast<int>(i);
+        }
+
+        const float* orig = Writer->GetParams().orig;
+
+        const auto forEachTile = [&](size_t tri, auto&& fn) {
+            float bmin[3], bmax[3];
+            TriangleBounds(s, tri, bmin, bmax);
+
+            // Clean() dropped such triangles already, the int conversions below must never see them.
+            if (!IsPlausibleCoordinate(bmin[0]) || !IsPlausibleCoordinate(bmax[0]) || !IsPlausibleCoordinate(bmin[2])
+                || !IsPlausibleCoordinate(bmax[2]))
+            {
+                return;
+            }
+
+            const int x0 = std::max(minX, static_cast<int>(std::floor((bmin[0] - padding - orig[0]) / TILESIZE)));
+            const int x1 = std::min(maxX, static_cast<int>(std::floor((bmax[0] + padding - orig[0]) / TILESIZE)));
+            const int y0 = std::max(minY, static_cast<int>(std::floor((bmin[2] - padding - orig[2]) / TILESIZE)));
+            const int y1 = std::min(maxY, static_cast<int>(std::floor((bmax[2] + padding - orig[2]) / TILESIZE)));
+
+            for (int y = y0; y <= y1; ++y)
+            {
+                for (int x = x0; x <= x1; ++x)
+                {
+                    if (const int idx = lookup[static_cast<size_t>((x - minX) + (y - minY) * gridW)]; idx >= 0)
+                    {
+                        fn(static_cast<size_t>(idx));
+                    }
+                }
+            }
+        };
+
+        Buckets buckets;
+        buckets.offsets.assign(tiles.size() + 1, 0);
+
+        for (size_t i = 0; i < s.tris.size(); ++i)
+        {
+            forEachTile(i, [&](size_t idx) { buckets.offsets[idx + 1]++; });
+        }
+
+        for (size_t i = 1; i < buckets.offsets.size(); ++i)
+        {
+            buckets.offsets[i] += buckets.offsets[i - 1];
+        }
+
+        buckets.items.resize(buckets.offsets.back());
+        std::vector<uint32_t> cursor(buckets.offsets.begin(), buckets.offsets.end() - 1);
+
+        for (size_t i = 0; i < s.tris.size(); ++i)
+        {
+            forEachTile(i, [&](size_t idx) { buckets.items[cursor[idx]++] = static_cast<uint32_t>(i); });
+        }
+
+        return buckets;
+    }
+
+    /// Assign a tile's triangles to the sub-tiles their (padded) bounds overlap.
+    static Buckets BucketTrianglesBySubTile(const Structure& s, const uint32_t* begin, const uint32_t* end,
+                                            const float* tileMin, const Params& p)
+    {
+        const int n = p.subTilesPerAxis;
+        const float subSize = static_cast<float>(p.subTileSize) * p.cs;
+        const float padding = static_cast<float>(p.borderSize) * p.cs;
+
+        const auto range = [&](float lo, float hi, float origin, int& i0, int& i1) {
+            // Conservative by one sub-tile on the low side, the rasterizer culls exactly anyway.
+            i0 = std::max(0, static_cast<int>(std::floor((lo - origin - padding) / subSize)) - 1);
+            i1 = std::min(n - 1, static_cast<int>(std::floor((hi - origin + padding) / subSize)));
+        };
+
+        Buckets buckets;
+        buckets.offsets.assign(static_cast<size_t>(n) * n + 1, 0);
+
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            std::vector<uint32_t> cursor;
+
+            if (pass == 1)
+            {
+                for (size_t i = 1; i < buckets.offsets.size(); ++i)
+                {
+                    buckets.offsets[i] += buckets.offsets[i - 1];
+                }
+
+                buckets.items.resize(buckets.offsets.back());
+                cursor.assign(buckets.offsets.begin(), buckets.offsets.end() - 1);
+            }
+
+            for (const uint32_t* it = begin; it != end; ++it)
+            {
+                float bmin[3], bmax[3];
+                TriangleBounds(s, *it, bmin, bmax);
+
+                int x0, x1, z0, z1;
+                range(bmin[0], bmax[0], tileMin[0], x0, x1);
+                range(bmin[2], bmax[2], tileMin[2], z0, z1);
+
+                for (int z = z0; z <= z1; ++z)
+                {
+                    for (int x = x0; x <= x1; ++x)
+                    {
+                        const size_t bucket = static_cast<size_t>(x + z * n);
+
+                        if (pass == 0)
+                        {
+                            buckets.offsets[bucket + 1]++;
+                        }
+                        else
+                        {
+                            buckets.items[cursor[bucket]++] = *it;
+                        }
+                    }
+                }
+            }
+        }
+
+        return buckets;
+    }
+
+    void BuildTile(Structure& s, const TileCoord& tile, const Buckets& tileBuckets, size_t tileIndex,
+                   const WaterMap* waterMap, const RoadMap* roadMap, const FactionMap* factionMap,
+                   const CityMap* cityMap, bool parallelSubTiles) noexcept
+    {
+        try
+        {
+            if (tileBuckets.Count(tileIndex) == 0)
+            {
+                Statistics.empty.fetch_add(1, std::memory_order_relaxed);
+                return;
+            }
+
+            float tbbMin[3]{};
+            float tbbMax[3]{};
+            TileBounds(tile, tbbMin, tbbMax);
+
+            // Vertical bounds from this tile's triangles only: spans store heights with 13 bits
+            // (8191 * ch ~ 1700 yards), a map wide range would clamp high terrain.
+            tbbMin[1] = std::numeric_limits<float>::max();
+            tbbMax[1] = std::numeric_limits<float>::lowest();
+
+            for (const uint32_t* it = tileBuckets.Begin(tileIndex); it != tileBuckets.End(tileIndex); ++it)
+            {
+                float bmin[3], bmax[3];
+                TriangleBounds(s, *it, bmin, bmax);
+                tbbMin[1] = std::min(tbbMin[1], bmin[1]);
+                tbbMax[1] = std::max(tbbMax[1], bmax[1]);
+            }
+
+            tbbMin[1] -= 1.0f;
+            tbbMax[1] += 1.0f;
+
+            const Params base = MakeParams(0);
+
+            if ((tbbMax[1] - tbbMin[1]) / base.ch > RC_SPAN_MAX_HEIGHT)
+            {
+                LogW(std::format("[{}] Tile {},{}: height range {:.0f} exceeds the heightfield limit, clamping",
+                                 MapName, tile.adtX, tile.adtY, tbbMax[1] - tbbMin[1]));
+                tbbMax[1] = tbbMin[1] + RC_SPAN_MAX_HEIGHT * base.ch;
+            }
+
+            const Buckets subBuckets =
+                BucketTrianglesBySubTile(s, tileBuckets.Begin(tileIndex), tileBuckets.End(tileIndex), tbbMin, base);
+
+            for (int retry = 0; retry <= Config.maxRetries; ++retry)
+            {
+                const Params p = MakeParams(retry);
+                const BuildResult result = BuildTileAttempt(s, tile, tbbMin, tbbMax, subBuckets, p, waterMap,
+                                                            roadMap, factionMap, cityMap, parallelSubTiles,
+                                                            Config.debugBmp && retry == 0);
+
+                if (result == BuildResult::Built)
+                {
+                    Statistics.built.fetch_add(1, std::memory_order_relaxed);
+
+                    if (retry > 0)
+                    {
+                        Statistics.retried.fetch_add(1, std::memory_order_relaxed);
+                        LogW(std::format("[{}] Tile {},{}: built with coarser settings (level {})", MapName,
+                                         tile.adtX, tile.adtY, retry));
+                    }
+
+                    return;
+                }
+
+                if (result == BuildResult::Empty)
+                {
+                    Statistics.empty.fetch_add(1, std::memory_order_relaxed);
+                    return;
+                }
+
+                if (result == BuildResult::Failed)
+                {
+                    break;
+                }
+
+                // BuildResult::TooDetailed -> retry coarser.
+            }
+
+            Statistics.failed.fetch_add(1, std::memory_order_relaxed);
+            LogE(std::format("[{}] Tile {},{}: failed to build a valid Detour tile", MapName, tile.adtX, tile.adtY));
+        }
+        catch (const std::exception& e)
+        {
+            Statistics.failed.fetch_add(1, std::memory_order_relaxed);
+            LogE(std::format("[{}] Tile {},{}: {}", MapName, tile.adtX, tile.adtY, e.what()));
+        }
+    }
+
+    enum class BuildResult
+    {
+        Built,
+        Empty,
+        TooDetailed, // exceeds Detour's 16 bit vertex/poly limits
+        Failed,
+    };
+
+    BuildResult BuildTileAttempt(Structure& s, const TileCoord& tile, const float* tbbMin, const float* tbbMax,
+                                 const Buckets& subBuckets, const Params& p, const WaterMap* waterMap,
+                                 const RoadMap* roadMap, const FactionMap* factionMap, const CityMap* cityMap,
+                                 [[maybe_unused]] bool parallelSubTiles, bool debugBmp)
+    {
+        const int subTileCount = p.subTilesPerAxis * p.subTilesPerAxis;
+        std::vector<rcPolyMesh*> pmeshes(static_cast<size_t>(subTileCount), nullptr);
+        std::vector<rcPolyMeshDetail*> dmeshes(static_cast<size_t>(subTileCount), nullptr);
+        std::vector<uint8_t> pixels;
+
+        if (debugBmp)
+        {
+            pixels.assign(static_cast<size_t>(Config.meshResolution) * Config.meshResolution * 3, 0);
+        }
+
+        const float subSize = static_cast<float>(p.subTileSize) * p.cs;
+        const float padding = static_cast<float>(p.borderSize) * p.cs;
+
+#pragma omp parallel if (parallelSubTiles)
+        {
+            RecastLogContext ctx;
+            Scratch scratch;
+
+#pragma omp for schedule(dynamic, 4)
+            for (int st = 0; st < subTileCount; ++st)
+            {
+                if (subBuckets.Count(static_cast<size_t>(st)) == 0)
+                {
+                    continue;
+                }
+
+                const int stX = st % p.subTilesPerAxis;
+                const int stY = st / p.subTilesPerAxis;
+
+                float bmin[3]{tbbMin[0] + stX * subSize - padding, tbbMin[1], tbbMin[2] + stY * subSize - padding};
+                float bmax[3]{tbbMin[0] + (stX + 1) * subSize + padding, tbbMax[1],
+                              tbbMin[2] + (stY + 1) * subSize + padding};
+
+                GatherSubTileTriangles(s, subBuckets, static_cast<size_t>(st), scratch);
+
+                BuildSubTile(&ctx, s, scratch, bmin, bmax, p, &pmeshes[static_cast<size_t>(st)],
+                             &dmeshes[static_cast<size_t>(st)], stX, stY, pixels.empty() ? nullptr : pixels.data(),
+                             waterMap, roadMap, factionMap, cityMap);
+            }
+        }
+
+        if (!pixels.empty())
+        {
+            SaveDebugBmp(OutputDir, Writer->GetMapId(), tile.adtX, tile.adtY, Config.meshResolution, pixels.data());
+        }
+
+        // Compact the non-empty meshes to the front for merging.
+        int meshCount = 0;
+        int vertexUpperBound = 0;
+
+        for (int i = 0; i < subTileCount; ++i)
+        {
+            if (pmeshes[static_cast<size_t>(i)] && dmeshes[static_cast<size_t>(i)]
+                && pmeshes[static_cast<size_t>(i)]->npolys > 0)
+            {
+                vertexUpperBound += pmeshes[static_cast<size_t>(i)]->nverts;
+                std::swap(pmeshes[static_cast<size_t>(meshCount)], pmeshes[static_cast<size_t>(i)]);
+                std::swap(dmeshes[static_cast<size_t>(meshCount)], dmeshes[static_cast<size_t>(i)]);
+                meshCount++;
+            }
+        }
+
+        const auto freeSubMeshes = [&]() {
+            for (int i = 0; i < subTileCount; ++i)
+            {
+                rcFreePolyMesh(pmeshes[static_cast<size_t>(i)]);
+                rcFreePolyMeshDetail(dmeshes[static_cast<size_t>(i)]);
+            }
+        };
+
+        if (meshCount == 0)
+        {
+            freeSubMeshes();
+            return BuildResult::Empty;
+        }
+
+        RecastLogContext ctx;
+
+        // rcMergePolyMeshes truncates vertex indices beyond 16 bits (and logs "Data can be corrupted").
+        // Merging dedupes shared border vertices, so the sum is only an upper bound; stay quiet while
+        // probing and check the merged result instead.
+        if (vertexUpperBound >= Config.maxTileVertices)
+        {
+            ctx.enableLog(false);
+        }
+
         rcPolyMesh* pmesh = rcAllocPolyMesh();
         rcPolyMeshDetail* dmesh = rcAllocPolyMeshDetail();
 
-        bool merged = rcMergePolyMeshes(ctx, spmeshes, meshIndex, *pmesh) &&
-                      rcMergePolyMeshDetails(ctx, sdmeshes, meshIndex, *dmesh);
+        const bool merged = pmesh && dmesh && rcMergePolyMeshes(&ctx, pmeshes.data(), meshCount, *pmesh)
+                            && rcMergePolyMeshDetails(&ctx, dmeshes.data(), meshCount, *dmesh);
 
-        // Always free sub-tile meshes - whether merge succeeded or not
-        for (int i = 0; i < totalTileCount; i++)
+        freeSubMeshes();
+
+        const auto cleanup = [&]() {
+            rcFreePolyMesh(pmesh);
+            rcFreePolyMeshDetail(dmesh);
+        };
+
+        if (!merged)
         {
-            rcFreePolyMesh(spmeshes[i]);
-            spmeshes[i] = nullptr;
-            rcFreePolyMeshDetail(sdmeshes[i]);
-            sdmeshes[i] = nullptr;
+            cleanup();
+            return vertexUpperBound >= Config.maxTileVertices ? BuildResult::TooDetailed : BuildResult::Failed;
         }
 
-        if (merged)
+        if (pmesh->nverts > Config.maxTileVertices || pmesh->npolys >= 0xffff)
         {
-            // ── Snap boundary vertices & detect portal edges ──
-            //
-            // Recast already subtracts borderSize from contour vertex coords
-            // (RecastContour.cpp line 976), so after rcMergePolyMeshes the
-            // merged vertices are in contour-set space: 0..tileSize per
-            // sub-tile, offset by the merge's (ox,oz) to 0..tw for the full
-            // tile.  No additional shift is needed.
-            //
-            // However, rcMergePolyMeshes calls buildMeshAdjacency which
-            // re-initialises all adjacency to 0xffff, wiping any portal
-            // flags that rcBuildPolyMesh set on individual sub-tiles.
-            // We must re-detect portal edges on the merged mesh.
-            const int tw = static_cast<int>(roundf(TILESIZE / RcCfg.cs));
-            const int th = tw;
-
-            // Snap vertices near tile boundaries to exact edge positions.
-            // Contour simplification can nudge boundary vertices by up to
-            // maxSimplificationError cells; without snapping the exact-
-            // equality portal check would miss them.
-            const int snapDist = static_cast<int>(ceilf(RcCfg.maxSimplificationError)) + 1;
-
-            for (int i = 0; i < pmesh->nverts; ++i)
-            {
-                int x = static_cast<int>(pmesh->verts[i * 3 + 0]);
-                int z = static_cast<int>(pmesh->verts[i * 3 + 2]);
-
-                if (x < snapDist) x = 0;
-                else if (x > tw - snapDist) x = tw;
-
-                if (z < snapDist) z = 0;
-                else if (z > th - snapDist) z = th;
-
-                pmesh->verts[i * 3 + 0] = static_cast<unsigned short>(x);
-                pmesh->verts[i * 3 + 2] = static_cast<unsigned short>(z);
-            }
-
-            // Align bounds to the tile grid (horizontal only; keep Y from mesh).
-            // Needed for Detour neighbour lookup which relies on exact bmin/bmax.
-            pmesh->bmin[0] = tbbMin[0];
-            pmesh->bmin[2] = tbbMin[2];
-            pmesh->bmax[0] = tbbMax[0];
-            pmesh->bmax[2] = tbbMax[2];
-
-            // Mark portal edges: unconnected edges on the tile boundary get
-            // portal flags so Detour can link adjacent tiles at runtime.
-            for (int i = 0; i < pmesh->npolys; ++i)
-            {
-                unsigned short* p = &pmesh->polys[i * 2 * pmesh->nvp];
-                for (int j = 0; j < pmesh->nvp; ++j)
-                {
-                    if (p[j] == RC_MESH_NULL_IDX) break;
-                    if (p[pmesh->nvp + j] != RC_MESH_NULL_IDX) continue;
-
-                    int nj = j + 1;
-                    if (nj >= pmesh->nvp || p[nj] == RC_MESH_NULL_IDX) nj = 0;
-
-                    const unsigned short* va = &pmesh->verts[p[j] * 3];
-                    const unsigned short* vb = &pmesh->verts[p[nj] * 3];
-
-                    if      (va[0] == 0  && vb[0] == 0)  p[pmesh->nvp + j] = 0x8000 | 0; // Portal x-
-                    else if (va[2] == th && vb[2] == th)  p[pmesh->nvp + j] = 0x8000 | 1; // Portal z+
-                    else if (va[0] == tw && vb[0] == tw)  p[pmesh->nvp + j] = 0x8000 | 2; // Portal x+
-                    else if (va[2] == 0  && vb[2] == 0)   p[pmesh->nvp + j] = 0x8000 | 3; // Portal z-
-                }
-            }
-
-            AssignPolyFlags(pmesh);
-
-            dtNavMeshCreateParams params{0};
-            params.verts = pmesh->verts;
-            params.vertCount = pmesh->nverts;
-            params.polys = pmesh->polys;
-            params.polyAreas = pmesh->areas;
-            params.polyFlags = pmesh->flags;
-            params.polyCount = pmesh->npolys;
-            params.nvp = pmesh->nvp;
-            params.detailMeshes = dmesh->meshes;
-            params.detailVerts = dmesh->verts;
-            params.detailVertsCount = dmesh->nverts;
-            params.detailTris = dmesh->tris;
-            params.detailTriCount = dmesh->ntris;
-
-            rcVcopy(params.bmin, pmesh->bmin);
-            rcVcopy(params.bmax, pmesh->bmax);
-
-            params.tileX = tX;
-            params.tileY = tY;
-            params.cs = RcCfg.cs;
-            params.ch = RcCfg.ch;
-            params.tileLayer = 0;
-            params.buildBvTree = true;
-
-            params.walkableHeight = 2.0f;
-            params.walkableRadius = 0.6f;
-            params.walkableClimb = 1.2f;
-
-            unsigned char* navData = nullptr;
-            int navDataSize = 0;
-            dtTileRef tile;
-
-            if (dtCreateNavMeshData(&params, &navData, &navDataSize))
-            {
-                if (dtStatusFailed(Navmesh->AddTile(params.tileX, params.tileY, navData, navDataSize, &tile)))
-                {
-                    dtFree(navData);
-                }
-            }
+            cleanup();
+            return BuildResult::TooDetailed;
         }
 
-        rcFreePolyMesh(pmesh);
-        rcFreePolyMeshDetail(dmesh);
+        FinalizeMergedMesh(pmesh, tbbMin, tbbMax, p);
+
+        dtNavMeshCreateParams params{};
+        params.verts = pmesh->verts;
+        params.vertCount = pmesh->nverts;
+        params.polys = pmesh->polys;
+        params.polyAreas = pmesh->areas;
+        params.polyFlags = pmesh->flags;
+        params.polyCount = pmesh->npolys;
+        params.nvp = pmesh->nvp;
+        params.detailMeshes = dmesh->meshes;
+        params.detailVerts = dmesh->verts;
+        params.detailVertsCount = dmesh->nverts;
+        params.detailTris = dmesh->tris;
+        params.detailTriCount = dmesh->ntris;
+        rcVcopy(params.bmin, pmesh->bmin);
+        rcVcopy(params.bmax, pmesh->bmax);
+        params.tileX = tile.x;
+        params.tileY = tile.y;
+        params.tileLayer = 0;
+        params.cs = p.cs;
+        params.ch = p.ch;
+        params.buildBvTree = true;
+        params.walkableHeight = Config.agentHeight;
+        params.walkableRadius = Config.agentRadius;
+        params.walkableClimb = Config.agentClimb;
+
+        unsigned char* navData = nullptr;
+        int navDataSize = 0;
+        const bool created = dtCreateNavMeshData(&params, &navData, &navDataSize);
+        cleanup();
+
+        if (!created)
+        {
+            return BuildResult::TooDetailed;
+        }
+
+        const bool stored = Writer->AddTile(navData, navDataSize);
+        dtFree(navData);
+        return stored ? BuildResult::Built : BuildResult::Failed;
     }
 
-    // ── Assign navmesh poly flags from area IDs ──
-
-    inline void AssignPolyFlags(rcPolyMesh* pmesh) noexcept
+    /// Copy the sub-tile's terrain and water triangles into contiguous Recast index/area arrays.
+    static void GatherSubTileTriangles(Structure& s, const Buckets& subBuckets, size_t subTile, Scratch& scratch)
     {
-        for (int p = 0; p < pmesh->npolys; ++p)
+        scratch.terrainTris.clear();
+        scratch.terrainAreas.clear();
+        scratch.waterTris.clear();
+        scratch.waterAreas.clear();
+
+        for (const uint32_t* it = subBuckets.Begin(subTile); it != subBuckets.End(subTile); ++it)
         {
-            if (TriAreaId area = static_cast<TriAreaId>(pmesh->areas[p] & 63))
+            const Tri& t = s.tris[*it];
+            const unsigned char area = s.triTypes[*it];
+            const bool water = IsLiquidArea(area);
+
+            auto& tris = water ? scratch.waterTris : scratch.terrainTris;
+            auto& areas = water ? scratch.waterAreas : scratch.terrainAreas;
+            tris.insert(tris.end(), {t.a, t.b, t.c});
+            areas.push_back(area);
+        }
+    }
+
+    bool BuildSubTile(rcContext* ctx, Structure& s, const Scratch& scratch, const float* bmin, const float* bmax,
+                      const Params& p, rcPolyMesh** pmeshOut, rcPolyMeshDetail** dmeshOut, int stX, int stY,
+                      uint8_t* pixels, const WaterMap* waterMap, const RoadMap* roadMap,
+                      const FactionMap* factionMap, const CityMap* cityMap) const noexcept
+    {
+        *pmeshOut = nullptr;
+        *dmeshOut = nullptr;
+
+        rcHeightfield* hf = nullptr;
+        rcCompactHeightfield* chf = nullptr;
+        rcContourSet* cset = nullptr;
+        rcPolyMesh* pmesh = nullptr;
+        rcPolyMeshDetail* dmesh = nullptr;
+
+        const auto cleanup = [&](bool keepMeshes) {
+            rcFreeHeightField(hf);
+            rcFreeCompactHeightfield(chf);
+            rcFreeContourSet(cset);
+
+            if (!keepMeshes)
             {
-                switch (area)
-                {
-                    case LIQUID_LAVA:
-                    case LIQUID_SLIME:
-                        pmesh->flags[p] = NAV_LAVA_SLIME;
-                        break;
-                    case ALLIANCE_LIQUID_SLIME:
-                    case ALLIANCE_LIQUID_LAVA:
-                        pmesh->flags[p] = NAV_LAVA_SLIME | NAV_ALLIANCE;
-                        break;
-                    case HORDE_LIQUID_LAVA:
-                    case HORDE_LIQUID_SLIME:
-                        pmesh->flags[p] = NAV_LAVA_SLIME | NAV_HORDE;
-                        break;
-                    case LIQUID_WATER:
-                    case LIQUID_OCEAN:
-                        pmesh->flags[p] = NAV_WATER;
-                        break;
-                    case ALLIANCE_LIQUID_WATER:
-                    case ALLIANCE_LIQUID_OCEAN:
-                        pmesh->flags[p] = NAV_WATER | NAV_ALLIANCE;
-                        break;
-                    case HORDE_LIQUID_WATER:
-                    case HORDE_LIQUID_OCEAN:
-                        pmesh->flags[p] = NAV_WATER | NAV_HORDE;
-                        break;
-                    case TERRAIN_GROUND:
-                    case TERRAIN_CITY:
-                    case WMO:
-                    case DOODAD:
-                        pmesh->flags[p] = NAV_GROUND;
-                        break;
-                    case TERRAIN_ROAD:
-                        pmesh->flags[p] = NAV_GROUND | NAV_ROAD;
-                        break;
-                    case ALLIANCE_TERRAIN_GROUND:
-                    case ALLIANCE_TERRAIN_CITY:
-                    case ALLIANCE_WMO:
-                    case ALLIANCE_DOODAD:
-                        pmesh->flags[p] = NAV_GROUND | NAV_ALLIANCE;
-                        break;
-                    case ALLIANCE_TERRAIN_ROAD:
-                        pmesh->flags[p] = NAV_GROUND | NAV_ROAD | NAV_ALLIANCE;
-                        break;
-                    case HORDE_TERRAIN_GROUND:
-                    case HORDE_TERRAIN_CITY:
-                    case HORDE_WMO:
-                    case HORDE_DOODAD:
-                        pmesh->flags[p] = NAV_GROUND | NAV_HORDE;
-                        break;
-                    case HORDE_TERRAIN_ROAD:
-                        pmesh->flags[p] = NAV_GROUND | NAV_ROAD | NAV_HORDE;
-                        break;
-                    default:
-                        break;
-                }
+                rcFreePolyMesh(pmesh);
+                rcFreePolyMeshDetail(dmesh);
             }
+        };
+
+        const int nverts = static_cast<int>(s.verts.size());
+
+        hf = rcAllocHeightfield();
+
+        if (!hf || !rcCreateHeightfield(ctx, *hf, p.width, p.width, bmin, bmax, p.cs, p.ch))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        // Pass 1: terrain, then the terrain filters. Water isn't rasterized yet so the ledge/height
+        // filters can't clear water surfaces.
+        if (!scratch.terrainAreas.empty()
+            && !rcRasterizeTriangles(ctx, s.Verts(), nverts, scratch.terrainTris.data(), scratch.terrainAreas.data(),
+                                     static_cast<int>(scratch.terrainAreas.size()), *hf, p.walkableClimb))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        rcFilterLowHangingWalkableObstacles(ctx, p.walkableClimb, *hf);
+        rcFilterLedgeSpans(ctx, p.walkableHeight, p.walkableClimb, *hf);
+        rcFilterWalkableLowHeightSpans(ctx, p.walkableHeight, *hf);
+
+        // Pass 2: water surfaces.
+        if (!scratch.waterAreas.empty()
+            && !rcRasterizeTriangles(ctx, s.Verts(), nverts, scratch.waterTris.data(), scratch.waterAreas.data(),
+                                     static_cast<int>(scratch.waterAreas.size()), *hf, p.walkableClimb))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        chf = rcAllocCompactHeightfield();
+
+        if (!chf || !rcBuildCompactHeightfield(ctx, p.walkableHeight, p.walkableClimb, *hf, *chf))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        rcFreeHeightField(hf);
+        hf = nullptr;
+
+        if (chf->spanCount == 0)
+        {
+            cleanup(false);
+            return false;
+        }
+
+        if (!rcErodeWalkableArea(ctx, p.walkableRadius, *chf) || !rcMedianFilterWalkableArea(ctx, *chf))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        // Water first (restores shores cleared by erosion), roads before cities (roads in cities stay roads),
+        // factions last (all base ids final).
+        MarkWaterAreas(chf, waterMap);
+        MarkRoadAreas(chf, roadMap);
+        MarkCityAreas(chf, cityMap);
+        MarkFactionAreas(chf, factionMap);
+
+        if (pixels)
+        {
+            RenderSubTileToBmp(chf, pixels, Config.meshResolution, stX, stY, p.subTileSize, p.borderSize, p.width);
+        }
+
+        if (!rcBuildDistanceField(ctx, *chf)
+            || !rcBuildRegions(ctx, *chf, p.borderSize, p.minRegionArea, p.mergeRegionArea))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        cset = rcAllocContourSet();
+
+        if (!cset || !rcBuildContours(ctx, *chf, p.maxSimplificationError, p.maxEdgeLen, *cset) || cset->nconts == 0)
+        {
+            cleanup(false);
+            return false;
+        }
+
+        pmesh = rcAllocPolyMesh();
+
+        if (!pmesh || !rcBuildPolyMesh(ctx, *cset, DT_VERTS_PER_POLYGON, *pmesh))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        dmesh = rcAllocPolyMeshDetail();
+
+        if (!dmesh || !rcBuildPolyMeshDetail(ctx, *pmesh, *chf, p.detailSampleDist, p.detailSampleMaxError, *dmesh))
+        {
+            cleanup(false);
+            return false;
+        }
+
+        *pmeshOut = pmesh;
+        *dmeshOut = dmesh;
+        cleanup(true);
+        return true;
+    }
+
+    /// Make the merged poly mesh a proper Detour tile: tile-relative vertex coordinates, exact tile bounds,
+    /// portal flags on the tile border and poly flags from the area ids.
+    static void FinalizeMergedMesh(rcPolyMesh* pmesh, const float* tbbMin, const float* tbbMax,
+                                   const Params& p) noexcept
+    {
+        const int tw = static_cast<int>(std::lround(TILESIZE / p.cs));
+        const int th = tw;
+
+        // rcMergePolyMeshes stores vertices relative to the min corner of the *merged sub-meshes*. When the
+        // first sub-tile row/column is empty that corner isn't the tile corner, shift the vertices so they
+        // are relative to the tile bounds we set below (otherwise the whole tile would be misplaced).
+        const int offsetX = static_cast<int>(std::lround((pmesh->bmin[0] - tbbMin[0]) / p.cs));
+        const int offsetZ = static_cast<int>(std::lround((pmesh->bmin[2] - tbbMin[2]) / p.cs));
+
+        // Snap vertices near the tile border onto it. Contour simplification can nudge border vertices
+        // by up to maxSimplificationError cells, which would break the exact portal edge test below.
+        const int snapDist = static_cast<int>(std::ceil(p.maxSimplificationError)) + 1;
+
+        for (int i = 0; i < pmesh->nverts; ++i)
+        {
+            unsigned short* v = &pmesh->verts[i * 3];
+            int x = static_cast<int>(v[0]) + offsetX;
+            int z = static_cast<int>(v[2]) + offsetZ;
+
+            if (x < snapDist)
+                x = 0;
+            else if (x > tw - snapDist)
+                x = tw;
+
+            if (z < snapDist)
+                z = 0;
+            else if (z > th - snapDist)
+                z = th;
+
+            v[0] = static_cast<unsigned short>(std::clamp(x, 0, 0xffff));
+            v[2] = static_cast<unsigned short>(std::clamp(z, 0, 0xffff));
+        }
+
+        // Exact tile bounds (horizontal), Detour's neighbour linking relies on them.
+        pmesh->bmin[0] = tbbMin[0];
+        pmesh->bmin[2] = tbbMin[2];
+        pmesh->bmax[0] = tbbMax[0];
+        pmesh->bmax[2] = tbbMax[2];
+
+        // rcMergePolyMeshes rebuilt the adjacency and dropped the sub-meshes' portal flags.
+        // Unconnected edges on the tile border become portals so Detour can link neighbour tiles.
+        for (int i = 0; i < pmesh->npolys; ++i)
+        {
+            unsigned short* poly = &pmesh->polys[i * 2 * pmesh->nvp];
+
+            for (int j = 0; j < pmesh->nvp; ++j)
+            {
+                if (poly[j] == RC_MESH_NULL_IDX)
+                    break;
+
+                if (poly[pmesh->nvp + j] != RC_MESH_NULL_IDX)
+                    continue;
+
+                int nj = j + 1;
+
+                if (nj >= pmesh->nvp || poly[nj] == RC_MESH_NULL_IDX)
+                    nj = 0;
+
+                const unsigned short* va = &pmesh->verts[poly[j] * 3];
+                const unsigned short* vb = &pmesh->verts[poly[nj] * 3];
+
+                if (va[0] == 0 && vb[0] == 0)
+                    poly[pmesh->nvp + j] = 0x8000 | 0; // x-
+                else if (va[2] == th && vb[2] == th)
+                    poly[pmesh->nvp + j] = 0x8000 | 1; // z+
+                else if (va[0] == tw && vb[0] == tw)
+                    poly[pmesh->nvp + j] = 0x8000 | 2; // x+
+                else if (va[2] == 0 && vb[2] == 0)
+                    poly[pmesh->nvp + j] = 0x8000 | 3; // z-
+            }
+        }
+
+        for (int i = 0; i < pmesh->npolys; ++i)
+        {
+            pmesh->flags[i] = AreaToPolyFlags(pmesh->areas[i] & RC_WALKABLE_AREA);
         }
     }
 };

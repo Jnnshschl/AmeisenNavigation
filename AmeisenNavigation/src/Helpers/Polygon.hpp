@@ -1,126 +1,107 @@
 #pragma once
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 #include <numbers>
-#include <random>
-
+#include <span>
+#include <vector>
 
 #include "../Utils/Vector3.hpp"
-#include "../Utils/VectorUtils.hpp"
 
-
+/// 2D polygon helpers (x/y plane) used by EXPLORE_POLY.
 namespace PolygonMath {
-constexpr inline bool IsInside2D(const Vector3* vertices, int vertexCount, const Vector3& p) noexcept
+/// Even-odd point in polygon test in the x/y plane.
+inline bool IsInside2D(const Vector3* vertices, int vertexCount, const Vector3& p) noexcept
 {
-    int count = 0;
+    bool inside = false;
 
-    for (int i = 0; i < vertexCount; ++i)
+    for (int i = 0, j = vertexCount - 1; i < vertexCount; j = i++)
     {
-        int next = (i + 1) % vertexCount;
+        const Vector3& a = vertices[i];
+        const Vector3& b = vertices[j];
 
-        if (((vertices[i].y <= p.y && p.y < vertices[next].y) || (vertices[next].y <= p.y && p.y < vertices[i].y)) &&
-            (p.x < (vertices[next].x - vertices[i].x) * (p.y - vertices[i].y) / (vertices[next].y - vertices[i].y) +
-                       vertices[i].x))
+        if (((a.y > p.y) != (b.y > p.y)) && (p.x < (b.x - a.x) * (p.y - a.y) / (b.y - a.y) + a.x))
         {
-            count++;
+            inside = !inside;
         }
     }
 
-    return count % 2 == 1;
+    return inside;
 }
 
-constexpr inline bool CheckMinDistance(const Vector3& p, const Vector3* points, const int pointCount,
-                                       float minDistance) noexcept
+/// Points of a hexagonal grid (`spacing` apart) inside a polygon. Every point of the polygon lies within
+/// spacing / sqrt(3) of a sample, the densest coverage for the number of points. Deterministic.
+/// Returns an empty vector if more than maxPointCount points would be needed. Polygons too narrow for
+/// the grid get their vertex centroid (if it is inside).
+inline std::vector<Vector3> HexGridSampling(std::span<const Vector3> polygon, float spacing, size_t maxPointCount)
 {
-    for (int i = 0; i < pointCount; ++i)
+    std::vector<Vector3> points;
+    const int vertexCount = static_cast<int>(polygon.size());
+
+    if (vertexCount < 3 || !(spacing > 0.0f) || !std::isfinite(spacing) || maxPointCount == 0)
     {
-        if (dtVdist(p, points[i]) < minDistance)
-        {
-            return false;
-        }
+        return points;
     }
 
-    return true;
-}
+    float minX = std::numeric_limits<float>::max();
+    float minY = std::numeric_limits<float>::max();
+    float maxX = std::numeric_limits<float>::lowest();
+    float maxY = std::numeric_limits<float>::lowest();
+    Vector3 centroid;
 
-/// Generate evenly-spaced sample points inside a polygon using Bridson's Poisson Disk Sampling.
-static void BridsonsPoissonDiskSampling(const Vector3* vertices, int vertexCount, Vector3* pointBuffer, int* pointCount,
-                                        Vector3* tempBuffer, int maxNodeCount, float minDistance,
-                                        int numCandidates = 30) noexcept
-{
-    thread_local std::mt19937 rng{ std::random_device{}() };
-    std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
-
-    auto maxX = std::numeric_limits<float>::min();
-    auto maxY = std::numeric_limits<float>::min();
-    auto minX = std::numeric_limits<float>::max();
-    auto minY = std::numeric_limits<float>::max();
-
-    for (int i = 0; i < vertexCount; ++i)
+    for (const Vector3& v : polygon)
     {
-        maxX = std::max(maxX, vertices[i].x);
-        maxY = std::max(maxY, vertices[i].y);
-        minX = std::min(minX, vertices[i].x);
-        minY = std::min(minY, vertices[i].y);
+        minX = std::min(minX, v.x);
+        minY = std::min(minY, v.y);
+        maxX = std::max(maxX, v.x);
+        maxY = std::max(maxY, v.y);
+        centroid.x += v.x / static_cast<float>(vertexCount);
+        centroid.y += v.y / static_cast<float>(vertexCount);
     }
 
-    Vector3 initialPoint;
+    const float rowHeight = spacing * std::numbers::sqrt3_v<float> / 2.0f;
+    const double rows = std::floor((maxY - minY) / rowHeight) + 1.0;
+    const double columns = std::floor((maxX - minX) / spacing) + 2.0;
 
-    do
+    // Bail out before looping over a huge grid (the caller picks a bigger spacing).
+    if (!std::isfinite(rows * columns) || rows * columns > static_cast<double>(maxPointCount) * 16.0 + 64.0)
     {
-        initialPoint.x = distribution(rng) * (maxX - minX) + minX;
-        initialPoint.y = distribution(rng) * (maxY - minY) + minY;
-    } while (!IsInside2D(vertices, vertexCount, initialPoint));
+        return points;
+    }
 
-    *pointCount = 0;
-    InsertVector3(pointBuffer, *pointCount, &initialPoint);
+    // Center the grid inside the bounding box.
+    const float y0 = minY + std::fmod(maxY - minY, rowHeight) / 2.0f;
+    const float x0 = minX + std::fmod(maxX - minX, spacing) / 2.0f;
 
-    int activeCount = 0;
-    InsertVector3(tempBuffer, activeCount, &initialPoint);
-
-    const auto cellSize = minDistance / std::sqrtf(2.0f);
-    const auto gridSizeX = static_cast<int>(std::ceilf((maxX - minX) / cellSize));
-    const auto gridSizeY = static_cast<int>(std::ceilf((maxY - minY) / cellSize));
-
-    std::vector<std::vector<bool>> grid(gridSizeX, std::vector<bool>(gridSizeY, false));
-
-    while (activeCount > 0)
+    for (int row = 0; row < static_cast<int>(rows); ++row)
     {
-        auto randomIndex = std::uniform_int_distribution<int>(0, activeCount - 1)(rng);
-        const auto currentPoint = tempBuffer[randomIndex];
-        bool foundCandidate = false;
+        const float y = y0 + static_cast<float>(row) * rowHeight;
+        const float offset = (row % 2) ? spacing / 2.0f : 0.0f;
 
-        for (int i = 0; i < numCandidates; ++i)
+        for (int column = -1; column < static_cast<int>(columns); ++column)
         {
-            const auto angle = distribution(rng) * 2.0f * std::numbers::pi_v<float>;
-            const auto distance = distribution(rng) * minDistance + minDistance;
-            const auto cosAngle = std::cosf(angle);
-            const auto sinAngle = std::sinf(angle);
+            const Vector3 p(x0 + offset + static_cast<float>(column) * spacing, y, 0.0f);
 
-            Vector3 candidate(currentPoint.x + distance * cosAngle, currentPoint.y + distance * sinAngle, 0.0f);
-
-            if (candidate[0] >= minX && candidate[0] <= maxX && candidate[1] >= minY && candidate[1] <= maxY)
+            if (p.x < minX || p.x > maxX || !IsInside2D(polygon.data(), vertexCount, p))
             {
-                const auto gridX = static_cast<int>((candidate.x - minX) / cellSize);
-                const auto gridY = static_cast<int>((candidate.y - minY) / cellSize);
-
-                if (!grid[gridX][gridY] && IsInside2D(vertices, vertexCount, candidate) &&
-                    CheckMinDistance(candidate, pointBuffer, *pointCount, minDistance))
-                {
-                    InsertVector3(pointBuffer, *pointCount, &candidate);
-                    InsertVector3(tempBuffer, activeCount, &candidate);
-                    grid[gridX][gridY] = true;
-
-                    foundCandidate = true;
-                    break;
-                }
+                continue;
             }
-        }
 
-        if (!foundCandidate)
-        {
-            EraseVector3(tempBuffer, activeCount, randomIndex);
+            if (points.size() >= maxPointCount)
+            {
+                return {};
+            }
+
+            points.push_back(p);
         }
     }
+
+    if (points.empty() && IsInside2D(polygon.data(), vertexCount, centroid))
+    {
+        points.push_back(centroid);
+    }
+
+    return points;
 }
-}; // namespace PolygonMath
+} // namespace PolygonMath

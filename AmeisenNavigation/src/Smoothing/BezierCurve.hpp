@@ -1,57 +1,67 @@
 #pragma once
 
-#include "../../recastnavigation/Detour/Include/DetourCommon.h"
-
+#include "../Utils/Path.hpp"
 #include "../Utils/VectorUtils.hpp"
-#include "../Utils/Vector3.hpp"
 
-namespace BezierCurve
+namespace BezierCurve {
+/// Cubic Bezier interpolation at parameter t in [0,1].
+inline Vector3 Interpolate(const Vector3& p0, const Vector3& p1, const Vector3& p2, const Vector3& p3,
+                           float t) noexcept
 {
-    /// Cubic Bezier interpolation at parameter t ∈ [0,1].
-    inline void Interpolate(const float* p0, const float* p1, const float* p2, const float* p3, float* p, float t) noexcept
+    const float u = 1.0f - t;
+    const float tt = t * t;
+    const float uu = u * u;
+
+    return p0 * (uu * u) + p1 * (3.0f * uu * t) + p2 * (3.0f * u * tt) + p3 * (tt * t);
+}
+
+/// Piecewise cubic Bezier: every group of 4 points (sharing their end points) forms one curve which is
+/// sampled with `points` samples. Remaining points that don't form a full group are appended as they are,
+/// so the path always ends at the destination. Output never exceeds its capacity.
+inline void SmoothPath(const Vector3* input, int inputSize, Path& output, int points) noexcept
+{
+    output.Clear();
+
+    if (inputSize <= 0)
     {
-        const float u = 1.0f - t;
-        const float tt = t * t;
-        const float uu = u * u;
-        const float uuu = uu * u;
-        const float ttt = tt * t;
-
-        float pTemp[3]{ 0.0f };
-
-        // (1-t)^3 * P0
-        dtVscale(p, p0, uuu);
-
-        // 3(1-t)^2 * t * P1
-        dtVscale(pTemp, p1, 3.0f * uu * t);
-        dtVadd(p, p, pTemp);
-
-        // 3(1-t) * t^2 * P2
-        dtVscale(pTemp, p2, 3.0f * u * tt);
-        dtVadd(p, p, pTemp);
-
-        // t^3 * P3
-        dtVscale(pTemp, p3, ttt);
-        dtVadd(p, p, pTemp);
+        return;
     }
 
-    static void SmoothPath(const Vector3* input, int inputSize, Vector3* output, int* outputSize, int outputMaxSize, int points) noexcept
+    output.TryAppend(input[0]);
+
+    const int samples = points < 2 ? 2 : points;
+    int i = 0;
+
+    for (; i + 3 < inputSize; i += 3)
     {
-        Vector3 c;
-
-        for (int i = 0; i < inputSize - 3; i += 3)
+        for (int j = 1; j < samples; ++j)
         {
-            const Vector3& p0 = input[i];
-            const Vector3& p1 = input[i + 1];
-            const Vector3& p2 = input[i + 2];
-            const Vector3& p3 = input[i + 3];
-
-            for (int j = 0; j < points; ++j)
+            // Keep one slot for the destination.
+            if (output.GetSpace() <= 1)
             {
-                Interpolate(p0, p1, p2, p3, c, static_cast<float>(j) / static_cast<float>(points - 1));
-                InsertVector3(output, *outputSize, &c, 0);
-
-                if (*outputSize > outputMaxSize - 1) { return; }
+                break;
             }
+
+            const float t = static_cast<float>(j) / static_cast<float>(samples - 1);
+            output.TryAppendUnique(Interpolate(input[i], input[i + 1], input[i + 2], input[i + 3], t));
         }
     }
+
+    for (int k = i + 1; k < inputSize; ++k)
+    {
+        const bool isLast = k == inputSize - 1;
+
+        if (!isLast && output.GetSpace() <= 1)
+        {
+            continue;
+        }
+
+        if (isLast && output.IsFull())
+        {
+            output.pointCount--;
+        }
+
+        output.TryAppendUnique(input[k]);
+    }
 }
+} // namespace BezierCurve

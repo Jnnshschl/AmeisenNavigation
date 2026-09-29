@@ -1,16 +1,18 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
+#include <fstream>
+#include <iomanip>
 #include <mutex>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
-
 #include "Tri.hpp"
 #include "Vector3.hpp"
 
-
+/// Triangle soup (RD coordinates) with one area id per triangle. Used for per-ADT extraction and the merged map.
 struct Structure
 {
     std::mutex mutex;
@@ -34,7 +36,9 @@ struct Structure
     inline void Append(const Structure& other) noexcept
     {
         const int triOffset = static_cast<int>(verts.size());
-        verts.append_range(other.verts);
+        verts.insert(verts.end(), other.verts.begin(), other.verts.end());
+        tris.reserve(tris.size() + other.tris.size());
+        triTypes.reserve(triTypes.size() + other.triTypes.size());
 
         for (size_t i = 0; i < other.tris.size(); ++i)
         {
@@ -49,6 +53,35 @@ struct Structure
     /// </summary>
     inline void Clean() noexcept
     {
+        // Corrupt client files can produce NaN/huge coordinates or bad indices: Recast converts coordinates to
+        // ints while rasterizing (undefined behaviour for them), drop those triangles first.
+        {
+            const auto validVertex = [this](int index) {
+                if (index < 0 || static_cast<size_t>(index) >= verts.size())
+                {
+                    return false;
+                }
+
+                const Vector3& v = verts[static_cast<size_t>(index)];
+                return IsPlausibleCoordinate(v.x) && IsPlausibleCoordinate(v.y) && IsPlausibleCoordinate(v.z);
+            };
+
+            size_t kept = 0;
+
+            for (size_t i = 0; i < tris.size() && i < triTypes.size(); ++i)
+            {
+                if (validVertex(tris[i].a) && validVertex(tris[i].b) && validVertex(tris[i].c))
+                {
+                    tris[kept] = tris[i];
+                    triTypes[kept] = triTypes[i];
+                    kept++;
+                }
+            }
+
+            tris.resize(kept);
+            triTypes.resize(kept);
+        }
+
         std::vector<bool> isVertexUsed(verts.size(), false);
 
         for (const auto& tri : tris)
@@ -150,10 +183,8 @@ struct Structure
 
     inline void ExportDebugObjFile(const char* filePath) noexcept
     {
-        std::fstream objFstream;
-        objFstream << std::fixed << std::showpoint;
-        objFstream << std::setprecision(8);
-        objFstream.open(filePath, std::fstream::out);
+        std::ofstream objFstream(filePath);
+        objFstream << std::fixed << std::showpoint << std::setprecision(8);
 
         for (const auto& v3 : verts)
         {
@@ -166,5 +197,29 @@ struct Structure
         }
 
         objFstream.close();
+    }
+
+    /// Recompute bbMin/bbMax from the vertices.
+    inline void ComputeBounds() noexcept
+    {
+        if (verts.empty())
+        {
+            return;
+        }
+
+        for (int i = 0; i < 3; ++i)
+        {
+            bbMin[i] = verts[0].pos[i];
+            bbMax[i] = verts[0].pos[i];
+        }
+
+        for (const auto& v : verts)
+        {
+            for (int i = 0; i < 3; ++i)
+            {
+                bbMin[i] = std::min(bbMin[i], v.pos[i]);
+                bbMax[i] = std::max(bbMax[i], v.pos[i]);
+            }
+        }
     }
 };

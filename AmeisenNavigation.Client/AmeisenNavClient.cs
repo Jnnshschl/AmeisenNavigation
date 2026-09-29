@@ -1,7 +1,9 @@
 using AnTCP.Client;
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net.Sockets;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
@@ -37,6 +39,7 @@ namespace AmeisenNavigation.Client
             ConfigureFilter,
             GetHeight,
             GetConfig,
+            CastRayEx,
         }
 
         private readonly AnTcpClient _client;
@@ -45,6 +48,8 @@ namespace AmeisenNavigation.Client
         private ClientState _state;
         private readonly float[] _areaCosts = new float[28]; // index 0 unused, 1-27 = area costs
         private bool _wasConnected;
+        private ServerConfig? _serverConfig;
+        private bool _disposed;
 
         // ── Events ────────────────────────────────────────────────────────
 
@@ -82,6 +87,16 @@ namespace AmeisenNavigation.Client
         public bool IsFilterDirty { get; private set; }
 
         public bool IsConnected => _client.IsConnected;
+
+        /// <summary>
+        /// Send/receive timeout in milliseconds (0 = infinite). A timeout counts as a network error
+        /// and triggers the auto-reconnect logic. Default: 30 seconds.
+        /// </summary>
+        public int TimeoutMs
+        {
+            get => _client.TimeoutMs;
+            set => _client.TimeoutMs = value;
+        }
 
         public AmeisenNavClient(string ip = "127.0.0.1", int port = 47110)
         {
@@ -136,6 +151,55 @@ namespace AmeisenNavigation.Client
             return SendPathRequest(MessageType.RandomPath, mapId, start, end, flags);
         }
 
+        /// <summary>Maximum number of polygon vertices accepted by <see cref="ExplorePolygon"/>.</summary>
+        public const int MaxExplorePolygonPoints = 256;
+
+        /// <summary>
+        /// Generate a route that explores an area: waypoints on a hexagonal grid <paramref name="spacing"/>
+        /// apart inside the polygon (x/y outline, its z picks the floor on stacked geometry), visited in a short
+        /// tour from <paramref name="start"/> and connected by navmesh paths. Unreachable waypoints are skipped,
+        /// the route is cut at the server's maximum path length. Returns null on failure.
+        /// Requires protocol version 2 (server 1.9+).
+        /// </summary>
+        /// <param name="spacing">Distance between waypoints, e.g. twice the sight/gather range (min 2).</param>
+        public Vector3[]? ExplorePolygon(int mapId, Vector3 start, IReadOnlyList<Vector3> polygon, float spacing,
+                                         PathFlags flags = PathFlags.None)
+        {
+            if (polygon == null || polygon.Count < 3 || polygon.Count > MaxExplorePolygonPoints
+                || !float.IsFinite(spacing))
+                return null;
+
+            var header = new ExplorePolyRequestHeader
+            {
+                MapId = mapId,
+                Flags = (int)flags,
+                Start = start,
+                Spacing = spacing,
+                PointCount = polygon.Count,
+            };
+
+            int headerSize = Marshal.SizeOf<ExplorePolyRequestHeader>();
+            int pointSize = Marshal.SizeOf<Vector3>();
+            byte[] buffer = new byte[headerSize + polygon.Count * pointSize];
+
+            MemoryMarshal.Write(buffer.AsSpan(0, headerSize), in header);
+
+            for (int i = 0; i < polygon.Count; i++)
+            {
+                Vector3 point = polygon[i];
+                MemoryMarshal.Write(buffer.AsSpan(headerSize + i * pointSize, pointSize), in point);
+            }
+
+            lock (_lock)
+            {
+                return SendWithReconnect(() =>
+                {
+                    var points = _client.SendBytes((byte)MessageType.ExplorePoly, buffer).AsArray<Vector3>();
+                    return points.Length == 0 || (points.Length == 1 && points[0].IsZero) ? null : points;
+                }, null);
+            }
+        }
+
         /// <summary>
         /// Move along the navmesh surface by a small delta. Useful for preventing
         /// falling off edges during incremental movement.
@@ -155,8 +219,9 @@ namespace AmeisenNavigation.Client
 
         /// <summary>
         /// Cast a movement ray to test for obstacles between start and end.
-        /// Returns true if the ray is clear (no wall hit). On hit, hitPoint is
-        /// set to the end position that was tested.
+        /// Returns true if the ray is clear (no wall hit), hitPoint is then the end position.
+        /// If the ray is blocked (or the request failed) hitPoint is a zero vector,
+        /// use <see cref="CastRayEx"/> to get the actual hit position.
         /// </summary>
         public bool CastRay(int mapId, Vector3 start, Vector3 end, out Vector3 hitPoint)
         {
@@ -170,6 +235,27 @@ namespace AmeisenNavigation.Client
 
                 hitPoint = result;
                 return !result.IsZero;
+            }
+        }
+
+        /// <summary>
+        /// Cast a movement ray along the navmesh surface and return where it hit a wall,
+        /// the wall normal and how far it got. Requires server version 1.9+.
+        /// </summary>
+        public RaycastHit CastRayEx(int mapId, Vector3 start, Vector3 end)
+        {
+            lock (_lock)
+            {
+                var request = new CastRayData { MapId = mapId, Start = start, End = end };
+                return SendWithReconnect(() =>
+                {
+                    var response = _client.Send((byte)MessageType.CastRayEx, request);
+
+                    if (!response.TryAs(out CastRayExResponse result) || result.Hit < 0)
+                        return default;
+
+                    return new RaycastHit(true, result.Hit != 0, result.Fraction, result.Position, result.Normal);
+                }, default(RaycastHit));
             }
         }
 
@@ -230,20 +316,8 @@ namespace AmeisenNavigation.Client
                 return SendWithReconnect<ServerConfig?>(() =>
                 {
                     var response = _client.SendBytes((byte)MessageType.GetConfig, ReadOnlySpan<byte>.Empty);
-                    var data = response.Data;
-
-                    // Header: mmapFormat(4) + useAnpFileFormat(4) + pathLength(4)
-                    if (data.Length < 12) return null;
-
-                    int mmapFormat = BitConverter.ToInt32(data.Slice(0, 4));
-                    bool useAnp = BitConverter.ToInt32(data.Slice(4, 4)) != 0;
-                    int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
-
-                    string meshesPath = "";
-                    if (pathLen > 0 && data.Length >= 12 + pathLen)
-                        meshesPath = System.Text.Encoding.UTF8.GetString(data.Slice(12, pathLen));
-
-                    return new ServerConfig(mmapFormat, useAnp, meshesPath);
+                    _serverConfig = ParseConfig(response.Data);
+                    return _serverConfig;
                 }, null);
             }
         }
@@ -255,8 +329,11 @@ namespace AmeisenNavigation.Client
         /// </summary>
         public void SetClientState(ClientState state)
         {
-            _state = state;
-            IsFilterDirty = true;
+            lock (_lock)
+            {
+                _state = state;
+                IsFilterDirty = true;
+            }
         }
 
         /// <summary>
@@ -264,10 +341,13 @@ namespace AmeisenNavigation.Client
         /// </summary>
         public void SetAreaCost(byte areaId, float cost)
         {
-            if (areaId >= 1 && areaId <= 27)
+            if (areaId >= 1 && areaId <= 27 && float.IsFinite(cost) && cost > 0f)
             {
-                _areaCosts[areaId] = cost;
-                IsFilterDirty = true;
+                lock (_lock)
+                {
+                    _areaCosts[areaId] = cost;
+                    IsFilterDirty = true;
+                }
             }
         }
 
@@ -284,6 +364,15 @@ namespace AmeisenNavigation.Client
         /// <param name="hordeMult">Multiplier for Horde faction areas (raise to avoid).</param>
         public void SetAreaCosts(float ground, float road, float water, float badLiquid,
                                  float allyMult = 1f, float hordeMult = 1f)
+        {
+            lock (_lock)
+            {
+                SetAreaCostsUnlocked(ground, road, water, badLiquid, allyMult, hordeMult);
+            }
+        }
+
+        private void SetAreaCostsUnlocked(float ground, float road, float water, float badLiquid,
+                                          float allyMult, float hordeMult)
         {
             // Ground
             _areaCosts[AnpArea.TERRAIN_GROUND] = ground;
@@ -336,34 +425,14 @@ namespace AmeisenNavigation.Client
         /// <summary>
         /// Send the current filter configuration to the server.
         /// Returns true on success. Call this after changing state or area costs.
+        /// The ANP area costs are only sent to servers using ANP navmeshes, MMAP servers
+        /// (different area ids) only receive the client state.
         /// </summary>
         public bool ApplyFilter()
         {
             lock (_lock)
             {
-                return SendWithReconnect(() =>
-                {
-                    // Wire format: [state(1)+pad(3)][count(4)][entries: {areaId(1)+pad(3)+cost(4)} × N]
-                    const int entryCount = 27;
-                    const int headerSize = 8;
-                    const int entrySize = 8;
-                    byte[] buffer = new byte[headerSize + entryCount * entrySize];
-
-                    buffer[0] = (byte)_state;
-                    BitConverter.GetBytes(entryCount).CopyTo(buffer, 4);
-
-                    for (int i = 0; i < entryCount; i++)
-                    {
-                        int off = headerSize + i * entrySize;
-                        byte areaId = (byte)(i + 1);
-                        buffer[off] = areaId;
-                        BitConverter.GetBytes(_areaCosts[areaId]).CopyTo(buffer, off + 4);
-                    }
-
-                    bool result = _client.SendBytes((byte)MessageType.ConfigureFilter, buffer).As<bool>();
-                    if (result) IsFilterDirty = false;
-                    return result;
-                }, false);
+                return SendWithReconnect(ApplyFilterInternal, false);
             }
         }
 
@@ -452,7 +521,9 @@ namespace AmeisenNavigation.Client
                         _wasConnected = true;
                         Connected?.Invoke();
 
-                        // Always re-apply filter on reconnect so the server knows our faction/costs
+                        // The server may have been restarted with a different config, re-query it and
+                        // re-apply the filter so the server knows our faction/costs.
+                        _serverConfig = null;
                         try { ApplyFilterInternal(); } catch { }
 
                         return true;
@@ -465,12 +536,16 @@ namespace AmeisenNavigation.Client
         }
 
         /// <summary>
-        /// Internal filter apply that doesn't go through the lock or reconnect wrapper
-        /// (called from within TryAutoReconnect which already holds the lock).
+        /// Filter apply without the lock or reconnect wrapper (callers hold the lock).
         /// </summary>
-        private void ApplyFilterInternal()
+        private bool ApplyFilterInternal()
         {
-            const int entryCount = 27;
+            // ANP area ids mean different areas on MMAP servers (e.g. 8/9 are lava/water in TrinityCore meshes),
+            // only send the costs when the server confirmed it uses ANP navmeshes, otherwise just the state.
+            _serverConfig ??= QueryConfigInternal();
+            int entryCount = _serverConfig is { UseAnpFileFormat: true } ? 27 : 0;
+
+            // Wire format: [state(1)+pad(3)][count(4)][entries: {areaId(1)+pad(3)+cost(4)} x N]
             const int headerSize = 8;
             const int entrySize = 8;
             byte[] buffer = new byte[headerSize + entryCount * entrySize];
@@ -486,8 +561,58 @@ namespace AmeisenNavigation.Client
                 BitConverter.GetBytes(_areaCosts[areaId]).CopyTo(buffer, off + 4);
             }
 
-            if (_client.SendBytes((byte)MessageType.ConfigureFilter, buffer).As<bool>())
+            bool result = _client.SendBytes((byte)MessageType.ConfigureFilter, buffer).As<bool>();
+
+            if (result)
                 IsFilterDirty = false;
+
+            return result;
+        }
+
+        private ServerConfig? QueryConfigInternal()
+        {
+            try
+            {
+                var response = _client.SendBytes((byte)MessageType.GetConfig, ReadOnlySpan<byte>.Empty);
+                return ParseConfig(response.Data);
+            }
+            catch (Exception ex) when (!IsNetworkError(ex))
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// GET_CONFIG response: mmapFormat(4) useAnp(4) pathLength(4) path[pathLength], then (protocol 2+)
+        /// protocolVersion(4) maxPointPath(4) versionLength(4) version[versionLength].
+        /// </summary>
+        private static ServerConfig? ParseConfig(ReadOnlySpan<byte> data)
+        {
+            if (data.Length < 12)
+                return null;
+
+            int mmapFormat = BitConverter.ToInt32(data.Slice(0, 4));
+            bool useAnp = BitConverter.ToInt32(data.Slice(4, 4)) != 0;
+            int pathLen = BitConverter.ToInt32(data.Slice(8, 4));
+
+            // long: 12 + pathLen must not wrap for a corrupt length.
+            if (pathLen < 0 || data.Length < 12L + pathLen)
+                return new ServerConfig(mmapFormat, useAnp, "");
+
+            string meshesPath = Encoding.UTF8.GetString(data.Slice(12, pathLen));
+            var trailer = data.Slice(12 + pathLen);
+
+            if (trailer.Length < 12)
+                return new ServerConfig(mmapFormat, useAnp, meshesPath);
+
+            int protocolVersion = BitConverter.ToInt32(trailer.Slice(0, 4));
+            int maxPointPath = BitConverter.ToInt32(trailer.Slice(4, 4));
+            int versionLen = BitConverter.ToInt32(trailer.Slice(8, 4));
+            string version = versionLen > 0 && trailer.Length >= 12L + versionLen
+                ? Encoding.UTF8.GetString(trailer.Slice(12, versionLen))
+                : "";
+
+            return new ServerConfig(mmapFormat, useAnp, meshesPath, protocolVersion, maxPointPath, version);
         }
 
         private void OnDisconnected()
@@ -509,7 +634,15 @@ namespace AmeisenNavigation.Client
 
         public void Dispose()
         {
-            try { if (_client.IsConnected) _client.Disconnect(); } catch { }
+            if (_disposed)
+                return;
+
+            _disposed = true;
+
+            lock (_lock)
+            {
+                try { _client.Dispose(); } catch { }
+            }
         }
     }
 }

@@ -35,7 +35,7 @@ struct Matrix4x4
 
     inline float DegreesToRadians(float degrees) noexcept
     {
-        return std::fmodf(degrees, 360.0f) * std::numbers::pi_v<float> / 180.0f;
+        return std::fmod(degrees, 360.0f) * std::numbers::pi_v<float> / 180.0f;
     }
 
     inline void SetRotation(const Vector3& axis) noexcept
@@ -44,9 +44,9 @@ struct Matrix4x4
         float y = DegreesToRadians(axis.y);
         float z = DegreesToRadians(axis.z);
 
-        float cx = std::cosf(x), sx = std::sinf(x);
-        float cy = std::cosf(y), sy = std::sinf(y);
-        float cz = std::cosf(z), sz = std::sinf(z);
+        float cx = std::cos(x), sx = std::sin(x);
+        float cy = std::cos(y), sy = std::sin(y);
+        float cz = std::cos(z), sz = std::sin(z);
 
         // ZYX Euler rotation matrix - multiply into existing transform to preserve scale
         Matrix4x4 rot;
@@ -67,7 +67,7 @@ struct Matrix4x4
 
     inline void SetRotation(float x, float y, float z, float w) noexcept
     {
-        float length = std::sqrtf(x * x + y * y + z * z + w * w);
+        float length = std::sqrt(x * x + y * y + z * z + w * w);
 
         if (length != 0.0f)
         {

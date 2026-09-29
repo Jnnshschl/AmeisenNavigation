@@ -5,7 +5,7 @@
 #include <format>
 #include <string>
 
-#include "../../../recastnavigation/Recast/Include/Recast.h"
+#include <Recast.h>
 
 #include "../Utils/Bmp.hpp"
 #include "../Utils/Tri.hpp"
@@ -67,9 +67,9 @@ inline void GetAreaColor(unsigned char area, uint8_t& r, uint8_t& g, uint8_t& b)
     }
 }
 
-/// Render one sub-tile of the compact heightfield into the BMP pixel buffer.
-inline void RenderSubTileToBmp(const rcCompactHeightfield* chf, uint8_t* adtPixels, int stX, int stY, int tileSize,
-                               int borderSize, int width) noexcept
+/// Render one sub-tile of the compact heightfield into a resolution x resolution BGR pixel buffer.
+inline void RenderSubTileToBmp(const rcCompactHeightfield* chf, uint8_t* adtPixels, int resolution, int stX, int stY,
+                               int tileSize, int borderSize, int width) noexcept
 {
     if (!adtPixels)
         return;
@@ -79,21 +79,23 @@ inline void RenderSubTileToBmp(const rcCompactHeightfield* chf, uint8_t* adtPixe
         for (int x = 0; x < tileSize; ++x)
         {
             const rcCompactCell& c = chf->cells[(x + borderSize) + (y + borderSize) * width];
+
             if (c.count > 0)
             {
-                unsigned char area = chf->areas[c.index + c.count - 1];
+                const unsigned char area = chf->areas[c.index + c.count - 1];
                 uint8_t r, g, b;
                 GetAreaColor(area, r, g, b);
 
-                int adtX = stX * tileSize + x;
-                int adtY = stY * tileSize + y;
+                const int adtX = stX * tileSize + x;
+                const int adtY = stY * tileSize + y;
 
-                if (adtX >= 0 && adtX < 2560 && adtY >= 0 && adtY < 2560)
+                if (adtX >= 0 && adtX < resolution && adtY >= 0 && adtY < resolution)
                 {
-                    int bufferY = 2559 - adtY;
-                    int bufferX = 2559 - adtX;
+                    // Flip both axes so the image matches the in-game map orientation.
+                    const int bufferY = resolution - 1 - adtY;
+                    const int bufferX = resolution - 1 - adtX;
+                    const size_t pIdx = (static_cast<size_t>(bufferX) + static_cast<size_t>(bufferY) * resolution) * 3;
 
-                    int pIdx = (bufferX + bufferY * 2560) * 3;
                     adtPixels[pIdx + 0] = b;
                     adtPixels[pIdx + 1] = g;
                     adtPixels[pIdx + 2] = r;
@@ -103,16 +105,22 @@ inline void RenderSubTileToBmp(const rcCompactHeightfield* chf, uint8_t* adtPixe
     }
 }
 
-/// Save the complete BMP debug image.
-inline void SaveDebugBmp(const std::string& outputDir, int mapId, const float* bbMax, uint8_t* adtPixels) noexcept
+/// Save the debug image of one ADT as {outputDir}/debug/area_{mapId}_{adtX}_{adtY}.bmp.
+inline bool SaveDebugBmp(const std::filesystem::path& outputDir, int mapId, int adtX, int adtY, int resolution,
+                         const uint8_t* adtPixels) noexcept
 {
     if (!adtPixels)
-        return;
+        return false;
 
-    int mapX = static_cast<int>(32.0f - (bbMax[0] / TILESIZE));
-    int mapY = static_cast<int>(32.0f - (bbMax[2] / TILESIZE));
-
-    std::filesystem::create_directories(std::format("{}/debug", outputDir));
-    std::string filename = std::format("{}/debug/area_{}_{}_{}.bmp", outputDir, mapId, mapX, mapY);
-    BmpWriter::Write(filename, 2560, 2560, adtPixels);
+    try
+    {
+        const auto debugDir = outputDir / "debug";
+        std::filesystem::create_directories(debugDir);
+        const auto filename = debugDir / std::format("area_{}_{}_{}.bmp", mapId, adtX, adtY);
+        return BmpWriter::Write(filename.string(), resolution, resolution, adtPixels);
+    }
+    catch (...)
+    {
+        return false;
+    }
 }

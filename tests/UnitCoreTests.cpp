@@ -1,0 +1,497 @@
+#include "TestFramework.hpp"
+
+#include <atomic>
+#include <filesystem>
+#include <fstream>
+#include <limits>
+#include <thread>
+#include <vector>
+
+#include <DetourNavMeshBuilder.h>
+
+#include "AmeisenNavigation.hpp"
+#include "Helpers/Polygon.hpp"
+#include "Helpers/Tour.hpp"
+
+namespace {
+std::filesystem::path TempDir(const char* name)
+{
+    auto dir = std::filesystem::temp_directory_path() / "anav_tests" / name;
+    std::filesystem::remove_all(dir);
+    std::filesystem::create_directories(dir);
+    return dir;
+}
+} // namespace
+
+TEST_CASE(Vector3_CoordinateConversionsRoundTrip)
+{
+    const Vector3 wow(1.0f, 2.0f, 3.0f);
+
+    Vector3 rd = wow;
+    rd.ToRDCoords();
+    CHECK(rd == Vector3(2.0f, 3.0f, 1.0f)); // (wowY, wowZ, wowX)
+
+    Vector3 copy;
+    wow.CopyToRDCoords(copy);
+    CHECK(copy == rd);
+
+    rd.ToWowCoords();
+    CHECK(rd == wow);
+
+    // In place copy (output aliases input) must work too.
+    Vector3 alias = wow;
+    alias.CopyToRDCoords(alias);
+    CHECK(alias == Vector3(2.0f, 3.0f, 1.0f));
+    alias.CopyToWowCoords(alias);
+    CHECK(alias == wow);
+}
+
+TEST_CASE(Path_CapacityAndUniqueAppend)
+{
+    Path path(3);
+    CHECK(path.TryAppend({1, 1, 1}));
+    CHECK(path.TryAppendUnique({1, 1, 1}));
+    CHECK_EQ(path.pointCount, 1);
+    CHECK(path.TryAppend({2, 2, 2}));
+    CHECK(path.TryAppend({3, 3, 3}));
+    CHECK(path.IsFull());
+    CHECK(!path.TryAppend({4, 4, 4}));
+    CHECK_EQ(path.pointCount, 3);
+    path.Clear();
+    CHECK(path.Empty());
+}
+
+TEST_CASE(AnpFormat_FactionHelpers)
+{
+    CHECK_EQ(GetNeutralArea(HORDE_TERRAIN_ROAD), TERRAIN_ROAD);
+    CHECK(GetAreaFaction(ALLIANCE_WMO) == AreaFaction::Alliance);
+    CHECK(GetAreaFaction(LIQUID_OCEAN) == AreaFaction::Neutral);
+    CHECK_EQ(WithFaction(LIQUID_WATER, AreaFaction::Horde), HORDE_LIQUID_WATER);
+    CHECK_EQ(AreaToPolyFlags(TERRAIN_CITY), NAV_GROUND);
+    CHECK_EQ(AreaToPolyFlags(HORDE_LIQUID_OCEAN), NAV_WATER | NAV_HORDE);
+    CHECK_EQ(AreaToPolyFlags(0), NAV_EMPTY);
+    CHECK_EQ(AreaToPolyFlags(63), NAV_EMPTY);
+
+    for (unsigned int area = TERRAIN_GROUND; area < ANP_AREA_COUNT; ++area)
+    {
+        CHECK(IsValidAnpArea(area));
+        CHECK_EQ(WithFaction(GetNeutralArea(area), GetAreaFaction(area)), area);
+    }
+}
+
+TEST_CASE(Anp_TileEntryNames)
+{
+    int x = -1, y = -1;
+    CHECK(Anp::ParseTileEntryName("07_42", x, y));
+    CHECK_EQ(x, 7);
+    CHECK_EQ(y, 42);
+    CHECK(Anp::ParseTileEntryName(Anp::TileEntryName(3, 250).c_str(), x, y));
+    CHECK_EQ(y, 250);
+    CHECK(!Anp::ParseTileEntryName("mapId", x, y));
+    CHECK(!Anp::ParseTileEntryName("params", x, y));
+    CHECK(!Anp::ParseTileEntryName("12_", x, y));
+    CHECK(!Anp::ParseTileEntryName("_12", x, y));
+    CHECK(!Anp::ParseTileEntryName("1_2_3", x, y));
+    CHECK(!Anp::ParseTileEntryName("", x, y));
+}
+
+TEST_CASE(DetourUtils_RejectsCorruptTiles)
+{
+    std::vector<unsigned char> garbage(4096, 0xAB);
+    CHECK(!ValidateTileData(garbage.data(), garbage.size()));
+    CHECK(!ValidateTileData(nullptr, 0));
+
+    dtMeshHeader header{};
+    header.magic = DT_NAVMESH_MAGIC;
+    header.version = DT_NAVMESH_VERSION;
+    header.vertCount = 1000; // claims far more data than provided
+    std::vector<unsigned char> truncated(sizeof(dtMeshHeader) + 64);
+    std::memcpy(truncated.data(), &header, sizeof(header));
+    CHECK(!ValidateTileData(truncated.data(), truncated.size()));
+
+    header.vertCount = -5;
+    std::memcpy(truncated.data(), &header, sizeof(header));
+    CHECK(!ValidateTileData(truncated.data(), truncated.size()));
+}
+
+TEST_CASE(FilterProvider_Tc335aCostsUseAreaIds)
+{
+    MmapQueryFilterProvider provider(MmapFormat::TC335A, 1.3f, 4.0f);
+    const dtQueryFilter* normal = provider.Get(ClientState::NORMAL);
+    REQUIRE(normal != nullptr);
+
+    // TrinityCore area ids: water = 9, magma/slime = 8 (the flags are 4 and 8).
+    CHECK_NEAR(normal->getAreaCost(static_cast<int>(NavArea335a::WATER)), 1.3f, 1e-6);
+    CHECK_NEAR(normal->getAreaCost(static_cast<int>(NavArea335a::MAGMA_SLIME)), 4.0f, 1e-6);
+    CHECK_NEAR(normal->getAreaCost(static_cast<int>(NavArea335a::GROUND)), 1.0f, 1e-6);
+    CHECK_NEAR(normal->getAreaCost(4), 1.0f, 1e-6); // flag value, not an area id
+    CHECK_EQ(normal->getExcludeFlags(), static_cast<unsigned short>(NavFlag335a::GROUND_STEEP));
+
+    const dtQueryFilter* dead = provider.Get(ClientState::DEAD);
+    REQUIRE(dead != nullptr);
+    CHECK_NEAR(dead->getAreaCost(static_cast<int>(NavArea335a::MAGMA_SLIME)), 1.0f, 1e-6);
+
+    CHECK(provider.Get(static_cast<ClientState>(42)) == nullptr);
+}
+
+TEST_CASE(FilterProvider_AnpFactionCosts)
+{
+    AnpQueryFilterProvider provider(1.6f, 4.0f, 0.75f, 3.0f);
+
+    const dtQueryFilter* alliance = provider.Get(ClientState::NORMAL_ALLIANCE);
+    const dtQueryFilter* horde = provider.Get(ClientState::NORMAL_HORDE);
+    REQUIRE(alliance && horde);
+
+    CHECK_NEAR(alliance->getAreaCost(HORDE_TERRAIN_ROAD), 0.75f * 3.0f, 1e-5);
+    CHECK_NEAR(alliance->getAreaCost(ALLIANCE_TERRAIN_ROAD), 0.75f, 1e-5);
+    CHECK_NEAR(horde->getAreaCost(ALLIANCE_LIQUID_WATER), 1.6f * 3.0f, 1e-5);
+    // Bad liquids are expensive regardless of faction.
+    CHECK_NEAR(horde->getAreaCost(ALLIANCE_LIQUID_LAVA), 4.0f, 1e-5);
+    CHECK_NEAR(provider.Get(ClientState::DEAD)->getAreaCost(LIQUID_SLIME), 1.0f, 1e-5);
+}
+
+TEST_CASE(NavClient_FilterValidation)
+{
+    AnpQueryFilterProvider provider;
+    AmeisenNavClient client(1, &provider, 64, 32);
+
+    CHECK(client.QueryFilter() == provider.Get(ClientState::NORMAL));
+
+    const AreaCost valid[] = {{TERRAIN_ROAD, 0.5f}, {LIQUID_WATER, 10.0f}};
+    CHECK(client.ConfigureQueryFilter(ClientState::NORMAL_HORDE, valid));
+    CHECK(client.HasCustomFilter());
+    CHECK(client.GetClientState() == ClientState::NORMAL_HORDE);
+    CHECK_NEAR(client.QueryFilter()->getAreaCost(TERRAIN_ROAD), 0.5f, 1e-6);
+    // Unconfigured areas keep the state's defaults.
+    CHECK_NEAR(client.QueryFilter()->getAreaCost(ALLIANCE_TERRAIN_GROUND), 3.0f, 1e-6);
+
+    // Out of range area ids would write past dtQueryFilter::m_areaCost.
+    const AreaCost badArea[] = {{200, 1.0f}};
+    CHECK(!client.ConfigureQueryFilter(ClientState::NORMAL, badArea));
+    CHECK(client.GetClientState() == ClientState::NORMAL_HORDE); // unchanged
+
+    const AreaCost badCost[] = {{TERRAIN_GROUND, -1.0f}};
+    CHECK(!client.ConfigureQueryFilter(ClientState::NORMAL, badCost));
+
+    const AreaCost nanCost[] = {{TERRAIN_GROUND, std::nanf("")}};
+    CHECK(!client.ConfigureQueryFilter(ClientState::NORMAL, nanCost));
+
+    CHECK(!client.ConfigureQueryFilter(static_cast<ClientState>(17), {}));
+
+    // Empty override list resets to the provider filter.
+    CHECK(client.ConfigureQueryFilter(ClientState::DEAD, {}));
+    CHECK(!client.HasCustomFilter());
+    CHECK(client.QueryFilter() == provider.Get(ClientState::DEAD));
+}
+
+TEST_CASE(NavMeshCache_LoadsOncePerMapUnderContention)
+{
+    NavMeshCache cache;
+    std::atomic<int> loads{0};
+
+    const auto loader = [&](int) -> NavMeshPtr {
+        loads++;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        NavMeshPtr mesh(dtAllocNavMesh());
+        dtNavMeshParams params{};
+        params.tileWidth = params.tileHeight = 100.0f;
+        params.maxTiles = 4;
+        params.maxPolys = 16;
+        mesh->init(&params);
+        return mesh;
+    };
+
+    std::vector<std::thread> threads;
+    std::atomic<dtNavMesh*> seen{nullptr};
+    std::atomic<bool> mismatch{false};
+
+    for (int i = 0; i < 8; ++i)
+    {
+        threads.emplace_back([&]() {
+            dtNavMesh* mesh = cache.GetOrLoad(1, loader);
+            dtNavMesh* expected = nullptr;
+
+            if (!seen.compare_exchange_strong(expected, mesh) && expected != mesh)
+            {
+                mismatch = true;
+            }
+        });
+    }
+
+    for (auto& t : threads)
+    {
+        t.join();
+    }
+
+    CHECK_EQ(loads.load(), 1);
+    CHECK(!mismatch.load());
+    CHECK(seen.load() != nullptr);
+
+    // Failed loads are remembered.
+    int failedLoads = 0;
+    CHECK(cache.GetOrLoad(2, [&](int) -> NavMeshPtr { failedLoads++; return nullptr; }) == nullptr);
+    CHECK(cache.GetOrLoad(2, [&](int) -> NavMeshPtr { failedLoads++; return nullptr; }) == nullptr);
+    CHECK_EQ(failedLoads, 1);
+}
+
+TEST_CASE(MmapNavSource_DetectsFormatFromFileNames)
+{
+    const auto tc = TempDir("mmap_tc");
+    std::ofstream(tc / "0003228.mmtile") << "x";
+    CHECK(MmapNavSource::DetectFormat(tc) == MmapFormat::TC335A);
+
+    const auto sf = TempDir("mmap_sf");
+    std::ofstream(sf / "0000_32_28.mmtile") << "x";
+    CHECK(MmapNavSource::DetectFormat(sf) == MmapFormat::SF548);
+
+    const auto empty = TempDir("mmap_empty");
+    CHECK(MmapNavSource::DetectFormat(empty) == MmapFormat::UNKNOWN);
+
+    // Missing map files are handled gracefully.
+    MmapNavSource source(tc, MmapFormat::TC335A);
+    CHECK(source.Get(0) == nullptr);
+}
+
+TEST_CASE(Polygon_HexGridCoversConcavePolygon)
+{
+    // L shape, 6400 square yards.
+    const Vector3 shape[] = {{0, 0, 0}, {100, 0, 0}, {100, 40, 0}, {40, 40, 0}, {40, 100, 0}, {0, 100, 0}};
+    constexpr float spacing = 10.0f;
+
+    const auto points = PolygonMath::HexGridSampling(shape, spacing, 1024);
+
+    // One point per hexagon cell of spacing^2 * sqrt(3) / 2.
+    CHECK(points.size() > 60 && points.size() < 90);
+
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        CHECK(PolygonMath::IsInside2D(shape, 6, points[i]));
+
+        for (size_t j = i + 1; j < points.size(); ++j)
+        {
+            CHECK(points[i].DistanceTo(points[j]) >= spacing - 1e-3f);
+        }
+    }
+
+    // Every point of the polygon is close to a sample.
+    for (float x = 0.5f; x < 100.0f; x += 3.0f)
+    {
+        for (float y = 0.5f; y < 100.0f; y += 3.0f)
+        {
+            const Vector3 probe(x, y, 0.0f);
+
+            if (!PolygonMath::IsInside2D(shape, 6, probe))
+            {
+                continue;
+            }
+
+            float nearest = 1e9f;
+
+            for (const auto& p : points)
+            {
+                nearest = std::min(nearest, p.DistanceTo(probe));
+            }
+
+            CHECK(nearest <= spacing);
+        }
+    }
+
+    // Deterministic.
+    const auto again = PolygonMath::HexGridSampling(shape, spacing, 1024);
+    REQUIRE(again.size() == points.size());
+
+    for (size_t i = 0; i < points.size(); ++i)
+    {
+        CHECK(again[i] == points[i]);
+    }
+
+    // Too many points needed, degenerate input.
+    CHECK(PolygonMath::HexGridSampling(shape, spacing, 10).empty());
+    CHECK(PolygonMath::HexGridSampling(shape, 0.0f, 1024).empty());
+    CHECK(PolygonMath::HexGridSampling(std::span<const Vector3>(shape, 2), spacing, 1024).empty());
+
+    // Smaller than one cell: its center.
+    const Vector3 small[] = {{0, 0, 0}, {4, 0, 0}, {4, 4, 0}, {0, 4, 0}};
+    const auto single = PolygonMath::HexGridSampling(small, spacing, 1024);
+    REQUIRE(single.size() == 1);
+    CHECK_NEAR(single[0].x, 2.0f, 1e-4);
+    CHECK_NEAR(single[0].y, 2.0f, 1e-4);
+}
+
+TEST_CASE(Tour_OrderIsAShortPermutation)
+{
+    const Vector3 start(0.0f, 0.0f, 0.0f);
+
+    // Shuffled points on a line: the optimal open tour walks them in order.
+    std::vector<Vector3> line;
+
+    for (const int i : {5, 2, 9, 1, 7, 3, 8, 4, 6})
+    {
+        line.emplace_back(static_cast<float>(i) * 10.0f, 0.0f, 0.0f);
+    }
+
+    const auto lineOrder = Tour::Order(start, line);
+    REQUIRE(lineOrder.size() == line.size());
+    CHECK_NEAR(Tour::Length(start, line, lineOrder), 90.0f, 1e-3);
+
+    // 10x10 grid in scrambled order, optimum from the corner is 99 steps (+ 0 to reach the first point).
+    std::vector<Vector3> grid;
+
+    for (int i = 0; i < 100; ++i)
+    {
+        const int k = (i * 37) % 100;
+        grid.emplace_back(static_cast<float>(k % 10) * 10.0f, static_cast<float>(k / 10) * 10.0f, 0.0f);
+    }
+
+    const auto order = Tour::Order(start, grid);
+    REQUIRE(order.size() == grid.size());
+
+    std::vector<int> sorted = order;
+    std::sort(sorted.begin(), sorted.end());
+
+    for (int i = 0; i < 100; ++i)
+    {
+        CHECK_EQ(sorted[static_cast<size_t>(i)], i);
+    }
+
+    CHECK(Tour::Length(start, grid, order) <= 990.0f * 1.25f);
+    CHECK(Tour::Order(start, std::span<const Vector3>()).empty());
+}
+
+TEST_CASE(Polygon_SamplingRejectsHugeOrInvalidPolygons)
+{
+    const Vector3 huge[] = {{-1e30f, -1e30f, 0}, {1e30f, -1e30f, 0}, {0, 1e30f, 0}};
+    const Vector3 nan[] = {{0, 0, 0}, {std::nanf(""), 0, 0}, {0, 10, 0}};
+
+    CHECK(PolygonMath::HexGridSampling(huge, 1.0f, 1024).empty());
+    CHECK(PolygonMath::HexGridSampling(nan, 1.0f, 1024).empty());
+}
+
+namespace {
+/// A real single-quad Detour tile at grid cell (x, y, layer), built like the exporter builds its tiles.
+std::vector<unsigned char> MakeQuadTile(int x, int y, int layer)
+{
+    constexpr unsigned short NONE = 0xffff;
+    const unsigned short verts[] = {0, 0, 0, 0, 0, 10, 10, 0, 10, 10, 0, 0};
+    const unsigned short polys[12] = {0, 1, 2, 3, NONE, NONE, NONE, NONE, NONE, NONE, NONE, NONE};
+    const unsigned char areas[] = {TERRAIN_GROUND};
+    const unsigned short flags[] = {NAV_GROUND};
+
+    dtNavMeshCreateParams params{};
+    params.verts = verts;
+    params.vertCount = 4;
+    params.polys = polys;
+    params.polyAreas = areas;
+    params.polyFlags = flags;
+    params.polyCount = 1;
+    params.nvp = 6;
+    params.walkableHeight = 2.0f;
+    params.walkableRadius = 0.6f;
+    params.walkableClimb = 0.9f;
+    params.bmax[0] = 10.0f;
+    params.bmax[1] = 1.0f;
+    params.bmax[2] = 10.0f;
+    params.cs = 1.0f;
+    params.ch = 1.0f;
+    params.buildBvTree = true;
+    params.tileX = x;
+    params.tileY = y;
+    params.tileLayer = layer;
+
+    unsigned char* data = nullptr;
+    int size = 0;
+
+    if (!dtCreateNavMeshData(&params, &data, &size))
+    {
+        return {};
+    }
+
+    std::vector<unsigned char> tile(data, data + size);
+    dtFree(data);
+    return tile;
+}
+
+bool ValidTile(const std::vector<unsigned char>& tile)
+{
+    return !tile.empty() && ValidateTileData(tile.data(), tile.size());
+}
+} // namespace
+
+TEST_CASE(DetourUtils_TileCoordinateAndLayerBounds)
+{
+    REQUIRE(!MakeQuadTile(0, 0, 0).empty());
+    CHECK(ValidTile(MakeQuadTile(0, 0, 0)));
+    CHECK(ValidTile(MakeQuadTile(63, 63, 0)));
+
+    // Inclusive limits.
+    CHECK(ValidTile(MakeQuadTile(MAX_TILE_COORD, -MAX_TILE_COORD, 255)));
+    CHECK(ValidTile(MakeQuadTile(-MAX_TILE_COORD, MAX_TILE_COORD, 0)));
+
+    // One past them (addTile's neighbour math overflowed at INT_MIN/INT_MAX).
+    CHECK(!ValidTile(MakeQuadTile(MAX_TILE_COORD + 1, 0, 0)));
+    CHECK(!ValidTile(MakeQuadTile(-MAX_TILE_COORD - 1, 0, 0)));
+    CHECK(!ValidTile(MakeQuadTile(0, MAX_TILE_COORD + 1, 0)));
+    CHECK(!ValidTile(MakeQuadTile(0, -MAX_TILE_COORD - 1, 0)));
+    CHECK(!ValidTile(MakeQuadTile(std::numeric_limits<int>::min(), 0, 0)));
+    CHECK(!ValidTile(MakeQuadTile(0, 0, 256)));
+    CHECK(!ValidTile(MakeQuadTile(0, 0, -1)));
+}
+
+TEST_CASE(Anp_TilesOutsideTheirCellAreRejected)
+{
+    dtNavMeshParams params{};
+    params.tileWidth = 10.0f;
+    params.tileHeight = 10.0f;
+    params.maxTiles = 16;
+    params.maxPolys = 1 << 16;
+
+    const auto good = MakeQuadTile(1, 2, 0);
+    const auto other = MakeQuadTile(3, 3, 0);
+
+    // The writer stores tiles under the cell in their header.
+    const auto dir = TempDir("anp_cells");
+    Anp::AnpWriter writer(77, params);
+    REQUIRE(writer.AddTile(good.data(), static_cast<int>(good.size())));
+    REQUIRE(writer.AddTile(other.data(), static_cast<int>(other.size())));
+    REQUIRE(writer.Save(dir));
+
+    const auto written = Anp::Load(dir / Anp::FileName(77));
+    REQUIRE(written.navMesh);
+    CHECK_EQ(written.tilesLoaded, 2);
+    CHECK_EQ(written.tilesRejected, 0);
+
+    // A foreign archive with tile (3, 3) stored as entry "00_00": rejected, the rest loads.
+    mz_zip_archive zip;
+    mz_zip_zero_struct(&zip);
+    const int mapId = 77;
+    REQUIRE(mz_zip_writer_init_heap(&zip, 0, 0));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::MAP_ID_ENTRY, &mapId, sizeof(mapId), MZ_NO_COMPRESSION));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::PARAMS_ENTRY, &params, sizeof(params), MZ_NO_COMPRESSION));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::TileEntryName(1, 2).c_str(), good.data(), good.size(),
+                                  MZ_DEFAULT_LEVEL));
+    REQUIRE(mz_zip_writer_add_mem(&zip, Anp::TileEntryName(0, 0).c_str(), other.data(), other.size(),
+                                  MZ_DEFAULT_LEVEL));
+
+    void* archive = nullptr;
+    size_t archiveSize = 0;
+    REQUIRE(mz_zip_writer_finalize_heap_archive(&zip, &archive, &archiveSize));
+
+    const auto loaded = Anp::LoadFromMemory(static_cast<const unsigned char*>(archive), archiveSize, "misplaced");
+    mz_free(archive);
+    mz_zip_writer_end(&zip);
+
+    REQUIRE(loaded.navMesh);
+    CHECK_EQ(loaded.tilesLoaded, 1);
+    CHECK_EQ(loaded.tilesRejected, 1);
+    CHECK(loaded.navMesh->getTileAt(1, 2, 0) != nullptr);
+    CHECK(loaded.navMesh->getTileAt(3, 3, 0) == nullptr);
+}
+
+TEST_CASE(Vector3_HashMatchesEquality)
+{
+    // Equal vectors must hash equal (unordered_map contract, vertex deduplication): -0 == +0.
+    const Vector3 positive(0.0f, 5.0f, 0.0f);
+    const Vector3 negative(-0.0f, 5.0f, -0.0f);
+    REQUIRE(positive == negative);
+    CHECK_EQ(Vector3::Hash{}(positive), Vector3::Hash{}(negative));
+}

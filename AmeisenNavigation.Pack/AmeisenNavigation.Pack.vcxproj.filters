@@ -21,6 +21,9 @@
     <ClInclude Include="src\miniz\miniz.h">
       <Filter>Headerdateien</Filter>
     </ClInclude>
+    <ClInclude Include="src\Version.hpp">
+      <Filter>Headerdateien</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <None Include="src\miniz\LICENSE" />

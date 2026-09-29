@@ -264,6 +264,9 @@ paket-files/
 __pycache__/
 *.pyc
 
-.claude/
+# Claude Code: local state stays private, the shared project settings and hooks are versioned.
+.claude/*
+!.claude/settings.json
+!.claude/hooks/
 build/
 .int/

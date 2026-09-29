@@ -181,11 +181,13 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="src\Exporter.cpp" />
     <ClCompile Include="src\Main.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="resource.h" />
     <ClInclude Include="src\Dbc\Dbc.hpp" />
+    <ClInclude Include="src\Exporter.hpp" />
     <ClInclude Include="src\Main.hpp" />
     <ClInclude Include="src\Mpq\CachedFileReader.hpp" />
     <ClInclude Include="src\Mpq\FileSort.hpp" />
@@ -196,9 +198,9 @@
     <ClInclude Include="src\Utils\Bmp.hpp" />
     <ClInclude Include="src\Utils\CityMap.hpp" />
     <ClInclude Include="src\Utils\FactionMap.hpp" />
-    <ClInclude Include="src\Utils\Logger.hpp" />
     <ClInclude Include="src\Utils\Matrix4x4.hpp" />
     <ClInclude Include="src\Utils\Misc.hpp" />
+    <ClInclude Include="src\Utils\RectGrid.hpp" />
     <ClInclude Include="src\Utils\RoadMap.hpp" />
     <ClInclude Include="src\Utils\Structure.hpp" />
     <ClInclude Include="src\Utils\Tri.hpp" />

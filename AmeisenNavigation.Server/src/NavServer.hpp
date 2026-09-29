@@ -1,84 +1,92 @@
 #pragma once
 
-#include "AnTcpServer.hpp"
-#include "AmeisenNavigation.hpp"
-#include "Protocol.hpp"
-#include "Config/Config.hpp"
-
+#include <array>
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
 #include <memory>
 #include <mutex>
-#include <shared_mutex>
-#include <unordered_map>
+#include <string>
+#include <vector>
 
-/// Owns all server state: TCP server, navigation engine, config, and per-client path buffers.
-/// A single global pointer (g_NavServer) is used by C-style callbacks to reach this state.
+#include "AmeisenNavigation.hpp"
+#include "AnTcpServer.hpp"
+#include "../../AmeisenNavigation.Pack/src/Version.hpp"
+#include "Config/Config.hpp"
+#include "Protocol.hpp"
+
+
+/// Lock free request counters of one message type, collected for the periodic stats log.
+struct RequestStats
+{
+    std::atomic<uint64_t> count{0};
+    std::atomic<uint64_t> totalMicros{0};
+    std::atomic<uint64_t> maxMicros{0};
+};
+
+/// Owns the TCP server, the navigation engine and the config, and implements all request handlers.
 class NavServer
 {
-public:
-    NavServer(std::unique_ptr<AmeisenNavConfig> config)
-        : config_(std::move(config))
-        , nav_(std::make_unique<AmeisenNavigation>(
-              config_->mmapsPath, config_->maxPolyPath, config_->maxSearchNodes,
-              config_->useAnpFileFormat, config_->factionDangerCost))
-        , server_(std::make_unique<AnTcpServer>(config_->ip, config_->port))
-    {
-    }
+    AmeisenNavConfig Cfg;
+    std::unique_ptr<AmeisenNavigation> Navigation;
+    std::unique_ptr<AnTcpServer> TcpServer;
+    std::atomic<long long> LastRejectLog{0};
 
-    ~NavServer() = default;
+    static constexpr size_t STATS_SLOTS = 16; // covers every MessageType
+    std::array<RequestStats, STATS_SLOTS> Stats{};
+    std::mutex StatsMutex;
+    std::condition_variable StatsCv;
+    bool StatsStop = false;
+
+public:
+    explicit NavServer(const AmeisenNavConfig& config);
 
     NavServer(const NavServer&) = delete;
     NavServer& operator=(const NavServer&) = delete;
 
-    // ── Accessors ────────────────────────────────────────────────────
+    /// Validate and normalize a config. Fatal problems are returned in errors, auto-corrected ones in warnings.
+    static void ValidateConfig(AmeisenNavConfig& config, std::vector<std::string>& errors,
+                               std::vector<std::string>& warnings);
 
-    AnTcpServer* Server() noexcept { return server_.get(); }
-    AmeisenNavigation* Nav() noexcept { return nav_.get(); }
-    AmeisenNavConfig* Config() noexcept { return config_.get(); }
+    /// Map the config's iMmapFormat value to MmapFormat.
+    static MmapFormat ToMmapFormat(int configValue) noexcept;
 
-    // ── Client path buffer management ────────────────────────────────
+    AnTcpServer& Server() noexcept { return *TcpServer; }
+    AmeisenNavigation& Nav() noexcept { return *Navigation; }
+    const AmeisenNavConfig& Config() const noexcept { return Cfg; }
 
-    void AllocClientBuffers(size_t clientId)
-    {
-        std::unique_lock lock(bufferMutex_);
-        clientBuffers_[clientId] =
-            std::make_pair(std::make_unique<Path>(config_->maxPointPath), std::make_unique<Path>(config_->maxPointPath));
-    }
+    /// Load the navmeshes listed in sPreloadMaps.
+    void PreloadMaps();
 
-    void FreeClientBuffers(size_t clientId) noexcept
-    {
-        std::unique_lock lock(bufferMutex_);
-        clientBuffers_.erase(clientId);
-    }
+    /// Serve until Stop() is called (blocking). Logs request stats every iStatsIntervalSec while running.
+    AnTcpError Run() noexcept;
 
-    bool HasClientBuffers(size_t clientId) noexcept
-    {
-        std::shared_lock lock(bufferMutex_);
-        return clientBuffers_.find(clientId) != clientBuffers_.end();
-    }
+    /// Requests per type with average/max latency since the last call, empty if there were none. Resets the
+    /// counters. `seconds` is the covered time span (for the request rate).
+    std::string TakeStatsSummary(double seconds);
 
-    /// Get the path buffer pair for a client. Caller must ensure clientId is valid.
-    std::pair<Path*, Path*> GetClientBuffers(size_t clientId) noexcept
-    {
-        std::shared_lock lock(bufferMutex_);
-        auto it = clientBuffers_.find(clientId);
-        if (it == clientBuffers_.end()) return { nullptr, nullptr };
-        return { it->second.first.get(), it->second.second.get() };
-    }
-
-    // ── Server lifecycle ─────────────────────────────────────────────
-
-    void RegisterCallbacks();
-    void Run() noexcept { server_->Run(); }
-    void Stop() noexcept { server_->Stop(); }
+    /// Async-signal-safe.
+    void Stop() noexcept { TcpServer->Stop(); }
 
 private:
-    std::unique_ptr<AmeisenNavConfig> config_;
-    std::unique_ptr<AmeisenNavigation> nav_;
-    std::unique_ptr<AnTcpServer> server_;
+    void RegisterCallbacks();
+    void RecordRequest(AnTcpMessageType type, uint64_t micros) noexcept;
+    void StatsLoop();
 
-    std::shared_mutex bufferMutex_;
-    std::unordered_map<size_t, std::pair<std::unique_ptr<Path>, std::unique_ptr<Path>>> clientBuffers_;
+    void OnClientConnect(ClientHandler* handler);
+    void OnClientDisconnect(ClientHandler* handler);
+
+    void HandlePath(ClientHandler* handler, AnTcpMessageType type, const void* data, int size, PathType pathType);
+    void HandleMoveAlongSurface(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleCastRay(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleCastRayEx(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleRandomPoint(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleRandomPointAround(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleConfigureFilter(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleGetHeight(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleGetConfig(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+    void HandleExplorePoly(ClientHandler* handler, AnTcpMessageType type, const void* data, int size);
+
+    /// Apply smoothing/validation flags to a raw path. Returns the buffer holding the final result.
+    Path* ApplyPathFlags(size_t clientId, int mapId, int flags, PathType pathType, Path& path, Path& scratch);
 };
-
-/// Single global access point for C-style callbacks.
-inline std::unique_ptr<NavServer> g_NavServer;

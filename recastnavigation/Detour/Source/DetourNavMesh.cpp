@@ -670,6 +670,39 @@ namespace
 			}
 		}
 
+		if (!pmin)
+		{
+			// AmeisenNavigation: no candidate edge. Tiles built without detail edge flags have no triangle marked as
+			// boundary, degenerate or non-finite detail triangles never become the closest edge. Dereferencing pmin
+			// crashed here, fall back to all detail edges and then to the polygon's own edges.
+			if (onlyBoundary)
+			{
+				closestPointOnDetailEdges<false>(tile, poly, pos, closest);
+				return;
+			}
+
+			for (int i = 0, j = poly->vertCount - 1; i < poly->vertCount; j = i++)
+			{
+				const float* va = &tile->verts[poly->verts[j] * 3];
+				const float* vb = &tile->verts[poly->verts[i] * 3];
+				float t;
+				const float d = dtDistancePtSegSqr2D(pos, va, vb, t);
+				if (!pmin || d < dmin)
+				{
+					dmin = d;
+					tmin = t;
+					pmin = va;
+					pmax = vb;
+				}
+			}
+
+			if (!pmin)
+			{
+				dtVcopy(closest, pos);
+				return;
+			}
+		}
+
 		dtVlerp(closest, pmin, pmax, tmin);
 	}
 }

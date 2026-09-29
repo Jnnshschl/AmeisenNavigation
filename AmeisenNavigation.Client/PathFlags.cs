@@ -15,5 +15,11 @@ namespace AmeisenNavigation.Client
         SmoothBezier = 1 << 2,
         ValidateClosestPointOnPoly = 1 << 3,
         ValidateMoveAlongSurface = 1 << 4,
+
+        /// <summary>
+        /// Fail (return null) instead of returning a path that ends as close as possible to an unreachable
+        /// end position. Requires protocol version 2 (server 1.9+), older servers ignore it.
+        /// </summary>
+        RequireComplete = 1 << 5,
     }
 }

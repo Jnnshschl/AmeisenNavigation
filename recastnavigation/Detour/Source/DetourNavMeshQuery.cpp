@@ -2510,8 +2510,19 @@ dtStatus dtNavMeshQuery::raycast(dtPolyRef startRef, const float* startPos, cons
 	if (prevRef)
 		m_nav->getTileAndPolyByRefUnsafe(prevRef, &prevTile, &prevPoly);
 
+	// AmeisenNavigation: corrupt neighbour links (a poly linked to itself, contradicting geometry between two polys)
+	// made this loop spin forever (found by fuzzing). A real ray visits far fewer polys than the node pool holds.
+	int iterations = 0;
+	const int maxIterations = m_nodePool ? m_nodePool->getMaxNodes() : 65535;
+
 	while (curRef)
 	{
+		if (++iterations > maxIterations)
+		{
+			hit->pathCount = n;
+			return DT_FAILURE | DT_OUT_OF_NODES;
+		}
+
 		// Cast ray against current polygon.
 		
 		// Collect vertices.

@@ -5,8 +5,11 @@
 #include <cstdio>
 #include <ctime>
 #include <format>
+#include <iterator>
 #include <mutex>
 #include <string>
+#include <string_view>
+#include <type_traits>
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -15,9 +18,18 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
+#include <io.h>
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
+/// Minimal thread-safe console logger shared by the server, exporter and library.
+///
+/// - Every call formats into one string and writes it under a single lock, so lines never interleave.
+/// - Logging never throws, it is safe to use from noexcept code.
+/// - Debug output is filtered at runtime *before* any formatting happens (see LogD), so it is free when disabled.
+/// - ANSI colors are only emitted when stdout is an interactive terminal.
 namespace Logger {
 enum class Level
 {
@@ -31,141 +43,230 @@ enum class Level
     Progress
 };
 
-inline std::mutex& GetMutex()
+namespace Detail {
+inline std::mutex& Mutex() noexcept
 {
     static std::mutex mtx;
     return mtx;
 }
 
-inline void Initialize()
+inline std::atomic<bool>& DebugFlag() noexcept
 {
-#ifdef _WIN32
-    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
-    if (hOut != INVALID_HANDLE_VALUE)
-    {
-        DWORD dwMode = 0;
-        if (GetConsoleMode(hOut, &dwMode))
-        {
-            dwMode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
-            SetConsoleMode(hOut, dwMode);
-        }
-    }
+#ifdef _DEBUG
+    static std::atomic<bool> enabled{true};
+#else
+    static std::atomic<bool> enabled{false};
 #endif
+    return enabled;
 }
 
-inline const char* LevelTag(Level level)
+inline std::atomic<bool>& ColorFlag() noexcept
+{
+    static std::atomic<bool> enabled{true};
+    return enabled;
+}
+
+inline std::atomic<bool>& QuietFlag() noexcept
+{
+    static std::atomic<bool> quiet{false};
+    return quiet;
+}
+
+inline const char* LevelTag(Level level, bool color) noexcept
 {
     switch (level)
     {
-        case Level::Info:     return "\033[96m[INFO ]\033[0m";
-        case Level::Success:  return "\033[92m[OK   ]\033[0m";
-        case Level::Warning:  return "\033[93m[WARN ]\033[0m";
-        case Level::Error:    return "\033[91m[ERR  ]\033[0m";
-        case Level::Debug:    return "\033[90m[DEBUG]\033[0m";
-        case Level::Map:      return "\033[95m[MAP  ]\033[0m";
-        case Level::Timer:    return "\033[94m[TIME ]\033[0m";
-        case Level::Progress: return "\033[93m[PROG ]\033[0m";
+        case Level::Info:     return color ? "\033[96m[INFO ]\033[0m" : "[INFO ]";
+        case Level::Success:  return color ? "\033[92m[OK   ]\033[0m" : "[OK   ]";
+        case Level::Warning:  return color ? "\033[93m[WARN ]\033[0m" : "[WARN ]";
+        case Level::Error:    return color ? "\033[91m[ERR  ]\033[0m" : "[ERR  ]";
+        case Level::Debug:    return color ? "\033[90m[DEBUG]\033[0m" : "[DEBUG]";
+        case Level::Map:      return color ? "\033[95m[MAP  ]\033[0m" : "[MAP  ]";
+        case Level::Timer:    return color ? "\033[94m[TIME ]\033[0m" : "[TIME ]";
+        case Level::Progress: return color ? "\033[93m[PROG ]\033[0m" : "[PROG ]";
         default:              return "[?????]";
     }
 }
 
-inline std::string GetTimestamp() noexcept
+inline std::string Timestamp() noexcept
 {
     try
     {
-        auto now = std::chrono::system_clock::now();
-        auto in_time_t = std::chrono::system_clock::to_time_t(now);
-        std::tm bt;
-        localtime_s(&bt, &in_time_t);
-        return std::format("{:02}:{:02}:{:02}", bt.tm_hour, bt.tm_min, bt.tm_sec);
+        const auto now = std::chrono::system_clock::now();
+        const auto seconds = std::chrono::system_clock::to_time_t(now);
+        const auto millis =
+            std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count() % 1000;
+
+        std::tm bt{};
+#ifdef _WIN32
+        localtime_s(&bt, &seconds);
+#else
+        localtime_r(&seconds, &bt);
+#endif
+        return std::format("{:02}:{:02}:{:02}.{:03}", bt.tm_hour, bt.tm_min, bt.tm_sec, millis);
     }
-    catch (...) { return "??:??:??"; }
+    catch (...)
+    {
+        return "??:??:??.???";
+    }
 }
 
-/// Thread-safe log implementation: formats to a single string, writes under lock.
-/// Named LogImpl to avoid overload-resolution ambiguity with the variadic template.
-/// Safe to call from noexcept contexts - never throws.
-inline void LogImpl(Level level, const std::string& msg) noexcept
+inline void Write(std::string_view line) noexcept
+{
+    const std::lock_guard lock(Mutex());
+    std::fwrite(line.data(), 1, line.size(), stdout);
+    std::fflush(stdout);
+}
+} // namespace Detail
+
+/// Enable ANSI colors on Windows consoles and disable them when stdout is redirected.
+inline void Initialize() noexcept
+{
+#ifdef _WIN32
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    DWORD dwMode = 0;
+    const bool isConsole = hOut != INVALID_HANDLE_VALUE && GetConsoleMode(hOut, &dwMode);
+
+    if (isConsole)
+    {
+        SetConsoleMode(hOut, dwMode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+        SetConsoleOutputCP(CP_UTF8);
+    }
+
+    Detail::ColorFlag().store(isConsole, std::memory_order_relaxed);
+#else
+    Detail::ColorFlag().store(isatty(fileno(stdout)) != 0, std::memory_order_relaxed);
+#endif
+}
+
+inline void SetDebugEnabled(bool enabled) noexcept { Detail::DebugFlag().store(enabled, std::memory_order_relaxed); }
+inline bool IsDebugEnabled() noexcept { return Detail::DebugFlag().load(std::memory_order_relaxed); }
+inline void SetColorsEnabled(bool enabled) noexcept { Detail::ColorFlag().store(enabled, std::memory_order_relaxed); }
+inline bool IsColorEnabled() noexcept { return Detail::ColorFlag().load(std::memory_order_relaxed); }
+
+/// Suppress all output (fuzzers, tools that only want their own output).
+inline void SetQuiet(bool quiet) noexcept { Detail::QuietFlag().store(quiet, std::memory_order_relaxed); }
+
+inline bool IsEnabled(Level level) noexcept
+{
+    return !Detail::QuietFlag().load(std::memory_order_relaxed) && (level != Level::Debug || IsDebugEnabled());
+}
+
+/// Log a pre-formatted message.
+inline void LogImpl(Level level, std::string_view msg) noexcept
 {
     try
     {
-        std::string timestamp = GetTimestamp();
-        std::string line = std::format("\033[90m[{}] \033[0m{} {}\n", timestamp, LevelTag(level), msg);
-
-        const std::lock_guard lock(GetMutex());
-        fputs(line.c_str(), stdout);
-        fflush(stdout);
+        const bool color = IsColorEnabled();
+        Detail::Write(std::format("{}[{}] {}{} {}\n", color ? "\033[90m" : "", Detail::Timestamp(),
+                                  color ? "\033[0m" : "", Detail::LevelTag(level, color), msg));
     }
-    catch (...) { /* swallow - cannot let logging crash noexcept callers */ }
+    catch (...)
+    {
+        // Logging must never take down a noexcept caller.
+    }
 }
 
-/// Single-string overload - delegates to LogImpl.
-inline void Log(Level level, const std::string& msg) noexcept
-{
-    LogImpl(level, msg);
-}
-
-/// Variadic convenience - concatenates args into one string, then logs.
-/// Safe to call from noexcept contexts - never throws.
+/// Concatenate all arguments (each formatted with "{}") and log them as one line.
 template <typename... Args>
-inline void Log(Level level, Args&&... args) noexcept
+inline void Log(Level level, const Args&... args) noexcept
 {
+    if (!IsEnabled(level))
+    {
+        return;
+    }
+
     try
     {
-        std::string msg;
-        ((msg += std::format("{}", std::forward<Args>(args))), ...);
-        LogImpl(level, msg);
+        if constexpr (sizeof...(Args) == 1 && (std::is_convertible_v<const Args&, std::string_view> && ...))
+        {
+            LogImpl(level, std::string_view(args...));
+        }
+        else
+        {
+            std::string msg;
+            (std::format_to(std::back_inserter(msg), "{}", args), ...);
+            LogImpl(level, msg);
+        }
     }
-    catch (...) { /* swallow */ }
+    catch (...)
+    {
+    }
 }
 
-/// Overwrite-in-place progress line (no newline - uses \r).
-/// Thread-safe. Stays on one line until a normal Log() call adds a newline.
-inline void LogProgress(const std::string& msg) noexcept
+/// Overwrite-in-place progress line (uses \r, no newline). Falls back to normal lines when not on a terminal.
+inline void LogProgress(std::string_view msg) noexcept
 {
+    if (!IsEnabled(Level::Progress))
+    {
+        return;
+    }
+
     try
     {
-        std::string timestamp = GetTimestamp();
-        std::string line = std::format("\r\033[90m[{}] \033[0m{} {}\033[K", timestamp, LevelTag(Level::Progress), msg);
+        if (!IsColorEnabled())
+        {
+            LogImpl(Level::Progress, msg);
+            return;
+        }
 
-        const std::lock_guard lock(GetMutex());
-        fputs(line.c_str(), stdout);
-        fflush(stdout);
+        Detail::Write(std::format("\r\033[90m[{}] \033[0m{} {}\033[K", Detail::Timestamp(),
+                                  Detail::LevelTag(Level::Progress, true), msg));
     }
-    catch (...) {}
+    catch (...)
+    {
+    }
 }
 
-/// End a progress sequence: print a final newline so subsequent logs start on a fresh line.
-inline void EndProgress()
+/// End a progress sequence so subsequent logs start on a fresh line.
+inline void EndProgress() noexcept
 {
-    const std::lock_guard lock(GetMutex());
-    fputs("\n", stdout);
-    fflush(stdout);
+    if (IsColorEnabled() && IsEnabled(Level::Progress))
+    {
+        Detail::Write("\n");
+    }
 }
 
-/// Format seconds as "Xh Ym Zs" or "Ym Zs" or "Zs".
+/// Format seconds as "Xh Ym Zs", "Ym Zs" or "Zs".
 inline std::string FormatDuration(double seconds) noexcept
 {
     try
     {
         if (seconds < 0.0)
+        {
             return "?";
-        int s = static_cast<int>(seconds);
+        }
+
+        const auto s = static_cast<long long>(seconds);
+
         if (s >= 3600)
+        {
             return std::format("{}h {:02}m {:02}s", s / 3600, (s % 3600) / 60, s % 60);
+        }
+
         if (s >= 60)
+        {
             return std::format("{}m {:02}s", s / 60, s % 60);
+        }
+
         return std::format("{}s", s);
     }
-    catch (...) { return "?"; }
+    catch (...)
+    {
+        return "?";
+    }
 }
-
 } // namespace Logger
 
-// Global Macros for ease of use
-#define LogI(...) Logger::Log(Logger::Level::Info, __VA_ARGS__)
-#define LogS(...) Logger::Log(Logger::Level::Success, __VA_ARGS__)
-#define LogW(...) Logger::Log(Logger::Level::Warning, __VA_ARGS__)
-#define LogE(...) Logger::Log(Logger::Level::Error, __VA_ARGS__)
-#define LogD(...) Logger::Log(Logger::Level::Debug, __VA_ARGS__)
-#define LogP(msg) Logger::LogProgress(msg)
+// Global macros. LogD checks the runtime debug flag before evaluating its arguments.
+#define LogI(...) ::Logger::Log(::Logger::Level::Info, __VA_ARGS__)
+#define LogS(...) ::Logger::Log(::Logger::Level::Success, __VA_ARGS__)
+#define LogW(...) ::Logger::Log(::Logger::Level::Warning, __VA_ARGS__)
+#define LogE(...) ::Logger::Log(::Logger::Level::Error, __VA_ARGS__)
+#define LogD(...)                                                                                                      \
+    do                                                                                                                 \
+    {                                                                                                                  \
+        if (::Logger::IsDebugEnabled())                                                                                \
+            ::Logger::Log(::Logger::Level::Debug, __VA_ARGS__);                                                        \
+    } while (0)
+#define LogP(msg) ::Logger::LogProgress(msg)

@@ -200,8 +200,10 @@
     <ClInclude Include="src\NavSources\IQueryFilterProvider.hpp" />
     <ClInclude Include="src\NavSources\Mmap\MmapQueryFilterProvider.hpp" />
     <ClInclude Include="src\Helpers\Polygon.hpp" />
+    <ClInclude Include="src\Helpers\Tour.hpp" />
     <ClInclude Include="src\NavSources\Anp\AnpNavSource.hpp" />
     <ClInclude Include="src\NavSources\INavSource.hpp" />
+    <ClInclude Include="src\NavSources\NavMeshQueryPool.hpp" />
     <ClInclude Include="src\NavSources\Mmap\MmapFormat.hpp" />
     <ClInclude Include="src\NavSources\Mmap\MmapNavSource.hpp" />
     <ClInclude Include="src\NavSources\Mmap\MmapTileHeader.hpp" />

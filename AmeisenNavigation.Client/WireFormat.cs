@@ -28,11 +28,30 @@ namespace AmeisenNavigation.Client
     }
 
     [StructLayout(LayoutKind.Sequential)]
+    internal struct CastRayExResponse
+    {
+        public int Hit;
+        public float Fraction;
+        public Vector3 Position;
+        public Vector3 Normal;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
     internal struct RandomPointAroundData
     {
         public int MapId;
         public Vector3 Start;
         public float Radius;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct ExplorePolyRequestHeader
+    {
+        public int MapId;
+        public int Flags;
+        public Vector3 Start;
+        public float Spacing;
+        public int PointCount;
     }
 
     [StructLayout(LayoutKind.Sequential)]

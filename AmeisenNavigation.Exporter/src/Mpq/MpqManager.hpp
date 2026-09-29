@@ -1,119 +1,146 @@
 #pragma once
 
 #include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <memory>
-#include <unordered_map>
+#include <string>
+#include <vector>
 
-#include <Utils/Logger.hpp>
+#include "../../../AmeisenNavigation/src/Utils/Logger.hpp"
 
-#define STORMLIB_NO_AUTO_LINK
-#include <stormlib.h>
+// Link StormLib explicitly (build system) instead of through StormLib.h's #pragma comment(lib).
+#ifndef __STORMLIB_NO_STATIC_LINK__
+#define __STORMLIB_NO_STATIC_LINK__
+#endif
+#include <StormLib.h>
 
 #include "FileSort.hpp"
 
+/// Owned file buffer read from an MPQ archive.
+struct MpqFile
+{
+    std::unique_ptr<unsigned char[]> data;
+    unsigned int size = 0;
+
+    explicit operator bool() const noexcept { return data && size > 0; }
+};
+
+/// Opens all MPQ archives of a WoW Data folder and reads files by priority (patches override base archives).
+/// Not thread-safe (StormLib archive handles aren't), CachedFileReader serializes access.
 class MpqManager
 {
-	const char* GameDir;
-	std::vector<void*> Mpqs;
-	std::vector<std::unique_ptr<unsigned char[]>> Allocations;
+    std::vector<HANDLE> Mpqs;
 
 public:
-	explicit MpqManager(const char* gameDir) noexcept
-		: GameDir(gameDir),
-		Mpqs()
-	{
-		const std::string mpqFilter{ ".mpq" };
+    explicit MpqManager(const std::filesystem::path& dataDir) noexcept
+    {
+        std::vector<std::filesystem::path> archives;
 
-		std::vector<std::filesystem::directory_entry> mpqFiles;
+        try
+        {
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(
+                     dataDir, std::filesystem::directory_options::skip_permission_denied))
+            {
+                if (!entry.is_regular_file())
+                {
+                    continue;
+                }
 
-		for (const auto& p : std::filesystem::recursive_directory_iterator(gameDir))
-		{
-			if (p.is_regular_file())
-			{
-				const auto& ext = p.path().extension().string();
+                std::string ext = entry.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(),
+                               [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
-				if (std::ranges::equal(mpqFilter, ext, [](char a, char b) { return std::tolower(a) == std::tolower(b); }))
-				{
-					mpqFiles.emplace_back(p);
-				}
-			}
-		}
+                if (ext == ".mpq")
+                {
+                    archives.push_back(entry.path());
+                }
+            }
+        }
+        catch (const std::exception& e)
+        {
+            LogE("Failed to scan \"", dataDir.string(), "\" for MPQ archives: ", e.what());
+        }
 
-		std::ranges::sort(mpqFiles, NaturalCompare);
-		std::ranges::reverse(mpqFiles);
-		Mpqs.resize(mpqFiles.size());
+        SortMpqsByPriority(archives, dataDir);
 
-#pragma omp parallel for schedule(dynamic)
-		for (int i = 0; i < mpqFiles.size(); ++i)
-		{
-			const auto& path = mpqFiles[i].path();
+        for (const auto& archive : archives)
+        {
+            HANDLE mpq = nullptr;
 
-			if (void* mpq; SFileOpenArchive(path.c_str(), 0, MPQ_OPEN_READ_ONLY, &mpq))
-			{
-				Mpqs[i] = mpq;
-			}
-		}
+            // TCHAR is wchar_t for Unicode builds of StormLib (Windows), char otherwise.
+#if defined(_WIN32) && defined(_UNICODE)
+            const std::wstring archiveName = archive.wstring();
+#else
+            const std::string archiveName = archive.string();
+#endif
 
-		LogS(std::format("Loaded {} MPQ archives", Mpqs.size()));
-	}
+            if (SFileOpenArchive(archiveName.c_str(), 0, MPQ_OPEN_READ_ONLY, &mpq))
+            {
+                Mpqs.push_back(mpq);
+                LogD("Opened MPQ: ", archive.string());
+            }
+            else
+            {
+                LogW("Failed to open MPQ: ", archive.string(), " (error ", SErrGetLastError(), ")");
+            }
+        }
 
-	~MpqManager() noexcept
-	{
-		Allocations.clear();
+        LogS("Loaded ", Mpqs.size(), " MPQ archives");
+    }
 
-		for (void* mpq : Mpqs)
-		{
-			SFileCloseArchive(mpq);
-		}
-	}
+    ~MpqManager() noexcept
+    {
+        for (HANDLE mpq : Mpqs)
+        {
+            SFileCloseArchive(mpq);
+        }
+    }
 
-	inline bool GetFile(const char* name, SFILE_FIND_DATA& resultFindData, void*& mpqHandle) noexcept
-	{
-		SFILE_FIND_DATA findData{ 0 };
+    MpqManager(const MpqManager&) = delete;
+    MpqManager& operator=(const MpqManager&) = delete;
 
-		for (void* mpq : Mpqs)
-		{
-			if (void* fileFind = SFileFindFirstFile(mpq, name, &findData, nullptr))
-			{
-				resultFindData = findData;
-				mpqHandle = mpq;
-				SFileFindClose(fileFind);
-				return true;
-			}
-		}
+    size_t GetArchiveCount() const noexcept { return Mpqs.size(); }
 
-		return false;
-	}
+    /// Read a file from the highest priority archive that contains it.
+    /// Uses the archives' hash tables (O(1) per archive) instead of wildcard searches.
+    MpqFile ReadFile(const char* name) const noexcept
+    {
+        for (HANDLE mpq : Mpqs)
+        {
+            HANDLE file = nullptr;
 
-	inline unsigned char* GetFileContent(const char* name, unsigned int& bufferSize) noexcept
-	{
-		void* mpq{};
-		SFILE_FIND_DATA findData{};
+            if (!SFileOpenFileEx(mpq, name, SFILE_OPEN_FROM_MPQ, &file))
+            {
+                continue;
+            }
 
-		if (GetFile(name, findData, mpq))
-		{
-			if (HANDLE hFile{}; SFileOpenFileEx(mpq, findData.cFileName, 0, &hFile))
-			{
-				bufferSize = findData.dwFileSize;
+            MpqFile result;
+            const DWORD size = SFileGetFileSize(file, nullptr);
 
-				if (bufferSize > 0)
-				{
-					auto buffer = std::make_unique<unsigned char[]>(bufferSize);
+            if (size != SFILE_INVALID_SIZE && size > 0)
+            {
+                result.data.reset(new (std::nothrow) unsigned char[size]);
+                DWORD read = 0;
 
-					if (SFileReadFile(hFile, buffer.get(), bufferSize, 0, 0)
-						&& SFileCloseFile(hFile))
-					{
-						unsigned char* ptr = buffer.get();
-						Allocations.push_back(std::move(buffer));
-						return ptr;
-					}
-				}
+                if (result.data && SFileReadFile(file, result.data.get(), size, &read, nullptr) && read == size)
+                {
+                    result.size = size;
+                }
+                else
+                {
+                    result.data.reset();
+                }
+            }
 
-				SFileCloseFile(hFile);
-			}
-		}
+            SFileCloseFile(file);
 
-		return nullptr;
-	}
+            if (result)
+            {
+                return result;
+            }
+        }
+
+        return {};
+    }
 };
