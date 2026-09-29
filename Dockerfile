@@ -9,7 +9,7 @@
 #   # Exporter: WoW client in, .anp files out
 #   docker run --rm -v /srv/wow:/wow:ro -v /srv/meshes:/meshes ameisennav exporter -w /wow -o /meshes -m 0,1 -s
 
-FROM ubuntu:24.04 AS build
+FROM ubuntu:26.04 AS build
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends g++ cmake ninja-build git ca-certificates \
@@ -25,7 +25,7 @@ RUN cmake -S . -B /build -G Ninja -DCMAKE_BUILD_TYPE=Release -DANAV_BUILD_TESTS=
  && cmake --build /build \
  && cmake --install /build --prefix /opt/ameisennav --strip
 
-FROM ubuntu:24.04
+FROM ubuntu:26.04
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libgomp1 \
